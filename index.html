@@ -3,9 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#eeeee0" />
+    <meta name="theme-color" content="#e9eadb" />
     <meta name="description" content="亡灵杀手：一场发生在荒村古渡的国风动作试炼。" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <title>亡灵杀手 · 荒村古渡</title>
   </head>
   <body>
@@ -27,18 +27,18 @@
       </defs>
     </svg>
 
+    <div id="game-viewport">
     <main id="game" aria-label="亡灵杀手游戏">
       <canvas id="game-canvas" aria-label="荒村古渡战场"></canvas>
       <div class="screen-grain" aria-hidden="true"></div>
 
       <header class="topbar">
-        <a class="brand" href="/" aria-label="亡灵杀手首页">
+        <a class="brand" href="./" aria-label="亡灵杀手首页">
           <span class="brand-mark"><svg><use href="#icon-mark"/></svg></span>
           <span class="brand-type"><strong>亡灵杀手</strong><span>UNDEAD SLAYER</span></span>
         </a>
         <div class="chapter-heading"><span class="chapter-index">壹</span><div><span class="eyebrow">CHAPTER ONE</span><h1>荒村古渡</h1></div></div>
         <div class="top-actions">
-          <span id="status-label" class="status-label">试炼准备</span>
           <button id="audio-button" class="icon-button" type="button" aria-label="切换音效" title="音效"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4Z"/><path class="sound-waves" d="M17 8a6 6 0 0 1 0 8M20 5a10 10 0 0 1 0 14"/><path class="sound-muted" d="m17 9 5 6m0-6-5 6"/></svg></button>
           <button id="pause-button" class="icon-button" type="button" aria-label="暂停游戏" title="暂停 · Esc"><svg><use href="#icon-pause"/></svg></button>
         </div>
@@ -65,16 +65,16 @@
         <div class="skill-bar" aria-label="战斗技能">
           <div class="attack-hint"><span class="attack-icon"><svg><use href="#icon-sword"/></svg></span><span>普通攻击<small>点击敌人</small></span></div>
           <span class="skill-divider"></span>
-          <button id="skill-dash" class="skill-button skill-flame" data-key="Q" type="button" title="烈焰斩 · Q" aria-label="烈焰斩，Q键"><span class="skill-icon"><svg><use href="#icon-dash"/></svg><span class="cooldown"></span><kbd>Q</kbd></span><span class="skill-name">烈焰斩</span></button>
-          <button id="skill-whirl" class="skill-button" data-key="E" type="button" title="旋风斩 · E" aria-label="旋风斩，E键"><span class="skill-icon"><svg><use href="#icon-whirl"/></svg><span class="cooldown"></span><kbd>E</kbd></span><span class="skill-name">旋风斩</span></button>
+          <button id="skill-dash" class="skill-button skill-flame" data-key="Q" type="button" title="破阵突进 · Q" aria-label="破阵突进，Q键"><span class="skill-icon"><svg><use href="#icon-dash"/></svg><span class="cooldown"></span><kbd>Q</kbd></span><span class="skill-name">破阵</span></button>
+          <button id="skill-whirl" class="skill-button" data-key="E" type="button" title="回风斩 · E" aria-label="回风斩，E键"><span class="skill-icon"><svg><use href="#icon-whirl"/></svg><span class="cooldown"></span><kbd>E</kbd></span><span class="skill-name">回风斩</span></button>
           <button id="skill-burst" class="skill-button skill-ultimate" data-key="R" type="button" title="镇魂爆发 · R" aria-label="镇魂爆发，R键"><span class="skill-icon"><svg><use href="#icon-burst"/></svg><span class="cooldown"></span><kbd>R</kbd></span><span class="skill-name">镇魂</span></button>
           <button id="skill-frost" class="skill-button skill-frost" data-key="F" type="button" title="寒冰禁锢 · F" aria-label="寒冰禁锢，F键"><span class="skill-icon"><svg><use href="#icon-frost"/></svg><span class="cooldown"></span><kbd>F</kbd></span><span class="skill-name">冰牢</span></button>
           <button id="skill-blades" class="skill-button skill-blades" data-key="C" type="button" title="追魂刃 · C" aria-label="追魂刃，C键"><span class="skill-icon"><svg><use href="#icon-blades"/></svg><span class="cooldown"></span><kbd>C</kbd></span><span class="skill-name">飞刃</span></button>
         </div>
-        <div class="control-hints"><span><i class="mouse-symbol"></i> 点击移动 · 沿途自动攻击</span><span><i class="target-symbol"></i> 双击翻滚</span><span>长按重击 · 划屏终结</span></div>
       </footer>
+      <div class="control-hints"><span><i class="mouse-symbol"></i> 点击移动 · 沿途自动攻击</span><span><i class="target-symbol"></i> 双击翻滚</span><span>长按重击 · 划屏终结</span></div>
 
-      <div class="bottom-meta"><span>国风动作试炼<span class="meta-dot">·</span>LOW POLY</span><button id="help-button" type="button" aria-label="展开操作说明" aria-expanded="false" aria-controls="help-panel"><svg><use href="#icon-help"/></svg><span>操作指南</span></button></div>
+      <div class="bottom-meta"><span>国风动作试炼<span class="meta-dot">·</span>LOW POLY</span><span id="status-label" class="status-label">试炼准备</span><button id="help-button" type="button" aria-label="展开操作说明" aria-expanded="false" aria-controls="help-panel"><svg><use href="#icon-help"/></svg><span>操作指南</span></button></div>
       <aside id="help-panel" class="help-panel paper-panel" hidden><div class="panel-eyebrow">HOW TO PLAY</div><h2>出刀有章，进退有度。</h2><p><b>点击地面</b>移动，沿途自动攻击；<b>点击敌人</b>追击。<b>双击地面</b>翻滚闪避。</p><p><b>长按</b>蓄力 EX 重击。<b>划屏</b>施放终结技，消耗 SP 并回复气血。点击右侧技能施放特殊招式。</p><p>桌面扩展：<b>W A S D</b> 移动、<b>空格</b>翻滚。<b>Q / E / R / F / C</b> 施放技能。</p><span class="help-touch">三星目标：全灭亡灵 · 180 秒内完成 · 受击少于 2 次。</span></aside>
 
       <section id="start-screen" class="overlay start-overlay" aria-label="开始试炼">
@@ -86,6 +86,7 @@
       <section id="result-screen" class="overlay modal-overlay" hidden aria-label="试炼结果"><div class="modal-card result-card paper-panel"><span class="modal-seal">剑</span><p class="panel-eyebrow">THE TRIAL ENDS</p><h2 id="result-title">试炼完成</h2><p id="result-subtitle" class="modal-copy">青锋已至，古渡复归宁静。</p><div id="result-stars" class="result-stars" aria-label="关卡星级"></div><p class="result-grade" id="result-grade">全灭 · 180 秒内 · 受击少于 2 次</p><div class="result-stats"><div><span>斩杀亡灵</span><strong id="result-kills">0</strong></div><div><span>试炼用时</span><strong id="result-time">00:00</strong></div><div><span>最高连斩</span><strong id="result-combo">0</strong></div></div><p class="result-hits">受到攻击 <span id="result-hits">0</span> 次</p><button id="result-restart" class="primary-button" type="button"><span>再试一次</span><svg><use href="#icon-arrow"/></svg></button></div></section>
       <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     </main>
-    <script type="module" src="/src/main.js"></script>
+    </div>
+    <script type="module" src="./src/main.js"></script>
   </body>
 </html>
