@@ -96,10 +96,10 @@ UI专项 `/tmp/undead-qa/ui-polish.cjs` 检查四项：100次相同HUD状态更�
 
 ## GitHub Pages 发布核对
 
-站点：[https://jisolkun.github.io/KenShi/](https://jisolkun.github.io/KenShi/)。[本轮 Pages Action运行成功](https://github.com/jisolkun/KenShi/actions/runs/37745705587)，部署的游戏代码提交为 `5dcd19d9d0554685344079a8473a63c874546762`，来自 `Undead-Slayer2` 分支。
+站点：[https://jisolkun.github.io/KenShi/](https://jisolkun.github.io/KenShi/)。[本轮 Pages Action运行成功](https://github.com/jisolkun/KenShi/actions/runs/37749620305)，部署的游戏代码提交为 `43874f048e8d4a2304146e4bdb9b21f7f211a4e7`，来自 `Undead-Slayer2` 分支。
 
-传输核对：通过保留TLS证书验证的HTTPS实际GET，站点返回200，页面标题为“亡灵杀手·荒寺夜袭”。远程HTML引用的 `index-CRY3VkW4.js`（635094字节）、`index-Cyb-KTtJ.css`（24543字节）及 favicon 的字节SHA256均与本地 `dist/` 完全一致。游戏脚本SHA256为 `298e8aea04d63fb64ea98b80a317c7ee351e53282789a17fdbd0459912498450`。
+传输核对：通过保留TLS证书验证的HTTPS实际GET，站点返回200，页面标题为“亡灵杀手·荒寺夜袭”。远程HTML引用的 `index-BL62Tgde.js`（637274字节）、`index-Cyb-KTtJ.css`（24543字节）及 favicon 的字节SHA256均与本地 `dist/` 完全一致。游戏脚本SHA256为 `cb9a696a770a6ccaa74b31329c8d1b8f417c79d0a5b3fab6a3b602d01d3b4d71`。
 
-浏览器执行核对：由于测试环境浏览器CA与代理不兼容，未关闭TLS验证；使用经TLS校验的curl下载远程资源，在该线上URL的浏览器请求中回放。`/tmp/undead-qa/online.cjs` 确认胸廓实际扩张、胸骨起伏、骨盆稳定，头与四肢没有被连带放缩；双手低放略后、双刀向后下方且离地。正交镜头、真实鼠标点地移动、点击进入视口的敌人自动攻击并出现combo 4，以及结算菜单隐藏波次通知和战斗浮字均通过，页面错误数为0。
+浏览器执行核对：由于测试环境浏览器CA与代理不兼容，未关闭TLS验证；使用经TLS校验的curl下载远程资源，在该线上URL的浏览器请求中回放。`/tmp/undead-qa/online.cjs` 确认胸廓实际扩张、胸骨起伏、骨盆稳定，头与四肢没有被连带放缩；双手低放、双刀朝前下方，采样约120.06°和120.09°。血条fill比例与真实HP一致，同透明阶段且彩色填充在黑底之后绘制。正交镜头、真实鼠标点地移动、点击进入视口的敌人自动攻击并出现combo 4，以及结算菜单隐藏波次通知和战斗浮字均通过，页面错误数为0。
 
 传输与浏览器执行分别完成核对。该方式不等同于浏览器原生网络证书链检查通过，也不代表线上真实手机验证。
