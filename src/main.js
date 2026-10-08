@@ -4,6 +4,7 @@ import { createWorld } from "./world.js";
 import { createUI } from "./ui.js";
 import { createAudio } from "./audio.js";
 import { createEffects } from "./effects.js";
+import { requestMobileFullscreen } from "./fullscreen.js";
 import "./style.css";
 
 const app = document.querySelector("#app") || document.body;
@@ -551,6 +552,7 @@ function clearDynamic() {
 }
 function startGame() {
   audio.unlock?.();
+  requestMobileFullscreen();
   keys.clear();
   lastTap = null;
   pointerStart = null;

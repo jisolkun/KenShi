@@ -322,7 +322,7 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
   if(dt===0&&!immediate&&transition!==false&&rig.motion)return;
   const {body,chest,head,arms,legs,pony,cloths,type} = rig;
   const motion = rig.motion ??= {
-    key: null, phase: 0, lastTime: time, gait: 0, move: 0,
+    key: null, phase: 0, lastTime: time, gait: 0, move: 0, pace: 0, drive: 0,
     idleClock: time+rig.idleOffset, idleAge: 0, idleLayer: 0, lookYaw: 0,
     elapsed: 1, duration: .08, targetQ: new THREE.Quaternion(),
     idleQ: new THREE.Quaternion(), idleBendQ: new THREE.Quaternion(), idleFootQ: new THREE.Quaternion(),
@@ -343,6 +343,12 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
   motion.move=mix(motion.move,state==='run'?1:0,1-Math.exp(-delta/.075));
   const movement=clamp(moveBlend??motion.move,0,1);
   const gait=gaitPhase??motion.gait;
+  if(type==='hero'){
+    const pace=locomotion?clamp(speed,0,1)*smooth(movement/.2):0;
+    const drive=locomotion&&delta>0?clamp((pace-motion.pace)/(delta*8),-1,1):0;
+    motion.drive=mix(motion.drive,drive,1-Math.exp(-delta/.10));
+    motion.pace=pace;
+  }
   motion.idleClock=immediate||transition===false ? time+rig.idleOffset : motion.idleClock+delta;
   motion.idleAge=idleAge??(locomotion&&movement<.12 ? motion.idleAge+delta : Math.max(0,motion.idleAge-delta*5));
   const idleGoal=locomotion&&movement<.2?smooth(motion.idleAge/.32):0;
@@ -536,20 +542,23 @@ function legTarget(leg,y,z,weight=1) {
 }
 
 function sampleLocomotion(rig,gait,blend,speed,turn,time) {
+  if(rig.type==='hero'){
+    sampleHeroLocomotion(rig,gait,blend,speed,turn);
+    return;
+  }
   const {body,chest,head,legs,arms,pony,cloths,type}=rig;
-  const hero=type==='hero';
   const lean=clamp(turn,-1,1)*blend;
   const pace=clamp(speed,0,1), stride=(type==='brute'?.215:.235)+.085*pace;
   // gaitPhase is a complete left/right cycle. At sprint speed a short ground
   // contact and longer airborne return preserve cadence without sliding feet.
   const cycleDistance=mix(.85,2.9,pace);
   const stance=clamp(stride*2/cycleDistance,.20,.58);
-  body.position.y=(hero?.875:.91)+(hero?0:Math.sin(time*2.3)*.004)*(1-blend)-(hero?.035+.01*pace:.055+.025*pace)*blend-.003*Math.abs(Math.sin(gait*2))*blend;
-  body.rotation.set(hero?mix(.075,.12,blend):.12*blend,Math.sin(gait)*.036*blend,-lean*.09);
-  chest.rotation.x=hero?mix(.065,.13,blend):mix(-.08,.105,blend);
-  chest.rotation.y=(hero?0:-.07*(1-blend))-Math.sin(gait)*(hero?.045:.078)*blend;
+  body.position.y=.91+Math.sin(time*2.3)*.004*(1-blend)-(.055+.025*pace)*blend-.003*Math.abs(Math.sin(gait*2))*blend;
+  body.rotation.set(.12*blend,Math.sin(gait)*.036*blend,-lean*.09);
+  chest.rotation.x=mix(-.08,.105,blend);
+  chest.rotation.y=-.07*(1-blend)-Math.sin(gait)*.078*blend;
   chest.rotation.z=lean*.035;
-  head.rotation.x=hero?-body.rotation.x-chest.rotation.x:mix(.045,-.17,blend);
+  head.rotation.x=mix(.045,-.17,blend);
   head.rotation.y=-chest.rotation.y*.6;
   head.rotation.z=lean*.045;
   for(const leg of legs){
@@ -564,31 +573,87 @@ function sampleLocomotion(rig,gait,blend,speed,turn,time) {
     leg.hip.rotation.y=-lean*.08;
     leg.hip.rotation.z=lean*.055+(leg.side===-1?-.018:.018)*blend;
     leg.foot.rotation.y=lean*.065;
-    if(hero)plantIdleFoot(rig,leg,1,.026+z*blend,.075+lift*blend,leg.hip.position.x+leg.side*.010*blend);
     // A slight toe peel only during the returning foot, never on the stance foot.
     if(u>stance)leg.foot.rotation.x+=.12*Math.sin(Math.PI*(u-stance)/(1-stance))*blend;
   }
   for(const arm of arms){
     const swing=Math.sin(gait+(arm.side===-1?Math.PI:0));
-    if(type==='hero'){
-      // The same relaxed low hands carry from rest into the first running step.
-      arm.shoulder.rotation.set(mix(.24,.34,blend)+swing*.035*blend,arm.side*-.025,arm.side*mix(.20,.215,blend));
-      arm.elbow.rotation.set(mix(-.14,-.17,blend),0,0);
-      arm.wrist.rotation.set(mix(-.4075,-.5875,blend),arm.side*.025,arm.side*.14);
-      // Side-view blade angle: up=0°, forward=90°, down=180°. The relaxed
-      // diagonal grip and moderate wrist bend share a forward/down 120° hold.
-      arm.weapon.position.set(0,-.029,0); // Handle axis passes through the palm.
-      arm.weapon.rotation.set(-.85,0,0);
-    }else{
-      arm.shoulder.rotation.x=mix(arm.shoulder.rotation.x,.25+swing*.18,blend);
-      if(type!=='archer')arm.elbow.rotation.x=mix(arm.elbow.rotation.x,-.48,blend);
-    }
+    arm.shoulder.rotation.x=mix(arm.shoulder.rotation.x,.25+swing*.18,blend);
+    if(type!=='archer')arm.elbow.rotation.x=mix(arm.elbow.rotation.x,-.48,blend);
   }
   pony.rotation.x=mix(pony.rotation.x,.25+pace*.11+Math.sin(gait-.8)*.055,blend);
   pony.rotation.z=-lean*.20+Math.sin(gait-.7)*.025*blend;
   for(let i=0;i<cloths.length;i++){
     cloths[i].rotation.x=mix(cloths[i].rotation.x,-.25-.12*pace+Math.sin(gait-.65+i)*.055,blend);
     cloths[i].rotation.z=-lean*.19+Math.sin(gait-.9+i)*.075*blend;
+  }
+}
+
+function sampleHeroLocomotion(rig,gait,blend,speed,turn) {
+  const {body,chest,head,legs,arms,pony,cloths,motion}=rig;
+  const pace=clamp(speed,0,1), lean=clamp(turn,-1,1)*blend;
+  const stride=.235+.085*pace, cycleDistance=mix(.85,2.9,pace);
+  const stance=clamp(stride*2/cycleDistance,.20,.58);
+  const stepBlend=smooth(blend/.2);
+  // Shift onto the supporting leg, compress after contact, rise on push-off.
+  // The hips lead; the chest and arms follow at slightly different phases.
+  const support=Math.cos(gait-Math.PI*stance);
+  const recoil=Math.cos(2*gait-.38);
+  const drive=motion.drive*(.3+.7*blend);
+  body.position.x=support*.028*blend;
+  body.position.y=mix(.875,.835,blend)-recoil*(.012+.006*pace)*blend-.012*Math.abs(lean);
+  body.position.z=Math.sin(2*gait-.6)*.008*blend;
+  body.rotation.set(
+    mix(.075,.13,blend)+recoil*.022*blend+drive*.055,
+    Math.sin(gait)*.085*blend,
+    -support*.04*blend-lean*.13,
+  );
+  chest.position.y+=Math.cos(2*gait-.7)*.006*blend;
+  chest.rotation.set(
+    mix(.065,.11,blend)-Math.cos(2*gait-.65)*.032*blend+drive*.024,
+    -Math.sin(gait-.22)*.15*blend-lean*.025,
+    Math.cos(gait-Math.PI*stance-.18)*.023*blend+lean*.045,
+  );
+  // Stabilize the gaze without freezing the entire head in world space.
+  head.rotation.set(
+    -body.rotation.x-chest.rotation.x+Math.sin(2*gait-.9)*.016*blend,
+    -(body.rotation.y+chest.rotation.y)*.65-lean*.055,
+    -(body.rotation.z+chest.rotation.z)*.7,
+  );
+  for(const leg of legs){
+    const u=((gait/TAU+(leg.side===-1?.5:0))%1+1)%1;
+    let z,lift;
+    if(u<stance){z=stride*(1-2*u/stance);lift=0;}
+    else{
+      const t=(u-stance)/(1-stance);
+      z=mix(-stride,stride,smooth(t));
+      lift=(.09+.05*pace)*Math.sin(Math.PI*t);
+    }
+    // Solve against the moving pelvis in three dimensions: support feet keep
+    // their height and stride while the upper body rolls, twists and shifts.
+    // Keep the distance-driven stride at walking speeds; scaling it by speed
+    // would make a planted foot slide forward with the character.
+    plantIdleFoot(rig,leg,1,.026+z*stepBlend,.075+lift*stepBlend,leg.hip.position.x+leg.side*.012*stepBlend);
+    if(u>stance)leg.foot.rotation.x+=.15*Math.sin(Math.PI*(u-stance)/(1-stance))*blend;
+  }
+  for(const arm of arms){
+    const phase=gait+(arm.side===-1?Math.PI:0);
+    const swing=-Math.sin(phase-.18)*(.12+.08*pace)*blend;
+    const follow=-Math.sin(phase-.48)*.055*blend;
+    arm.shoulder.position.y+=Math.cos(phase-.35)*.007*blend;
+    arm.shoulder.rotation.set(mix(.24,.34,blend)+swing,arm.side*-.025-lean*.035,arm.side*mix(.20,.215,blend));
+    arm.elbow.rotation.set(mix(-.14,-.17,blend)-follow,0,0);
+    // Let the hands travel with the shoulders; the grip absorbs part of the
+    // swing so the blades remain low, pointing forward and down.
+    arm.wrist.rotation.set(mix(-.4075,-.5875,blend)-swing*.65+follow*.5,arm.side*.025,arm.side*.14);
+    arm.weapon.position.set(0,-.029,0);
+    arm.weapon.rotation.set(-.85,0,0);
+  }
+  pony.rotation.x=mix(pony.rotation.x,.27+pace*.12+Math.sin(2*gait-.9)*.10+drive*.10,blend);
+  pony.rotation.z=-lean*.24+Math.sin(gait-.8)*.065*blend;
+  for(let i=0;i<cloths.length;i++){
+    cloths[i].rotation.x=mix(cloths[i].rotation.x,-.25-.12*pace+Math.sin(2*gait-.75+i*.4)*.085-drive*.09,blend);
+    cloths[i].rotation.z=-lean*.23+Math.sin(gait-.8+i*.45)*.105*blend;
   }
 }
 
@@ -691,12 +756,16 @@ function sampleIdle(rig,clock,weight,alertness,lookYaw,time) {
   const age=rig.motion.idleAge;
   const cycle=((clock+rig.idleOffset)%9.6+9.6)%9.6;
   const guard=pulse(cycle,6.4,8.8)*smooth(age/.8);
-  body.position.x+=balance*(hero?.008:heavy?.016:.022)*weight;
-  body.position.z+=hero?0:Math.sin(clock*.47+.7)*.004*weight;
-  body.position.y+=(hero?-.006:breath*.005-.006-Math.sin(time*2.3)*.004)*weight;
+  body.position.x+=balance*(hero?.020:heavy?.016:.022)*weight;
+  body.position.z+=Math.sin(clock*.47+.7)*.004*weight;
+  body.position.y+=(hero?breath*.004-.006:breath*.005-.006-Math.sin(time*2.3)*.004)*weight;
+  if(hero){
+    body.rotation.z-=balance*.015*weight;
+    body.rotation.y+=Math.sin(clock*.57-.25)*.018*weight;
+  }
   chest.position.y+=breath*(hero?.022:.008)*weight;
   chest.rotation.x+=(hero?-breath*.027-.003*guard:breath*.026-.018*guard-.026*alert)*weight;
-  chest.rotation.z+=balance*(hero?.009:.018)*weight;
+  chest.rotation.z+=balance*.018*weight;
   if(hero){
     const inhale=(breath+1)*.5*weight;
     rig.ribcage.scale.set(1+.035*inhale,1+.006*inhale,1+.065*inhale);
