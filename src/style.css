@@ -20,3 +20,33 @@
 @media(max-height:500px) and (orientation:landscape){.damage-number.critical{font-size:30px}.damage-number.critical:after{font-size:13px;letter-spacing:1px}}
 .notification{width:max-content}.notification span{text-wrap:balance}.notification.visible{transition:none}
 .game-interface[data-mode]:not([data-mode="hide"]):not([data-mode="start"]) .damage-layer{visibility:hidden}
+
+.orientation-notice{
+  display:none;
+  position:absolute;
+  inset:0;
+  z-index:30;
+  place-content:center;
+  justify-items:center;
+  gap:14px;
+  background:rgba(12,21,23,.94);
+  color:#eddec3;
+  text-align:center;
+  pointer-events:auto;
+}
+.orientation-notice b{font-size:20px;letter-spacing:5px;color:#f0d49e}
+.orientation-notice>span{font-size:13px;letter-spacing:2px;color:#b7b9a6}
+.orientation-icon{
+  width:74px;
+  height:48px;
+  border:2px solid #d3b47b;
+  border-radius:9px;
+  color:#d3b47b;
+  display:grid;
+  place-items:center;
+  font:36px/1 Georgia,serif;
+  transform:rotate(-90deg);
+}
+@media(orientation:portrait){
+  .game-interface[data-phone="true"]:not([data-mode="start"]) .orientation-notice{display:grid}
+}

@@ -1,3 +1,5 @@
+import { isPhoneBrowser } from './fullscreen.js';
+
 const icon = (content, className = '') => `<svg class="${className}" viewBox="0 0 40 40" fill="none" aria-hidden="true">${content}</svg>`;
 const icons = [
   icon('<path d="m8 31 20-23 7-3-3 8-20 22z" fill="currentColor"/><path d="m9 23 9 8M5 35l5-5M4 15h13M2 20h10" stroke="currentColor" stroke-width="2"/>'),
@@ -21,6 +23,7 @@ const timeLabel = seconds => `${String(Math.floor((seconds || 0) / 60)).padStart
 export function createUI(callbacks = {}) {
   const root = document.createElement('div');
   root.className = 'game-interface';
+  root.dataset.phone = String(isPhoneBrowser());
   root.innerHTML = `
     <div class="battle-hud is-hidden">
       <div class="player-panel">
@@ -52,6 +55,7 @@ export function createUI(callbacks = {}) {
     <div class="modal-layer is-hidden"><section class="game-modal" role="dialog" aria-modal="true" aria-label="战场菜单"></section></div>
     <div class="notification" role="status"><span></span></div>
     <div class="damage-layer" aria-hidden="true"></div>
+    <div class="orientation-notice" role="status"><div class="orientation-icon" aria-hidden="true">↻</div><b>请横屏游玩</b><span>将手机旋转至横向后继续</span></div>
   `;
   document.body.append(root);
   const $ = selector => root.querySelector(selector);
