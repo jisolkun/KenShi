@@ -185,7 +185,7 @@ export function createEffects(scene, camera) {
     geo.setAttribute('position',new THREE.BufferAttribute(positions,3).setUsage(THREE.DynamicDrawUsage));geo.setAttribute('color',new THREE.BufferAttribute(colors,3).setUsage(THREE.DynamicDrawUsage));geo.setDrawRange(0,0);
     const material=additive(0xffffff,0.8);material.vertexColors=true;
     const mesh=new THREE.Mesh(geo,material);mesh.frustumCulled=false;scene.add(mesh);
-    const trail={mesh,points:[],spare:Array.from({length:32},()=>({tip:new THREE.Vector3(),inner:new THREE.Vector3(),core:new THREE.Vector3(),body:new THREE.Vector3(),age:0})),positions,colors,wasActive:false};trails.push(trail);return trail;
+    const trail={mesh,points:[],color:new THREE.Color(0xb0c4ff),coreColor:new THREE.Color(0xfff7eb),widthFactor:1,spare:Array.from({length:32},()=>({tip:new THREE.Vector3(),inner:new THREE.Vector3(),core:new THREE.Vector3(),body:new THREE.Vector3(),age:0})),positions,colors,wasActive:false};trails.push(trail);return trail;
   }
   function resetTrail(trail) {
     while(trail.points.length)trail.spare.push(trail.points.pop());trail.mesh.geometry.setDrawRange(0,0);trail.wasActive=false;
@@ -198,12 +198,13 @@ export function createEffects(scene, camera) {
       // Mount/state changes and discontinuous sampling never connect into a rod.
       if(!trail.wasActive||elapsed>0.07||(last&&(last.tip.distanceToSquared(tip)>4.4||last.body.distanceToSquared(body)>1.4)))resetTrail(trail);
       const previous=trail.points.at(-1);
-      if(!previous||previous.tip.distanceToSquared(tip)>0.0004){const p=trail.spare.pop()||trail.points.shift();p.tip.copy(tip);p.body.copy(body);p.inner.copy(tip).lerp(body,0.26);p.core.copy(tip).lerp(body,0.055);p.age=0;trail.points.push(p);if(trail.points.length>29)trail.spare.push(trail.points.shift());}
+      if(!previous||previous.tip.distanceToSquared(tip)>0.0004){const p=trail.spare.pop()||trail.points.shift();p.tip.copy(tip);p.body.copy(body);p.inner.copy(tip).lerp(body,0.26*trail.widthFactor);p.core.copy(tip).lerp(body,0.055*trail.widthFactor);p.age=0;trail.points.push(p);if(trail.points.length>29)trail.spare.push(trail.points.shift());}
     }
     trail.wasActive=Boolean(active);let at=0;
     function vertex(point,age,layer,edge){
       trail.positions[at]=point.x;trail.positions[at+1]=point.y;trail.positions[at+2]=point.z;const fade=Math.pow(Math.max(0,1-age/trailLife),1.6);
-      trail.colors[at]=fade*(layer?1:edge?0.69:0.14);trail.colors[at+1]=fade*(layer?0.97:edge?0.77:0.2);trail.colors[at+2]=fade*(layer?0.92:edge?1:0.48);at+=3;
+      const color=layer?trail.coreColor:trail.color,strength=layer||edge?1:0.22;
+      trail.colors[at]=fade*color.r*strength;trail.colors[at+1]=fade*color.g*strength;trail.colors[at+2]=fade*color.b*strength;at+=3;
     }
     for(let i=1;i<trail.points.length;i++){const a=trail.points[i-1],b=trail.points[i];for(let layer=0;layer<2;layer++){const inside=layer?'core':'inner';for(const[p,edge]of[[a,true],[a,false],[b,true],[b,true],[a,false],[b,false]])vertex(edge?p.tip:p[inside],p.age,layer,edge);}}
     trail.mesh.geometry.setDrawRange(0,at/3);trail.mesh.geometry.attributes.position.needsUpdate=true;trail.mesh.geometry.attributes.color.needsUpdate=true;

@@ -5,6 +5,9 @@ import { createUI } from "./ui.js";
 import { createAudio } from "./audio.js";
 import { createEffects } from "./effects.js";
 import { requestMobileFullscreen } from "./fullscreen.js";
+import { WEAPONS, getWeapon, DEFAULT_WEAPON_ID, SKILL_CONTACTS } from "./weapons.js";
+import { createWeaponEffects } from "./weaponEffects.js";
+import { weaponStrikeContains } from "./weaponCombat.js";
 import "./style.css";
 
 const app = document.querySelector("#app") || document.body;
@@ -91,10 +94,18 @@ scene.add(rim);
 const world = createWorld(scene);
 const audio = createAudio();
 const fx = createEffects(scene, camera);
+const weaponFx = createWeaponEffects(scene, fx);
+let storedWeaponId = DEFAULT_WEAPON_ID;
+try { storedWeaponId = localStorage.getItem("undead-slayer-weapon") || DEFAULT_WEAPON_ID; } catch {}
+let currentWeapon = getWeapon(storedWeaponId);
 const rig = createCharacter("hero");
+rig.setWeapon(currentWeapon.id);
 scene.add(rig.group);
 const hero = {
   rig,
+  weaponId: currentWeapon.id,
+  previewAge: Infinity,
+  previewContact: -1,
   pos: new THREE.Vector3(0, 0, 4),
   velocity: new THREE.Vector3(), // External knockback, separate from locomotion.
   moveVelocity: new THREE.Vector3(),
@@ -168,19 +179,14 @@ let enemies = [],
   drops = [],
   companions = [];
 const specials = { horse: true, eagle: true, captain: true };
-const attackDurations = [0.32, 0.34, 0.4, 0.5];
-const attackWindows = [
-  [0.38, 0.58],
-  [0.38, 0.58],
-  [0.4, 0.62],
-  [0.42, 0.72],
-];
-const attackContacts = [0.43, 0.43, 0.47, 0.48];
+let attackDurations = currentWeapon.moves.map(move => move.duration);
+let attackWindows = currentWeapon.moves.map(move => move.active);
+let attackContacts = currentWeapon.moves.map(move => move.contact);
 let shakeAge = 1,
   shakeNext = 0;
 const shakeDirection = new THREE.Vector3();
-const attackDamages = [18, 19, 22, 32];
-const attackRanges = [2.12, 2.15, 2.45, 2.55];
+let attackDamages = currentWeapon.moves.map(move => move.damage);
+let attackRanges = currentWeapon.moves.map(move => move.reach);
 const raycaster = new THREE.Raycaster(),
   pointer = new THREE.Vector2(),
   ground = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -191,6 +197,8 @@ const keys = new Set();
 const damageQueue = [];
 const ui = createUI({
   start: startGame,
+  weapon: selectWeapon,
+  chooseWeapon: chooseWeapon,
   mobileEntry: retryMobilePresentation,
   mobileViewRetry: retryMobilePresentation,
   pause: pauseGame,
@@ -205,8 +213,8 @@ const ui = createUI({
   help() {
     pauseGame("help");
   },
-});
-const trails = [fx.swordTrail(), fx.swordTrail()];
+}, currentWeapon.id);
+const trails = Array.from({ length: 4 }, () => fx.swordTrail());
 const destinationMarker = new THREE.Group();
 for (let i = 0; i < 2; i++) {
   const mesh = new THREE.Mesh(
@@ -335,7 +343,7 @@ function movementGoal() {
       direction: delta.normalize(),
       distance,
       stoppingDistance: Math.max(
-        1.15,
+        0.7,
         attackRanges[hero.combo] + hero.target.radius - 0.38,
       ),
     };
@@ -438,6 +446,9 @@ function updateAwareness(dt) {
 function stateSnapshot() {
   const boss = enemies.find((e) => e.type === "boss" && e.state !== "dead");
   return {
+    weaponId: currentWeapon.id,
+    weaponName: currentWeapon.name,
+    attack: { name: currentWeapon.moves[hero.combo].name, shape: currentWeapon.moves[hero.combo].shape, reach: attackRanges[hero.combo] },
     hp: hero.hp,
     maxHp: hero.maxHp,
     stamina: hero.stamina,
@@ -466,6 +477,7 @@ function stateSnapshot() {
       triangles: renderer.info.render.triangles,
     },
     player: {
+      weaponId: currentWeapon.id,
       x: hero.pos.x,
       z: hero.pos.z,
       hp: hero.hp,
@@ -551,6 +563,61 @@ function clearDynamic() {
     eagleMesh = null;
   }
   fx.clear();
+  weaponFx.clear();
+}
+function selectWeapon(id = currentWeapon.id, preview = true) {
+  currentWeapon = getWeapon(id);
+  hero.weaponId = currentWeapon.id;
+  rig.setWeapon(currentWeapon.id);
+  attackDurations = currentWeapon.moves.map(move => move.duration);
+  attackWindows = currentWeapon.moves.map(move => move.active);
+  attackContacts = currentWeapon.moves.map(move => move.contact);
+  attackDamages = currentWeapon.moves.map(move => move.damage);
+  attackRanges = currentWeapon.moves.map(move => move.reach);
+  hero.combo = 0;
+  hero.attackHits.clear();
+  hero.previewAge = preview && mode === "start" ? 0 : Infinity;
+  if (mode === "start") hero.angle = cameraSettings.yaw + 0.24;
+  hero.previewContact = -1;
+  fx.clear();
+  weaponFx.clear();
+  const width = currentWeapon.grip === "flexible" ? 0.55
+    : currentWeapon.stats.power >= 4 ? 1.1 : 0.7;
+  for (const trail of trails) {
+    trail.color = new THREE.Color(currentWeapon.effectColor);
+    trail.coreColor = new THREE.Color(currentWeapon.effectAccent);
+    trail.widthFactor = width;
+  }
+  ui.setWeapon(currentWeapon.id);
+  try { localStorage.setItem("undead-slayer-weapon", currentWeapon.id); } catch {}
+}
+function chooseWeapon(id = currentWeapon.id) {
+  mode = "start";
+  keys.clear();
+  clearDynamic();
+  damageQueue.length = 0;
+  hero.pos.set(0, 0, 4);
+  hero.angle = Math.PI;
+  hero.state = "idle";
+  hero.elapsed = 0;
+  hero.duration = 0;
+  hero.mount = 0;
+  hero.flight = 0;
+  hero.target = null;
+  hero.destination = null;
+  hero.velocity.set(0, 0, 0);
+  hero.moveVelocity.set(0, 0, 0);
+  hero.moveBlend = 0;
+  hero.attackCarry = 0;
+  hero.flash = 0;
+  hero.idleAge = 0;
+  hero.combatAge = 10;
+  hero.localHitStop = 0;
+  hero.rig.setFlash(0);
+  destinationMarker.visible = false;
+  targetMarker.visible = false;
+  selectWeapon(id);
+  ui.showScreen("start");
 }
 function reportMobilePresentation(result) {
   ui.syncMobileDisplay();
@@ -566,7 +633,7 @@ function retryMobilePresentation() {
   const request = requestMobileFullscreen();
   if (request) void request.then(reportMobilePresentation);
 }
-function startGame() {
+function startGame(weaponId = currentWeapon.id) {
   // Keep the Fullscreen API call at the very start of the trusted start click.
   const mobilePresentationRequest = requestMobileFullscreen();
   audio.unlock?.();
@@ -574,6 +641,7 @@ function startGame() {
   lastTap = null;
   pointerStart = null;
   clearDynamic();
+  selectWeapon(weaponId, false);
   damageQueue.length = 0;
   mode = "playing";
   gameTime = 0;
@@ -814,7 +882,6 @@ function beginAttack(enemy) {
   hero.attackTarget = enemy;
   if (!hero.destination) hero.target = enemy;
   destinationMarker.visible = !!hero.destination;
-  safeAudio("slash", hero.combo);
 }
 function hurtEnemy(
   e,
@@ -841,7 +908,9 @@ function hurtEnemy(
   e.localHitStop = Math.max(e.localHitStop || 0, critical ? 0.038 : 0.027);
   e.velocity.addScaledVector(temp, force * (e.type === "boss" ? 0.4 : 1));
   showDamage(e, damage, critical ? "critical" : skill ? "skill" : "normal");
-  if (fx.impact)
+  if (playerContact) {
+    weaponFx.impact(currentWeapon.id, e.pos.clone().add(new THREE.Vector3(0, 1.05, 0)), hero.angle, hero.combo, critical);
+  } else if (fx.impact)
     fx.impact(
       e.pos
         .clone()
@@ -855,14 +924,15 @@ function hurtEnemy(
   comboTimeout = 3;
   hero.souls = Math.min(100, hero.souls + 2);
   if (playerContact || e.pos.distanceTo(hero.pos) < 6)
-    kickCamera(hitDirection, critical ? 0.075 : 0.035);
+    kickCamera(hitDirection, (critical ? 0.075 : 0.035) * (playerContact ? 0.7 + currentWeapon.stats.power * 0.12 : 1));
   const isPlayerContact =
     playerContact &&
     ((hero.state === "attack" && !skill) ||
       (hero.state === "skill" && skill && hero.skillIndex !== 4));
   if (isPlayerContact && !hero.impactDone) {
     hero.impactDone = true;
-    hero.localHitStop = critical ? 0.038 : 0.029;
+    const contactStop = currentWeapon.moves[hero.combo].hitstop;
+    hero.localHitStop = skill ? 0.038 : Math.min(0.08, contactStop * (critical ? 1.2 : 1));
   }
   if (
     playerContact &&
@@ -874,7 +944,8 @@ function hurtEnemy(
     hero.globalImpactDone = true;
     hitStop = Math.max(hitStop, 0.025);
   }
-  safeAudio("hit", critical ? 1.5 : 0.75, hero.combo);
+  if (playerContact) safeAudio("weaponHit", currentWeapon.id, critical ? 1.5 : 0.75, hero.combo);
+  else safeAudio("hit", critical ? 1.5 : 0.75, hero.combo);
   if (e.hp <= 0) {
     e.state = "dead";
     e.elapsed = 0;
@@ -911,32 +982,28 @@ function attackHit(phase = attackContacts[hero.combo]) {
   const firstContact = !hero.hitDone;
   hero.hitDone = true;
   const c = hero.combo,
-    r = attackRanges[c],
-    forward = new THREE.Vector3(Math.sin(hero.angle), 0, Math.cos(hero.angle));
+    move = currentWeapon.moves[c];
   const origin = hero.pos.clone();
-  let count = 0;
   for (const e of enemies) {
     if (e.state === "dead" || e.state === "spawn" || hero.attackHits.has(e.id))
       continue;
-    const delta = temp2.subVectors(e.pos, origin),
-      d = delta.length();
-    if (d > r + e.radius) continue;
-    const dot = d < 0.01 ? 1 : delta.dot(forward) / d;
-    if (c !== 3 && dot < (c === 2 ? 0.45 : -0.12)) continue;
+    if (!weaponStrikeContains(move, e.pos.x - origin.x, e.pos.z - origin.z, hero.angle, e.radius)) continue;
     const crit = c === 3 || Math.random() < 0.12;
     hero.attackHits.add(e.id);
     hurtEnemy(
       e,
       Math.round(attackDamages[c] * (crit ? 1.5 : 1)),
       origin,
-      c === 3 ? 5.8 : 2.8,
+      move.knockback * (move.shape === "hook" && currentWeapon.category === "奇门" ? -2.2 : c === 3 ? 5 : 3.5),
       crit,
       false,
       true,
     );
-    count++;
   }
-  if (firstContact) fx.arc(origin, hero.angle, r, c);
+  if (firstContact) {
+    weaponFx.attack(currentWeapon.id, origin, hero.angle, c);
+    safeAudio("weaponSlash", currentWeapon.id, c);
+  }
 }
 function damageHero(amount, from) {
   if (
@@ -1070,7 +1137,7 @@ function castSkill(index) {
   hero.combatAge = 0;
   hero.skillIndex = index;
   hero.elapsed = 0;
-  hero.duration = [0.72, 0.85, 1.05, 0.85, 0.8][index];
+  hero.duration = [0.72, 0.85, 1.05, 0.85, 0.8][index] * (1.13 - currentWeapon.stats.speed * 0.026);
   hero.skillHits.clear();
   hero.impactDone = false;
   hero.globalImpactDone = false;
@@ -1080,15 +1147,21 @@ function castSkill(index) {
   hero.invulnerable = index === 2 ? 0.88 : 0.38;
   hero.dashDirection.set(Math.sin(hero.angle), 0, Math.cos(hero.angle));
   destinationMarker.visible = false;
-  safeAudio("skill", index);
+  safeAudio("weaponSkill", currentWeapon.id, index);
+  weaponFx.skill(currentWeapon.id, hero.pos, hero.angle, index);
   fx.ring(
     hero.pos,
-    index === 3 ? 4.8 : 1.7,
-    index === 3 ? 0xaacbe7 : 0xc5b9ee,
+    index === 3 ? weaponSkillRadius(4.8) : 1.7,
+    index === 3 ? 0xaacbe7 : currentWeapon.effectColor,
     0.4,
   );
 }
+function weaponSkillRadius(radius) {
+  return radius * THREE.MathUtils.clamp(Math.max(...attackRanges) / 2.6, 0.68, 1.35);
+}
 function skillHit(radius, damage, force, full = true, once = true) {
+  radius = weaponSkillRadius(radius);
+  damage = Math.round(damage * (0.76 + currentWeapon.stats.power * 0.09));
   let did = false;
   for (const e of enemies) {
     if (
@@ -1123,6 +1196,10 @@ function skillHit(radius, damage, force, full = true, once = true) {
     hitStop = Math.max(hitStop, 0.032);
   }
 }
+function skillContactFeedback(index) {
+  weaponFx.skill(currentWeapon.id, hero.pos, hero.angle, index, true);
+  safeAudio("weaponSlash", currentWeapon.id, index % 4);
+}
 function updateHero(frameDt) {
   const frozen = Math.min(frameDt, hero.localHitStop);
   hero.localHitStop = Math.max(0, hero.localHitStop - frameDt);
@@ -1142,7 +1219,7 @@ function updateHero(frameDt) {
   hero.velocity.multiplyScalar(Math.exp(-dt * 10));
   hero.pos.addScaledVector(hero.velocity, dt);
   if (hero.target?.state === "dead") hero.target = null;
-  const maxSpeed = hero.mount > 0 ? 12 : hero.flight > 0 ? 8.5 : 5.8;
+  const maxSpeed = hero.mount > 0 ? 12 : hero.flight > 0 ? 8.5 : 5.8 * (0.88 + currentWeapon.stats.speed * 0.024);
   function navigate() {
     const goal = movementGoal();
     locomotion(
@@ -1169,6 +1246,7 @@ function updateHero(frameDt) {
     }
   } else if (hero.state === "attack") {
     const phase = hero.elapsed / hero.duration;
+    const move = currentWeapon.moves[hero.combo];
     const travelling = !!hero.destination || keyboardDirection().lengthSq() > 0;
     if (travelling) {
       const goal = movementGoal();
@@ -1188,7 +1266,7 @@ function updateHero(frameDt) {
     } else if (
       hero.attackTarget &&
       hero.attackTarget.state !== "dead" &&
-      phase < 0.56
+      phase < move.contact + 0.12
     ) {
       const direction = hero.attackTarget.pos.clone().sub(hero.pos),
         distance = direction.length();
@@ -1196,8 +1274,8 @@ function updateHero(frameDt) {
         dt,
         direction.normalize(),
         distance,
-        3.6,
-        1.35 + hero.attackTarget.radius * 0.35,
+        THREE.MathUtils.clamp(move.lunge / (move.duration * move.contact), 1.2, 4.8),
+        Math.max(0.65, move.reach * 0.66 + hero.attackTarget.radius * 0.35),
       );
       hero.attackCarry = 0;
     } else locomotion(dt, null);
@@ -1236,30 +1314,29 @@ function updateHero(frameDt) {
       fx.ghost(hero.rig);
       hero.ghostTimer = 0.1;
     }
-    if (index === 0 && phase > 0.22 && phase < 0.73) {
+    if (index === 0 && phase >= SKILL_CONTACTS[index] && phase < 0.73) {
       if (!hero.hitDone) {
         hero.hitDone = true;
-        safeAudio("skillImpact", index);
+        skillContactFeedback(index);
       }
       move(hero.pos, hero.dashDirection, 17, dt);
       skillHit(2.3, 58, 6, false);
     }
-    if (index === 1 && phase > 0.22 && phase < 0.85) {
+    if (index === 1 && phase >= SKILL_CONTACTS[index] && phase < 0.85) {
       if (!hero.hitDone) {
-        fx.arc(hero.pos, hero.angle, 3.8, 3, 0xe1c0ff);
         hero.hitDone = true;
-        safeAudio("skillImpact", index);
+        skillContactFeedback(index);
         skillHit(3.8, 75, 7);
       }
       hero.angle += dt * 15;
     }
     if (index === 2 && phase < 0.52)
       move(hero.pos, hero.dashDirection, 6.5, dt);
-    if (index === 2 && phase >= 0.72 && !hero.hitDone) {
+    if (index === 2 && phase >= SKILL_CONTACTS[index] && !hero.hitDone) {
       hero.hitDone = true;
-      safeAudio("skillImpact", index);
+      skillContactFeedback(index);
       skillHit(4.5, 100, 9);
-      fx.ring(hero.pos, 4.5, 0xebd9ae, 0.55);
+      fx.ring(hero.pos, weaponSkillRadius(4.5), currentWeapon.effectAccent, 0.55);
       fx.burst(hero.pos, 2);
       kickCamera(hero.dashDirection, 0.15);
       if (!hero.globalImpactDone) {
@@ -1267,16 +1344,15 @@ function updateHero(frameDt) {
         hitStop = Math.max(hitStop, 0.04);
       }
     }
-    if (index === 3 && phase >= 0.4 && !hero.hitDone) {
+    if (index === 3 && phase >= SKILL_CONTACTS[index] && !hero.hitDone) {
       hero.hitDone = true;
-      safeAudio("skillImpact", index);
+      skillContactFeedback(index);
       skillHit(5, 52, 2);
-      fx.ring(hero.pos, 5, 0xb3cddd, 1.1);
-      fx.arc(hero.pos, hero.angle, 4.8, 3, 0xb2d7f2);
+      fx.ring(hero.pos, weaponSkillRadius(5), 0xb3cddd, 1.1);
     }
-    if (index === 4 && phase >= 0.4 && !hero.hitDone) {
+    if (index === 4 && phase >= SKILL_CONTACTS[index] && !hero.hitDone) {
       hero.hitDone = true;
-      safeAudio("skillImpact", index);
+      skillContactFeedback(index);
       for (let i = -2; i <= 2; i++)
         spawnProjectile(
           hero.pos.clone().add(new THREE.Vector3(0, 1, 0)),
@@ -1288,10 +1364,9 @@ function updateHero(frameDt) {
           18,
           true,
           60,
-          0xc6c5ed,
+          currentWeapon.effectColor,
           2.6,
         );
-      fx.arc(hero.pos, hero.angle, 2.6, 1);
     }
     hero.moveVelocity.multiplyScalar(Math.exp(-dt * 25));
     if (phase >= 1) locomotionState();
@@ -1301,7 +1376,7 @@ function updateHero(frameDt) {
     if (hero.state === "dead" && hero.elapsed >= hero.duration)
       finishGame(false);
   } else {
-    const enemy = hero.target || nearestEnemy(hero.pos, 2.8);
+    const enemy = hero.target || nearestEnemy(hero.pos, attackRanges[hero.combo] + 0.8);
     if (
       enemy &&
       hero.pos.distanceTo(enemy.pos) <
@@ -1338,7 +1413,7 @@ function updateHero(frameDt) {
     if (hero.mount <= 0) {
       disposeGroup(horseMesh);
       horseMesh = null;
-      ui.notify("战马已退 · 继续双刃作战");
+      ui.notify(`战马已退 · 继续${currentWeapon.name}作战`);
     }
   }
   clampPosition(hero.pos);
@@ -1419,8 +1494,8 @@ function updateHero(frameDt) {
       phase >= attackWindows[hero.combo][0] &&
       phase <= attackWindows[hero.combo][1]) ||
       (hero.state === "skill" && phase > 0.25 && phase < 0.8));
-  for (let i = 0; i < 2; i++)
-    fx.sample(trails[i], tips[i], hero.pos, active, frameDt);
+  for (let i = 0; i < trails.length; i++)
+    fx.sample(trails[i], tips[i], hero.pos, active && !!tips[i], frameDt);
 }
 function beginEnemyAttack(e) {
   e.state = "attack";
@@ -1735,7 +1810,7 @@ function updateProjectiles(dt) {
         );
         if (d < e.radius + 0.45) {
           p.hit.add(e.id);
-          hurtEnemy(e, p.damage, p.mesh.position, 3, false, true);
+          hurtEnemy(e, p.damage, p.mesh.position, 3, false, true, true);
           if (p.hit.size >= 3) p.life = 0;
         }
       }
@@ -2198,10 +2273,13 @@ window.addEventListener("resize", () => {
 });
 function updateCamera(dt) {
   const b = world.bounds;
-  const desired = hero.pos.clone().addScaledVector(cameraBack, -0.8);
+  const preview = mode === "start" && document.querySelector('.game-interface')?.dataset.mode === "armory";
+  const desired = hero.pos.clone().addScaledVector(cameraBack, preview ? 0 : -0.8);
   desired.x = THREE.MathUtils.clamp(desired.x, b.minX + 2, b.maxX - 2);
   desired.z = THREE.MathUtils.clamp(desired.z, b.minZ + 2, b.maxZ - 2);
-  desired.y = 0.15;
+  desired.y = preview ? 1.05 : 0.15;
+  camera.zoom = THREE.MathUtils.lerp(camera.zoom, preview ? 2.4 : 1, 1 - Math.exp(-dt * 8));
+  camera.updateProjectionMatrix();
   cameraFocus.lerp(desired, 1 - Math.exp(-dt * 7));
   shakeAge += dt;
   const amplitude = shake * Math.exp(-shakeAge * 19) * Math.sin(shakeAge * 58);
@@ -2212,8 +2290,27 @@ function updateCamera(dt) {
   camera.updateMatrixWorld(true);
 }
 function updatePresentation(dt) {
-  const state = mode === "lose" ? "dead" : "idle";
+  let state = mode === "lose" ? "dead" : "idle", phase = state === "dead" ? 1 : 0, comboIndex = 0;
+  if (mode === "start" && Number.isFinite(hero.previewAge)) {
+    hero.previewAge += dt;
+    let remaining = hero.previewAge - 0.18;
+    for (let i = 0; i < currentWeapon.moves.length && remaining >= 0; i++) {
+      const move = currentWeapon.moves[i];
+      if (remaining <= move.duration) {
+        state = "attack";
+        comboIndex = i;
+        phase = Math.min(1, remaining / move.duration);
+        if (phase >= move.contact && hero.previewContact !== i) {
+          hero.previewContact = i;
+          weaponFx.attack(currentWeapon.id, hero.pos, hero.angle, i);
+        }
+        break;
+      }
+      remaining -= move.duration + 0.1;
+    }
+  }
   hero.state = state;
+  hero.combo = comboIndex;
   hero.moveBlend = THREE.MathUtils.lerp(
     hero.moveBlend,
     0,
@@ -2231,8 +2328,8 @@ function updatePresentation(dt) {
     state,
     time: globalTime,
     dt,
-    phase: state === "dead" ? 1 : 0,
-    combo: 0,
+    phase,
+    combo: comboIndex,
     speed: 0,
     moveBlend: hero.moveBlend,
     gaitPhase: hero.gaitPhase,
@@ -2242,8 +2339,12 @@ function updatePresentation(dt) {
     lookYaw: 0,
   });
   rig.group.updateMatrixWorld(true);
+  const tips = rig.weaponTips();
+  const active = state === "attack" && phase >= attackWindows[comboIndex][0] && phase <= attackWindows[comboIndex][1];
+  for (let i = 0; i < trails.length; i++) fx.sample(trails[i], tips[i], hero.pos, active && !!tips[i], dt);
+  fx.update(dt);
+  weaponFx.update(dt);
   if (mode !== "start") {
-    fx.update(dt);
     for (let i = projectiles.length - 1; i >= 0; i--) {
       const p = projectiles[i];
       p.life -= dt;
@@ -2311,6 +2412,7 @@ function animate(now) {
         updateDrops(step);
         updateCompanions(step);
         fx.update(step);
+        weaponFx.update(step);
       }
     }
     targetMarker.visible = !!hero.target && hero.target.state !== "dead";
@@ -2349,6 +2451,7 @@ resizeCamera();
 updateCamera(1);
 rig.group.position.copy(hero.pos);
 rig.group.rotation.y = hero.angle;
+selectWeapon(currentWeapon.id, false);
 ui.update(stateSnapshot());
 ui.showScreen("start");
 requestAnimationFrame(animate);
@@ -2358,6 +2461,9 @@ if (new URLSearchParams(location.search).get("debug") === "1") {
       return stateSnapshot();
     },
     getState: stateSnapshot,
+    getWeapons: () => WEAPONS,
+    selectWeapon,
+    chooseWeapon,
     getPose() {
       rig.group.updateMatrixWorld(true);
       const xyz = (value) => ({ x: value.x, y: value.y, z: value.z });
@@ -2372,6 +2478,7 @@ if (new URLSearchParams(location.search).get("debug") === "1") {
         ),
       );
       return {
+        weaponId: rig.weaponId,
         state: hero.state,
         clock: globalTime,
         presentationClock: presentationTime,

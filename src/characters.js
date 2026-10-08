@@ -1,4 +1,7 @@
 import * as THREE from 'three';
+import { equipWeapon } from './weaponModels.js';
+import { DEFAULT_WEAPON_ID } from './weapons.js';
+import { applyWeaponPose, reconcileWeaponGrip } from './weaponMotion.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // All body parts share geometry; each character owns its palette for hit flashes.
@@ -291,16 +294,28 @@ export function createCharacter(type = 'hero') {
   const resetNodes = [body,...nodes];
   const bind = resetNodes.map(n => ({node:n, p:n.position.clone(),r:n.rotation.clone(),s:n.scale.clone()}));
   const rig = {
-    type, group, body, chest, ribcage, head, pony, legs, arms, cloths, bow, bind,
+    type, group, body, chest, ribcage, head, pony, legs, arms, cloths, bow, bind, materials: material,
     swords: hero ? arms.map(arm=>arm.weapon) : [],
     idleOffset: (characterSerial++ * 2.3999632297) % TAU,
-    weaponTips() { group.updateMatrixWorld(true); return tips.map(t => t.getWorldPosition(new THREE.Vector3())); },
+    weaponTips() { group.updateMatrixWorld(true); return (rig.weaponTipNodes ?? tips).map(t => t.getWorldPosition(new THREE.Vector3())); },
+    setWeapon(id = DEFAULT_WEAPON_ID) {
+      if(type !== 'hero')return;
+      equipWeapon(rig,id);
+      for(const binding of bind){
+        if(arms.some(arm => arm.weapon === binding.node)){
+          binding.p.copy(binding.node.position);binding.r.copy(binding.node.rotation);binding.s.copy(binding.node.scale);
+        }
+      }
+      rig.motion = undefined;
+      poseCharacter(rig,{state:'idle',time:0,phase:0,immediate:true});
+    },
     setFlash(amount) {
       const value = THREE.MathUtils.clamp(amount,0,1);
       for (const m of Object.values(material)) { m.emissive.setRGB(value*.82,value*.86,value*.9); m.emissiveIntensity = 1; }
     },
   };
-  poseCharacter(rig,{state:'idle',time:0,phase:0});
+  if(hero)rig.setWeapon(DEFAULT_WEAPON_ID);
+  else poseCharacter(rig,{state:'idle',time:0,phase:0});
   return rig;
 }
 
@@ -509,6 +524,7 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
     pony.rotation.x=.2+.4*energy;pony.rotation.z=-.35*energy;
     for(const c of cloths){c.rotation.x=-.15-.65*energy;c.rotation.z=.35*energy;}
   }
+  applyWeaponPose(rig,{state,time,phase:p,combo,skill,speed,dt,gaitPhase:gait,moveBlend:movement,idleClock:motion.idleClock,idleAge:motion.idleAge},plantIdleFoot);
   // Blend only the opening of a changed action. Contacts and complete spin arcs
   // are sampled absolutely; quaternion interpolation never wraps a full turn.
   if(locomotion)settleSecondary(motion,delta);
@@ -520,6 +536,7 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
     node.quaternion.slerpQuaternions(motion.from[i].q,motion.targetQ,blend);
     node.scale.lerpVectors(motion.from[i].s,node.scale,blend);
   });
+  if(blend<1)reconcileWeaponGrip(rig);
   for(const part of motion.secondary){
     if(!locomotion&&delta>0){
       part.vx=clamp((part.node.rotation.x-part.x)/delta,-1.4,1.4);

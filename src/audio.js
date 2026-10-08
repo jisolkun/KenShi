@@ -1,3 +1,5 @@
+import { getWeapon } from './weapons.js';
+
 export function createAudio() {
   let context, master, noiseBuffer, wind, windGain;
   let enabled = true;
@@ -113,6 +115,80 @@ export function createAudio() {
     }
   }
 
+  // Air, metal resonance, body weight and articulation are tuned per weapon.
+  const weaponVoices = {
+    'dual-dao':[2700,1320,0.8,'double'], 'tang-dao':[2450,1710,1,'cut'],
+    'yanling-dao':[3100,1920,0.85,'cut'], 'miao-dao':[1500,970,1.5,'cut'],
+    'ring-dao':[2100,2420,1.15,'ring'], 'pu-dao':[1200,820,1.65,'cut'],
+    'longquan-jian':[3300,2250,0.7,'point'], 'dual-jian':[3500,2140,0.7,'double'],
+    guandao:[980,680,1.9,'heavy'], qiang:[3800,1580,1,'point'],
+    shemao:[2850,1450,1.05,'snake'], 'fangtian-ji':[1750,1160,1.55,'hook'],
+    'dual-ji':[2400,1370,1.1,'double'], staff:[780,260,1.1,'wood'],
+    'three-section-staff':[1150,760,1.2,'chain'], 'nine-section-whip':[3200,2860,0.8,'chain'],
+    'iron-whip':[1600,840,1.4,'metal'], 'dual-jian-maces':[1350,610,1.55,'double-heavy'],
+    'wolf-club':[700,340,1.9,'heavy'], 'dual-axes':[1800,940,1.35,'double-heavy'],
+    'war-hammer':[560,220,2,'heavy'], 'hook-swords':[2600,1840,0.85,'hook'],
+    'emei-piercers':[4600,3100,0.5,'point'], 'mandarin-yue':[3600,2540,0.7,'double'],
+    'meteor-hammer':[950,480,1.8,'chain'], 'judge-brush':[4100,2740,0.55,'brush'],
+    'battle-yue':[1050,550,1.85,'heavy'],
+  };
+  function weaponSlash(id, combo = 0) {
+    if (!ready() || context.currentTime - lastSlash < 0.06) return;
+    lastSlash = context.currentTime;
+    const [air, metal, weight, kind] = weaponVoices[id] || weaponVoices['tang-dao'];
+    const pitch = [1.04,0.94,1.12,0.86][Math.abs(combo)%4];
+    const shape=getWeapon(id).moves[((combo%4)+4)%4].shape;
+    const duration = (0.085 + weight * 0.035)*(shape==='thrust'?0.72:shape==='radial'?1.3:1);
+    if(shape==='crush')tone(110,37,0.14,0.065,'sine',0.015,0.005);
+    if(shape==='thrust')noise(0.045,0.09,air*1.3,air*0.8,'highpass',0,0.002);
+    noise(duration,0.19+weight*0.04,air*pitch,air*0.32,weight>1.5?'bandpass':'highpass',0,0.006);
+    tone(metal*pitch,metal*0.45,duration,0.025,'triangle',0.005,0.003);
+    if (kind.includes('double')) {
+      noise(duration*0.75,0.16,air/pitch,air*0.4,'highpass',0.037,0.004);
+      tone(metal*1.2,metal*0.6,0.09,0.018,'triangle',0.04,0.003);
+    }
+    if (kind==='chain' || kind==='ring') {
+      for(let i=0;i<3;i++)tone(metal*(1+i*0.37),metal*(0.98+i*0.37),0.055,0.026/(i+1),'sine',i*0.025,0.002);
+    } else if (kind==='wood' || kind==='heavy') {
+      tone(100+weight*35,48,duration,0.07,'sine',0,0.006);
+    } else if (kind==='snake') {
+      noise(0.07,0.12,air*1.35,air*0.7,'bandpass',0.05,0.004);
+    } else if (kind==='hook') {
+      tone(metal*1.5,metal*0.8,0.12,0.027,'sine',0.035,0.003);
+    } else if (kind==='brush') {
+      noise(0.1,0.095,5100,2200,'highpass',0.025,0.015);
+    }
+  }
+  function weaponHit(id, strength = 1, combo = 0) {
+    if (!ready()) return;
+    const [air,metal,weight,kind] = weaponVoices[id] || weaponVoices['tang-dao'];
+    const force=Math.min(2,Math.max(0.45,typeof strength==='number'?strength:1));
+    if(context.currentTime-lastHit<0.035 && force<=lastHitWeight*1.3)return;
+    lastHit=context.currentTime;lastHitWeight=force;
+    const pitch=combo%2?0.94:1.06, mass=Math.min(2.2,weight*force);
+    tone((90+weight*30)*pitch,32,0.09+mass*0.045,0.2+mass*0.075,'sine',0,0.002);
+    noise(0.035+mass*0.016,0.19+mass*0.055,kind==='wood'?820:air,220,'lowpass',0,0.002);
+    if(kind==='wood') {
+      tone(240,95,0.045,0.09,'triangle',0.003,0.002);
+    } else if(kind==='heavy' || kind==='double-heavy') {
+      noise(0.12,0.13,650,90,'lowpass',0.009,0.003);
+      tone(58,27,0.18,0.085,'sine',0.007,0.003);
+      if(kind==='double-heavy')tone(metal*1.23,metal*0.5,0.07,0.035,'triangle',0.024,0.002);
+    } else {
+      tone(metal*pitch,metal*0.62,kind==='point'?0.055:0.095,kind==='point'?0.08:0.05,'triangle',0,0.002);
+      if(kind==='chain'||kind==='ring'||kind==='metal'||kind==='hook') {
+        tone(metal*2.03,metal*1.99,0.14,0.028,'sine',0.007,0.002);
+        tone(metal*2.7,metal*2.63,0.08,0.013,'sine',0.017,0.002);
+      }
+    }
+  }
+  function weaponSkill(id,index=0) {
+    skill(index);
+    const voice=weaponVoices[id]||weaponVoices['tang-dao'];
+    tone(voice[1]*0.3,voice[1]*0.65,0.17,0.025,'sine',0.025,0.01);
+    if(voice[3]==='chain')noise(0.13,0.09,2200,3400,'highpass',0.04,0.005);
+  }
+
   function roll() {
     noise(0.24, 0.3, 800, 180, 'bandpass');
     tone(170, 55, 0.15, 0.09, 'sine', 0.12);
@@ -205,7 +281,7 @@ export function createAudio() {
     else if (enabled) context.resume().catch(() => {});
   };
   document.addEventListener('visibilitychange', visibility);
-  return { unlock, slash, hit, roll, skill, skillImpact, footstep, kill, enemy, win, setEnabled, update,
+  return { unlock, slash, hit, weaponSlash, weaponHit, weaponSkill, roll, skill, skillImpact, footstep, kill, enemy, win, setEnabled, update,
     destroy() { document.removeEventListener('visibilitychange', visibility); wind?.stop(); context?.close(); },
   };
 }
