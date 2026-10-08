@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { createCharacter, poseCharacter } from '../src/characters.js';
 import { WEAPONS, DEFAULT_WEAPON_ID, getWeapon, SKILL_CONTACTS } from '../src/weapons.js';
 import { WEAPON_COMBOS } from '../src/weaponMotion.js';
+import { getReviewedAttack } from '../src/choreography/index.js';
 
 const vector = () => new THREE.Vector3();
 const assertFinite = (rig, label) => {
@@ -70,8 +71,8 @@ test('all equipped poses, four attacks and five skills keep finite body and tip 
   }
 });
 
-test('new weapon attacks keep reachable ankles on the ground through all four contacts', () => {
-  for (const weapon of WEAPONS.filter(w => w.id !== DEFAULT_WEAPON_ID)) {
+test('legacy weapon attacks keep reachable ankles on the ground through all four contacts', () => {
+  for (const weapon of WEAPONS.filter(w => w.id !== DEFAULT_WEAPON_ID && !getReviewedAttack(w.id))) {
     const rig = createCharacter();
     rig.setWeapon(weapon.id);
     for (let combo = 0; combo < 4; combo++) {
@@ -128,7 +129,7 @@ test('equip switches preserve wrist roots, replace tip nodes and reset motion sa
 
 test('skill pose peaks align with the shared skill hit and effect contacts', () => {
   assert.deepEqual(SKILL_CONTACTS, [.3, .38, .72, .4, .4]);
-  for (const weapon of WEAPONS.filter(w => w.id !== DEFAULT_WEAPON_ID)) {
+  for (const weapon of WEAPONS.filter(w => w.id !== DEFAULT_WEAPON_ID && !getReviewedAttack(w.id))) {
     const rig = createCharacter();
     rig.setWeapon(weapon.id);
     for (let skill = 0; skill < 5; skill++) {

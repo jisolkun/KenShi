@@ -350,6 +350,11 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
   const key=locomotion?'locomotion':`${state}:${state==='attack'?combo:state==='skill'?skill:0}`;
   const restarted=!locomotion && phase<motion.phase-.2;
   if(motion.key!==null && (key!==motion.key||restarted)) {
+    if(rig.weaponId==='ring-dao'){
+      rig.group.updateMatrixWorld(true);
+      const groupQ=rig.group.getWorldQuaternion(new THREE.Quaternion());
+      motion.shaftFrom={point:rig.group.worldToLocal(rig.arms[1].wrist.getWorldPosition(new THREE.Vector3())),quaternion:groupQ.invert().multiply(rig.arms[1].wrist.getWorldQuaternion(new THREE.Quaternion()))};
+    }
     rig.bind.forEach(({node},i)=>{motion.from[i].p.copy(node.position);motion.from[i].q.copy(node.quaternion);motion.from[i].s.copy(node.scale);});
     motion.elapsed=0;
     motion.duration=state==='hurt'?.04:state==='roll'?.06:.08;
@@ -524,12 +529,20 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
     pony.rotation.x=.2+.4*energy;pony.rotation.z=-.35*energy;
     for(const c of cloths){c.rotation.x=-.15-.65*energy;c.rotation.z=.35*energy;}
   }
-  applyWeaponPose(rig,{state,time,phase:p,combo,skill,speed,dt,gaitPhase:gait,moveBlend:movement,idleClock:motion.idleClock,idleAge:motion.idleAge},plantIdleFoot);
+  applyWeaponPose(rig,{state,time,phase:p,combo,skill,speed,dt,gaitPhase:gait,moveBlend:movement,attackCarry,idleClock:motion.idleClock,idleAge:motion.idleAge},plantIdleFoot);
   // Blend only the opening of a changed action. Contacts and complete spin arcs
   // are sampled absolutely; quaternion interpolation never wraps a full turn.
   if(locomotion)settleSecondary(motion,delta);
   let blend=transition&&!immediate?smooth(motion.elapsed/motion.duration):1;
   if((state==='attack'||state==='skill')&&p>=.32)blend=1;
+  rig.reviewedShaftBlend=null;
+  if(blend<1&&rig.weaponId==='ring-dao'&&motion.shaftFrom){
+    rig.group.updateMatrixWorld(true);
+    const groupQ=rig.group.getWorldQuaternion(new THREE.Quaternion());
+    const point=rig.group.worldToLocal(rig.arms[1].wrist.getWorldPosition(new THREE.Vector3()));
+    const quaternion=groupQ.clone().invert().multiply(rig.arms[1].wrist.getWorldQuaternion(new THREE.Quaternion()));
+    rig.reviewedShaftBlend={point:rig.group.localToWorld(motion.shaftFrom.point.clone().lerp(point,blend)),quaternion:groupQ.multiply(motion.shaftFrom.quaternion.clone().slerp(quaternion,blend))};
+  }
   if(blend<1)rig.bind.forEach(({node},i)=>{
     motion.targetQ.copy(node.quaternion);
     node.position.lerpVectors(motion.from[i].p,node.position,blend);

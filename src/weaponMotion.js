@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { animateWeaponParts } from './weaponModels.js';
 import { SKILL_CONTACTS } from './weapons.js';
+import { sampleReviewedAttack } from './choreography/index.js';
+export { getReviewedAttack, sampleReviewedAttack } from './choreography/index.js';
 
 // Each row describes a deliberately authored contact: shoulder pitch/yaw/roll,
 // elbow flexion, wrist pitch/roll and torso yaw. Cuts, points, hooks and weighted
@@ -48,16 +50,24 @@ function guardFor(id) {
 const down=new THREE.Vector3(0,-1,0);
 // Solve a two-bone arm in chest coordinates. The elbow pole keeps the upper
 // arm clear of the torso; wrist orientation follows the shaft's primary hand.
-function solveArm(rig,arm,point,desired) {
+function solveArm(rig,arm,point,desired,stable=false) {
  const target=point.clone().sub(arm.shoulder.position);
  const length=target.length(),a=.29,b=.27,d=clamp(length,.035,a+b-.0001),axis=target.clone().normalize();
- const pole=new THREE.Vector3(arm.side,-.25,.1);
+ const pole=stable?new THREE.Vector3(arm.side,0,0):new THREE.Vector3(arm.side,-.25,.1);
  pole.addScaledVector(axis,-pole.dot(axis)).normalize();
  const along=(a*a+d*d-b*b)/(2*d),height=Math.sqrt(Math.max(0,a*a-along*along));
  const elbow=axis.clone().multiplyScalar(along).addScaledVector(pole,height);
- arm.shoulder.quaternion.setFromUnitVectors(down,elbow.clone().normalize());
+ if(stable){
+  const y=elbow.clone().normalize().negate(),z=new THREE.Vector3().crossVectors(pole,axis).normalize(),x=new THREE.Vector3().crossVectors(y,z).normalize();
+  z.crossVectors(x,y).normalize();
+  arm.shoulder.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x,y,z));
+ }else arm.shoulder.quaternion.setFromUnitVectors(down,elbow.clone().normalize());
  const forearm=axis.clone().multiplyScalar(d).sub(elbow).normalize().applyQuaternion(arm.shoulder.quaternion.clone().invert());
- arm.elbow.quaternion.setFromUnitVectors(down,forearm);
+ // Keep the elbow's bend plane even near a fully folded arm. The generic
+ // shortest-vector quaternion loses its axis at an antiparallel forearm.
+ const bendNormal=new THREE.Vector3().crossVectors(pole,axis).normalize().applyQuaternion(arm.shoulder.quaternion.clone().invert());
+ if(stable)arm.elbow.quaternion.setFromAxisAngle(bendNormal,Math.acos(clamp(down.dot(forearm),-1,1)));
+ else arm.elbow.quaternion.setFromUnitVectors(down,forearm);
  rig.group.updateMatrixWorld(true);
  arm.wrist.quaternion.copy(arm.elbow.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(desired));
 }
@@ -78,8 +88,14 @@ function supportHand(rig) {
 export function applyWeaponPose(rig, pose, plantFoot) {
  if(rig.type!=='hero'||!WEAPON_COMBOS[rig.weaponId])return;
  const {state,phase=0,combo=0,skill=0,time=0}=pose,id=rig.weaponId;
- // Preserve the original default choreography and its established foot contacts.
- if(id==='dual-dao'){animateWeaponParts(rig,pose);return;}
+ // Reviewed attacks author blade planes, connected grips and ankle targets.
+ if(['dual-dao','tang-dao','yanling-dao','miao-dao','ring-dao'].includes(id)&&(state==='attack'||state==='skill')){
+  applyReviewedMotion(rig,pose,plantFoot);
+  animateWeaponParts(rig,pose);return;
+ }
+ if(id==='dual-dao'){
+  animateWeaponParts(rig,pose);return;
+ }
  if(!['idle','run','walk','guard','attack','skill'].includes(state)){animateWeaponParts(rig,pose);return;}
  const guard=guardFor(id),row=WEAPON_COMBOS[id][((combo%4)+4)%4];
  let values=guard.slice(),weight=0;
@@ -173,8 +189,81 @@ export function applyWeaponPose(rig, pose, plantFoot) {
 
 }
 
+function applyReviewedMotion(rig,pose,plantFoot) {
+ const sample=sampleReviewedAttack(rig.weaponId,pose.state==='skill'?pose.skill:pose.combo,pose.phase,pose.state);
+ const {yaw,load,advance}=sample.stance;
+ // Pelvis starts the turn; the chest follows. Feet remain in the character
+ // frame while the hip crosses between the two support legs.
+ rig.body.rotation.set(0,yaw*.65,0);
+ // The moving Yanling stance needs knee flexion while its authored torso
+ // retreats. Keep ankle cadence fixed and lower the pelvis instead of
+ // shortening the planted step, which would make that foot slide.
+ const movingCrouch=rig.weaponId==='yanling-dao'?.015*clamp(pose.attackCarry??0,0,1):0;
+ rig.body.position.set(-yaw*.07,(sample.stance.bodyHeight??.875)-load*.055-movingCrouch,advance);
+ rig.chest.rotation.set(-.055-load*.035,yaw*.35,0);
+ rig.head.rotation.set(.02,-yaw*.25,0);
+ rig.group.updateMatrixWorld(true);
+ const chestQ=rig.chest.getWorldQuaternion(new THREE.Quaternion());
+ for(let i=0;i<2;i++){
+  const h=sample.hands[i];
+  solveArm(rig,rig.arms[i],new THREE.Vector3(...h.grip),chestQ.clone().multiply(new THREE.Quaternion().fromArray(h.quaternion)),true);
+ }
+ const resolvedFeet=[];
+ for(const leg of rig.legs){
+  leg.hip.rotation.set(0,0,0);leg.knee.rotation.set(0,0,0);leg.foot.rotation.set(0,0,0);
+  const carry=clamp(pose.attackCarry??0,0,1);
+  // Gait phase follows root distance, not elapsed time. Match the blended
+  // short step to that distance so a support ankle stays still in world space.
+  const speed=pose.speed>0?clamp(pose.speed,0,1):carry;
+  const cycleDistance=THREE.MathUtils.lerp(.85,2.9,speed);
+  const stance=Math.max(1e-6,2*.19*carry/cycleDistance);
+  const u=(((pose.gaitPhase??0)/(Math.PI*2)+(leg.side===-1?.5:0))%1+1)%1;
+  const swing=clamp((u-stance)/(1-stance),0,1);
+  const stride=u<stance?.19*(1-2*u/stance):THREE.MathUtils.lerp(-.19,.19,ease(swing));
+  const compact=rig.weaponId==='tang-dao',authored=sample.stance.feet?.[leg.side===-1?0:1];
+  const z=THREE.MathUtils.lerp(authored?.z??(leg.side===-1?(compact?.10:.16):(compact?-.07:-.12)),.026+stride,carry);
+  const y=THREE.MathUtils.lerp(authored?.y??.075,.075+Math.sin(Math.PI*swing)*.10,carry);
+  const x=authored?.x??leg.side*(compact?.16:.19);
+  plantFoot?.(rig,leg,1,z,y,x);
+  resolvedFeet.push({x,y,z});
+ }
+ sample.stance.feet=resolvedFeet;
+ rig.pony.rotation.set(.2+load*.08,0,-yaw*.15);
+ for(const cloth of rig.cloths){cloth.rotation.x=-.15-load*.16;cloth.rotation.z=-yaw*.12;}
+ rig.reviewedAttackSample=sample;
+}
+
 // Quaternion blending may separate the two wrist targets for the first few
 // frames of a state change; re-project the blended shaft into both arm chains.
 export function reconcileWeaponGrip(rig) {
- if(rig.type==='hero'&&rig.offhandGrip)supportHand(rig);
+ if(rig.type!=='hero'||!rig.offhandGrip)return;
+ if(!['miao-dao','ring-dao'].includes(rig.weaponId)||!rig.reviewedAttackSample){supportHand(rig);return;}
+ // During a state blend preserve the actual primary wrist and shaft plane.
+ // Only move that shaft if its support marker falls outside the left reach.
+ rig.group.updateMatrixWorld(true);
+ const desired=rig.reviewedShaftBlend?.quaternion.clone()??rig.arms[1].wrist.getWorldQuaternion(new THREE.Quaternion());
+ if(rig.reviewedShaftBlend){
+  solveArm(rig,rig.arms[1],rig.chest.worldToLocal(rig.reviewedShaftBlend.point.clone()),desired.clone(),true);
+  rig.group.updateMatrixWorld(true);
+ }
+ if(rig.weaponId==='ring-dao'){
+  const floor=Math.min(...rig.weaponBlades().flatMap(b=>[b.heel.y,b.tip.y]));
+  if(floor<.06){
+   // The broad blade's interpolated carry plane can dip during entry. Raise
+   // the entire connected shaft, retaining its blended orientation.
+   const point=rig.arms[1].wrist.getWorldPosition(new THREE.Vector3());point.y+=.06-floor;
+   const primary=rig.chest.worldToLocal(point);
+   solveArm(rig,rig.arms[1],primary,desired.clone(),true);
+   rig.group.updateMatrixWorld(true);
+  }
+ }
+ const target=rig.chest.worldToLocal(rig.offhandGrip.getWorldPosition(new THREE.Vector3()));
+ const shoulder=rig.arms[0].shoulder.position,delta=target.clone().sub(shoulder);
+ if(delta.length()>.549){
+  const correction=shoulder.clone().add(delta.setLength(.549)).sub(target);
+  const primary=rig.chest.worldToLocal(rig.arms[1].wrist.getWorldPosition(new THREE.Vector3())).add(correction);
+  solveArm(rig,rig.arms[1],primary,desired.clone(),true);
+  rig.group.updateMatrixWorld(true);
+ }
+ solveArm(rig,rig.arms[0],rig.chest.worldToLocal(rig.offhandGrip.getWorldPosition(new THREE.Vector3())),desired,true);
 }

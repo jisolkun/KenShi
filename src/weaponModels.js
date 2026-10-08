@@ -14,6 +14,11 @@ function polygon(key, points) {
   return cached(key, () => { const s=new THREE.Shape(); points.forEach(([x,y],i)=>i?s.lineTo(x,y):s.moveTo(x,y)); s.closePath(); return new THREE.ExtrudeGeometry(s,{depth:.035,bevelEnabled:false,steps:1,curveSegments:1}); });
 }
 const straight = polygon('straight', [[-.06,0],[.06,0],[.06,-.85],[0,-1],[-.06,-.85]]);
+// Straight spine on -X, sharpened edge on +X, with an oblique dao point.
+const tangBlade=polygon('tang-single-edge',[[-.065,0],[.055,0],[.055,-.88],[-.035,-1],[-.065,-.94]]);
+const yanlingBlade=polygon('yanling-curved-point',[[-.055,0],[.055,0],[.065,-.65],[.10,-.83],[0,-1],[-.04,-.82],[-.055,-.52]]);
+const miaoBlade=polygon('miao-long-edge',[[-.052,0],[.054,0],[.06,-.75],[.078,-.91],[0,-1],[-.043,-.90],[-.052,-.68]]);
+const ringBlade=polygon('ring-heavy-edge',[[-.07,0],[.105,0],[.18,-.45],[.20,-.70],[.08,-.92],[0,-1],[-.08,-.82],[-.07,-.50]]);
 const dao = polygon('dao', [[-.07,0],[.09,0],[.14,-.58],[.08,-.88],[-.04,-1],[-.07,-.72]]);
 const crescent = polygon('crescent', [[-.04,0],[.12,-.05],[.34,-.24],[.4,-.55],[.25,-.85],[-.08,-1],[.10,-.69],[.15,-.4],[.06,-.2]]);
 const axe = polygon('axe', [[0,.12],[.38,.20],[.49,.08],[.49,-.3],[.35,-.44],[0,-.27]]);
@@ -28,7 +33,7 @@ function merge(root,key) {
 export function equipWeapon(rig,id) {
   const def=getWeapon(id); const palette=rig.materials;
   if(!palette)throw new Error('Weapon models require rig.materials');
-  rig.weaponId=def.id;rig.weaponDefinition=def;rig.weaponTipNodes=[];rig.weaponArticulation=[];rig.offhandGrip=null;
+  rig.weaponId=def.id;rig.weaponDefinition=def;rig.weaponTipNodes=[];rig.weaponArticulation=[];rig.offhandGrip=null;rig.weaponBladeFrames=[];rig.reviewedAttackSample=null;
   for(let side=0;side<2;side++) {
     const arm=rig.arms[side];if(!arm.weapon){arm.weapon=new THREE.Group();arm.wrist.add(arm.weapon);}
     const root=arm.weapon;root.clear();root.scale.setScalar(1);root.visible=side===1||def.grip==='dual';root.position.set(0,-.029,0);root.rotation.set(0,0,0);
@@ -43,10 +48,18 @@ export function equipWeapon(rig,id) {
     const id=def.id;
     switch(id) {
       case 'dual-dao':handle();guard();blade(dao,.82,.9);tip(-.92);break;
-      case 'tang-dao':handle(.28);guard();blade(straight,1.08,.8);m(ring,'gold',[.055,.055,.055],[0,.20,0]);tip(-1.18);break;
-      case 'yanling-dao':handle();guard();blade(dao,1,.7);tip(-1.1);break;
-      case 'miao-dao':handle(.47);guard();blade(dao,1.4,.85);tip(-1.5);break;
-      case 'ring-dao':handle(.36);guard();blade(dao,1.18,1.7);for(let j=0;j<9;j++)m(ring,'gold',[.047,.047,.047],[-.11,-.17-j*.095,.01]);tip(-1.28);break;
+      case 'tang-dao':handle(.28);guard();blade(tangBlade,1.08,1);m(box,'edge',[.009,.87,.008],[.05,-.54,.021]);m(ring,'gold',[.055,.055,.055],[0,.20,0]);tip(-1.18);break;
+      case 'yanling-dao':handle();guard();blade(yanlingBlade,1,1);tip(-1.1);break;
+      case 'miao-dao':handle(.47);guard();blade(miaoBlade,1.4,1);tip(-1.5);break;
+      case 'ring-dao': {
+        handle(.48);guard();blade(ringBlade,1.18,1.7);
+        for(let j=0;j<9;j++){
+          const node=new THREE.Group();node.position.set(-.15,-.17-j*.095,.035);root.add(node);
+          add(node,ring,palette.gold,[.043,.043,.043],[-.048,0,0]);
+          rig.weaponArticulation.push({node,index:j,side,kind:'blade-ring',initialized:false});
+        }
+        tip(-1.28);break;
+      }
       case 'pu-dao':shaft(1.15);blade(dao,.87,1.25,-.88);tip(-1.75);break;
       case 'longquan-jian':handle(.25);guard();blade(straight,1.1,1);m(box,'gold',[.014,.82,.025],[0,-.52,.025]);tip(-1.2);break;
       case 'dual-jian':handle();guard();blade(straight,.88,.85);tip(-.98);break;
@@ -78,16 +91,43 @@ export function equipWeapon(rig,id) {
         else rig.weaponTipNodes.push(mark(parent,-.47));break;
       }
     }
+    if(['dual-dao','tang-dao','yanling-dao','miao-dao','ring-dao'].includes(id)) {
+      const lengths={'dual-dao':.92,'tang-dao':1.18,'yanling-dao':1.1,'miao-dao':1.5,'ring-dao':1.28};
+      const heel=mark(root,-.12),tip=mark(root,-lengths[id]),edge=mark(root,-lengths[id]*.55,.15),face=mark(root,-lengths[id]*.55,0,.15);
+      rig.weaponBladeFrames.push({hand:side,root,heel,tip,edge,face});
+    }
     if(def.grip==='twohand')rig.offhandGrip=mark(root,.25);
     merge(root,`${id}:${side}`);
   }
   rig.swords=rig.arms.map(a=>a.weapon);
+  rig.weaponBlades=()=>{
+    rig.group.updateMatrixWorld(true);
+    return rig.weaponBladeFrames.map(b=>{
+      const heel=b.heel.getWorldPosition(new THREE.Vector3()),tip=b.tip.getWorldPosition(new THREE.Vector3());
+      const quaternion=b.root.getWorldQuaternion(new THREE.Quaternion());
+      return {hand:b.hand,heel,tip,edge:new THREE.Vector3(1,0,0).applyQuaternion(quaternion),normal:new THREE.Vector3(0,0,1).applyQuaternion(quaternion)};
+    });
+  };
   return def;
 }
 
 export function animateWeaponParts(rig,pose={}) {
   const time=pose.time||0;const phase=pose.phase||0;const attack=pose.state==='attack'||pose.state==='skill'||pose.attacking;
   const energy=attack?1:.18;
+  if(rig.weaponId==='ring-dao') {
+    rig.group.updateMatrixWorld(true);
+    const rotation=rig.arms[1].weapon.getWorldQuaternion(new THREE.Quaternion()).invert();
+    const gravity=new THREE.Vector3(0,-1,0).applyQuaternion(rotation);
+    // Keep rings outside the spine. Their gravity bias follows the world;
+    // staggered damping gives the loose fittings a short lag behind the blade.
+    gravity.x=-Math.max(.8,Math.abs(gravity.x));gravity.normalize();
+    const target=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(-1,0,0),gravity);
+    for(const part of rig.weaponArticulation){
+      if(!part.initialized){part.node.quaternion.copy(target);part.initialized=true;}
+      else part.node.quaternion.slerp(target,1-Math.exp(-Math.max(0,pose.dt??1/60)*(12-part.index*.35)));
+    }
+    return;
+  }
   for(const part of rig.weaponArticulation||[]){const {node,index}=part;
     if(rig.weaponId==='three-section-staff'){node.rotation.set(Math.sin(time*6-index*.8)*.12*energy,0,Math.sin(phase*Math.PI*2-index*.9+time*.8)*.65*energy);}
     else if(rig.weaponId==='nine-section-whip'){node.rotation.set(Math.cos(time*9-index*.5)*.18*energy,0,Math.sin(time*11-index*.64+phase*4)*.31*energy);}

@@ -7,7 +7,8 @@ import { createEffects } from "./effects.js";
 import { requestMobileFullscreen } from "./fullscreen.js";
 import { WEAPONS, getWeapon, DEFAULT_WEAPON_ID, SKILL_CONTACTS } from "./weapons.js";
 import { createWeaponEffects } from "./weaponEffects.js";
-import { weaponStrikeContains } from "./weaponCombat.js";
+import { weaponStrikeContains, bladeSweepContains } from "./weaponCombat.js";
+import { getReviewedAttack, sampleReviewedAttack } from "./choreography/index.js";
 import "./style.css";
 
 const app = document.querySelector("#app") || document.body;
@@ -98,6 +99,7 @@ const weaponFx = createWeaponEffects(scene, fx);
 let storedWeaponId = DEFAULT_WEAPON_ID;
 try { storedWeaponId = localStorage.getItem("undead-slayer-weapon") || DEFAULT_WEAPON_ID; } catch {}
 let currentWeapon = getWeapon(storedWeaponId);
+let weaponWarmGeneration = 0;
 const rig = createCharacter("hero");
 rig.setWeapon(currentWeapon.id);
 scene.add(rig.group);
@@ -115,6 +117,9 @@ const hero = {
   attackCarry: 0,
   localHitStop: 0,
   attackHits: new Set(),
+  strokeContacts: new Set(),
+  reviewedPrevious: null,
+  trailSeries: 0,
   impactDone: false,
   globalImpactDone: false,
   nextAttackIn: 0,
@@ -344,7 +349,7 @@ function movementGoal() {
       distance,
       stoppingDistance: Math.max(
         0.7,
-        attackRanges[hero.combo] + hero.target.radius - 0.38,
+        getReviewedAttack(currentWeapon.id,hero.combo)?attackRanges[hero.combo]*.8+hero.target.radius*.35:attackRanges[hero.combo] + hero.target.radius - 0.38,
       ),
     };
   }
@@ -577,6 +582,9 @@ function selectWeapon(id = currentWeapon.id, preview = true) {
   hero.combo = 0;
   hero.attackHits.clear();
   hero.previewAge = preview && mode === "start" ? 0 : Infinity;
+  hero.reviewedPrevious = null;
+  hero.strokeContacts.clear();
+  hero.trailSeries++;
   if (mode === "start") hero.angle = cameraSettings.yaw + 0.24;
   hero.previewContact = -1;
   fx.clear();
@@ -589,7 +597,24 @@ function selectWeapon(id = currentWeapon.id, preview = true) {
     trail.widthFactor = width;
   }
   ui.setWeapon(currentWeapon.id);
+  warmReviewedWeapon(currentWeapon.id);
   try { localStorage.setItem("undead-slayer-weapon", currentWeapon.id); } catch {}
+}
+function warmReviewedWeapon(id) {
+  const generation=++weaponWarmGeneration;
+  const queue=[];
+  for(const state of ['attack','skill'])for(let i=0;i<(state==='skill'?5:4);i++){
+    const action=getReviewedAttack(id,i,state);
+    if(action)queue.push({state,i,phase:action.contact});
+  }
+  const schedule=callback=>window.requestIdleCallback?window.requestIdleCallback(callback,{timeout:500}):setTimeout(callback,30);
+  const next=()=>{
+    if(generation!==weaponWarmGeneration||!queue.length)return;
+    const action=queue.shift();
+    sampleReviewedAttack(id,action.i,action.phase,action.state);
+    if(queue.length)schedule(next);
+  };
+  if(queue.length)schedule(next);
 }
 function chooseWeapon(id = currentWeapon.id) {
   mode = "start";
@@ -875,10 +900,14 @@ function beginAttack(enemy) {
   hero.hitDone = false;
   hero.attackHits.clear();
   hero.impactDone = false;
+  hero.reviewedPrevious = null;
+  hero.strokeContacts.clear();
+  hero.trailSeries++;
   hero.globalImpactDone = false;
   hero.attackCarry = hero.destination
     ? Math.min(1, hero.moveVelocity.length() / 5.8)
     : 0;
+  if(getReviewedAttack(currentWeapon.id,hero.combo))hero.attackCarry=Math.min(1,hero.moveVelocity.length()/5.8);
   hero.attackTarget = enemy;
   if (!hero.destination) hero.target = enemy;
   destinationMarker.visible = !!hero.destination;
@@ -1003,6 +1032,52 @@ function attackHit(phase = attackContacts[hero.combo]) {
   if (firstContact) {
     weaponFx.attack(currentWeapon.id, origin, hero.angle, c);
     safeAudio("weaponSlash", currentWeapon.id, c);
+  }
+}
+function reviewedStrike(phase,frames) {
+  const skill=hero.state==='skill';
+  const action=getReviewedAttack(currentWeapon.id,skill?hero.skillIndex:hero.combo,hero.state);
+  if(!action)return;
+  const previous=hero.reviewedPrevious;
+  action.contacts.forEach((contact,stroke)=>{
+    if(phase<contact.window[0]||phase>contact.window[1])return;
+    const frame=frames.find(b=>b.hand===contact.hand);
+    if(!frame)return;
+    hero.hitDone=true;
+    if(!hero.strokeContacts.has(stroke)){
+      hero.strokeContacts.add(stroke);
+      safeAudio('weaponSlash',currentWeapon.id,skill?hero.skillIndex:hero.combo,contact.kind??'cut');
+    }
+    const prior=previous&&previous.state===hero.state&&previous.combo===(skill?hero.skillIndex:hero.combo)&&previous.phase>=contact.window[0]
+      ?previous.frames.find(b=>b.hand===contact.hand):null;
+    for(const e of enemies){
+      const key=`${stroke}:${e.id}`;
+      if(e.state==='dead'||e.state==='spawn'||hero.attackHits.has(key))continue;
+      const target={x:e.pos.x,z:e.pos.z,minY:.18,maxY:e.type==='boss'?3.2:e.type==='brute'?2.4:1.85};
+      if(!bladeSweepContains(frame,prior,target,e.radius,action.width*.5))continue;
+      hero.attackHits.add(key);
+      const move=currentWeapon.moves[hero.combo];
+      const critical=skill||hero.combo===3;
+      const totalDamage=skill?[75,100,115,95,150][hero.skillIndex]:move.damage;
+      hurtEnemy(e,Math.round(totalDamage/action.contacts.length*(critical?1.25:1)),hero.pos,move.knockback*(skill?5:3.5),critical,skill,true);
+    }
+  });
+  hero.reviewedPrevious={state:hero.state,combo:skill?hero.skillIndex:hero.combo,phase,frames};
+}
+function sampleHeroTrails(frames,tips,phase,dt,active) {
+  const action=['attack','skill'].includes(hero.state)?getReviewedAttack(currentWeapon.id,hero.state==='skill'?hero.skillIndex:hero.combo,hero.state):null;
+  const source=`${currentWeapon.id}:${hero.trailSeries}:${hero.state}:${hero.state==='skill'?hero.skillIndex:hero.combo}`;
+  for(let i=0;i<trails.length;i++){
+    const trail=trails[i];
+    const blade=action&&frames.find(b=>b.hand===i);
+    const cutting=action?!!blade&&action.contacts.some(c=>c.hand===i&&phase>=c.window[0]&&phase<=c.window[1]):active&&!!tips[i];
+    // A short active interval can cover one displayed frame. Seed from the
+    // preceding real blade pose so its path still forms a visible ribbon.
+    if(blade&&cutting&&dt>0&&!trail.wasActive&&trail.previousBlade?.source===source&&phase-trail.previousBlade.phase<.1){
+      fx.sample(trail,trail.previousBlade.tip,trail.previousBlade.heel,true,0);
+    }
+    fx.sample(trail,blade?blade.tip:tips[i],blade?blade.heel:hero.pos,dt>0&&cutting,dt);
+    trail.previousBlade=blade?{tip:blade.tip,heel:blade.heel,phase,source}:null;
   }
 }
 function damageHero(amount, from) {
@@ -1138,6 +1213,12 @@ function castSkill(index) {
   hero.skillIndex = index;
   hero.elapsed = 0;
   hero.duration = [0.72, 0.85, 1.05, 0.85, 0.8][index] * (1.13 - currentWeapon.stats.speed * 0.026);
+  const reviewed=getReviewedAttack(currentWeapon.id,index,'skill');
+  if(reviewed)hero.duration=reviewed.duration;
+  hero.reviewedPrevious=null;
+  hero.strokeContacts.clear();
+  hero.trailSeries++;
+  hero.attackHits.clear();
   hero.skillHits.clear();
   hero.impactDone = false;
   hero.globalImpactDone = false;
@@ -1148,10 +1229,10 @@ function castSkill(index) {
   hero.dashDirection.set(Math.sin(hero.angle), 0, Math.cos(hero.angle));
   destinationMarker.visible = false;
   safeAudio("weaponSkill", currentWeapon.id, index);
-  weaponFx.skill(currentWeapon.id, hero.pos, hero.angle, index);
+  if(!reviewed)weaponFx.skill(currentWeapon.id, hero.pos, hero.angle, index);
   fx.ring(
     hero.pos,
-    index === 3 ? weaponSkillRadius(4.8) : 1.7,
+    reviewed?0.65:index === 3 ? weaponSkillRadius(4.8) : 1.7,
     index === 3 ? 0xaacbe7 : currentWeapon.effectColor,
     0.4,
   );
@@ -1268,6 +1349,10 @@ function updateHero(frameDt) {
       hero.attackTarget.state !== "dead" &&
       phase < move.contact + 0.12
     ) {
+      if(getReviewedAttack(currentWeapon.id,hero.combo)){
+        locomotion(dt,null);
+        hero.attackCarry=THREE.MathUtils.clamp(hero.moveVelocity.length()/maxSpeed,0,1);
+      } else {
       const direction = hero.attackTarget.pos.clone().sub(hero.pos),
         distance = direction.length();
       locomotion(
@@ -1278,15 +1363,16 @@ function updateHero(frameDt) {
         Math.max(0.65, move.reach * 0.66 + hero.attackTarget.radius * 0.35),
       );
       hero.attackCarry = 0;
+      }
     } else locomotion(dt, null);
     const window = attackWindows[hero.combo];
     if (
       dt > 0 &&
-      phase >= attackContacts[hero.combo] &&
+      !getReviewedAttack(currentWeapon.id,hero.combo) && phase >= attackContacts[hero.combo] &&
       previousPhase < window[1]
     )
       attackHit(Math.min(phase, window[1]));
-    if (travelling && hero.hitDone && phase >= 0.66) {
+    if (travelling && hero.hitDone && phase >= (getReviewedAttack(currentWeapon.id,hero.combo)?Math.max(.66,window[1]+.08):.66)) {
       hero.combo = (hero.combo + 1) % 4;
       hero.comboTimer = 0;
       hero.nextAttackIn = 0.12;
@@ -1299,7 +1385,7 @@ function updateHero(frameDt) {
       if (
         next &&
         hero.pos.distanceTo(next.pos) <
-          attackRanges[hero.combo] + next.radius + 0.35 &&
+          (getReviewedAttack(currentWeapon.id,hero.combo)?attackRanges[hero.combo]*.8+next.radius*.35+.1:attackRanges[hero.combo] + next.radius + 0.35) &&
         hero.mount <= 0 &&
         !(hero.flight > 0)
       )
@@ -1309,6 +1395,10 @@ function updateHero(frameDt) {
   } else if (hero.state === "skill") {
     const phase = hero.elapsed / hero.duration,
       index = hero.skillIndex;
+    const reviewed = getReviewedAttack(currentWeapon.id,index,'skill');
+    if (reviewed) {
+      locomotion(dt,null);
+    } else {
     hero.ghostTimer -= dt;
     if ((index === 0 || index === 1) && hero.ghostTimer <= 0) {
       fx.ghost(hero.rig);
@@ -1368,6 +1458,7 @@ function updateHero(frameDt) {
           2.6,
         );
     }
+    }
     hero.moveVelocity.multiplyScalar(Math.exp(-dt * 25));
     if (phase >= 1) locomotionState();
   } else if (hero.state === "hurt" || hero.state === "dead") {
@@ -1380,7 +1471,7 @@ function updateHero(frameDt) {
     if (
       enemy &&
       hero.pos.distanceTo(enemy.pos) <
-        attackRanges[hero.combo] + enemy.radius - 0.12 &&
+        (getReviewedAttack(currentWeapon.id,hero.combo)?attackRanges[hero.combo]*.8+enemy.radius*.35+.1:attackRanges[hero.combo] + enemy.radius - 0.12) &&
       hero.disengage <= 0 &&
       hero.nextAttackIn <= 0 &&
       hero.mount <= 0 &&
@@ -1417,11 +1508,14 @@ function updateHero(frameDt) {
     }
   }
   clampPosition(hero.pos);
+  const reviewedMotion = getReviewedAttack(currentWeapon.id,
+    hero.state === 'skill' ? hero.skillIndex : hero.combo, hero.state);
+  if (reviewedMotion) hero.attackCarry = THREE.MathUtils.clamp(hero.moveVelocity.length() / maxSpeed, 0, 1);
   const moved = hero.pos.distanceTo(previousPosition);
   const locomoting =
     hero.state === "run" ||
     hero.state === "idle" ||
-    (hero.state === "attack" && hero.attackCarry > 0.05);
+    ((hero.state === "attack" || (hero.state === "skill" && reviewedMotion)) && hero.attackCarry > 0.05);
   const previousFoot = Math.floor(hero.gaitPhase / Math.PI);
   if (locomoting)
     hero.gaitPhase +=
@@ -1487,6 +1581,8 @@ function updateHero(frameDt) {
   });
   hero.rig.group.updateMatrixWorld(true);
   const tips = hero.rig.weaponTips();
+  const blades = hero.rig.weaponBlades();
+  if(dt>0&&(hero.state==='attack'||hero.state==='skill'))reviewedStrike(phase,blades);
   const active =
     !switched &&
     dt > 0 &&
@@ -1494,8 +1590,7 @@ function updateHero(frameDt) {
       phase >= attackWindows[hero.combo][0] &&
       phase <= attackWindows[hero.combo][1]) ||
       (hero.state === "skill" && phase > 0.25 && phase < 0.8));
-  for (let i = 0; i < trails.length; i++)
-    fx.sample(trails[i], tips[i], hero.pos, active && !!tips[i], frameDt);
+  sampleHeroTrails(blades,tips,phase,frameDt,active&&!switched);
 }
 function beginEnemyAttack(e) {
   e.state = "attack";
@@ -2302,7 +2397,7 @@ function updatePresentation(dt) {
         phase = Math.min(1, remaining / move.duration);
         if (phase >= move.contact && hero.previewContact !== i) {
           hero.previewContact = i;
-          weaponFx.attack(currentWeapon.id, hero.pos, hero.angle, i);
+          if(!getReviewedAttack(currentWeapon.id,i))weaponFx.attack(currentWeapon.id, hero.pos, hero.angle, i);
         }
         break;
       }
@@ -2341,7 +2436,7 @@ function updatePresentation(dt) {
   rig.group.updateMatrixWorld(true);
   const tips = rig.weaponTips();
   const active = state === "attack" && phase >= attackWindows[comboIndex][0] && phase <= attackWindows[comboIndex][1];
-  for (let i = 0; i < trails.length; i++) fx.sample(trails[i], tips[i], hero.pos, active && !!tips[i], dt);
+  sampleHeroTrails(rig.weaponBlades(),tips,phase,dt,active);
   fx.update(dt);
   weaponFx.update(dt);
   if (mode !== "start") {

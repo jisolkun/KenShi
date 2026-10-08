@@ -1,4 +1,5 @@
 // Weapon definitions are data only; motion and rendering consume the same timings.
+import { getReviewedAttack } from './choreography/index.js';
 export const DEFAULT_WEAPON_ID = 'dual-dao';
 export const SKILL_CONTACTS = [0.3, 0.38, 0.72, 0.4, 0.4];
 export const WEAPONS = [
@@ -30,5 +31,35 @@ export const WEAPONS = [
   {"id": "judge-brush", "name": "判官笔", "category": "奇门", "tagline": "笔锋点穴，落字封喉", "description": "双持短笔状兵器集中力量于尖端，以快步点刺连续命中。", "grip": "dual", "effectColor": 16761707, "effectAccent": 15137791, "stats": {"speed": 5, "power": 2, "reach": 1}, "skillNames": ["落点", "连字", "挑笔", "封喉", "绝式·封喉"], "moves": [{"name": "落点", "duration": 0.26, "contact": 0.442, "active": [0.3, 0.62], "damage": 22.25, "reach": 1.4, "shape": "thrust", "halfAngle": 0.31, "width": 0.33, "lunge": 0.775, "knockback": 0.54, "hitstop": 0.036}, {"name": "连字", "duration": 0.291, "contact": 0.492, "active": [0.335, 0.645], "damage": 24.92, "reach": 1.48, "shape": "thrust", "halfAngle": 0.31, "width": 0.34, "lunge": 0.548, "knockback": 0.61, "hitstop": 0.039}, {"name": "挑笔", "duration": 0.244, "contact": 0.392, "active": [0.37, 0.67], "damage": 20.03, "reach": 1.32, "shape": "arc", "halfAngle": 1.55, "width": 0.386, "lunge": 0.905, "knockback": 0.68, "hitstop": 0.042}, {"name": "封喉", "duration": 0.369, "contact": 0.562, "active": [0.405, 0.695], "damage": 36.71, "reach": 1.61, "shape": "thrust", "halfAngle": 0.31, "width": 0.34, "lunge": 0.658, "knockback": 0.75, "hitstop": 0.045}]},
   {"id": "battle-yue", "name": "战钺", "category": "重兵", "tagline": "广刃战钺，威断山河", "description": "宽大的单面钺刃装在长柄上，沉重横斩与钩拉兼具压迫力。", "grip": "twohand", "effectColor": 11589887, "effectAccent": 16769443, "stats": {"speed": 2, "power": 5, "reach": 4}, "skillNames": ["开疆", "挂岳", "断河", "定鼎", "绝式·定鼎"], "moves": [{"name": "开疆", "duration": 0.71, "contact": 0.454, "active": [0.3, 0.62], "damage": 34.42, "reach": 3.2, "shape": "arc", "halfAngle": 1.276, "width": 0.467, "lunge": 0.57, "knockback": 0.904, "hitstop": 0.057}, {"name": "挂岳", "duration": 0.795, "contact": 0.504, "active": [0.335, 0.645], "damage": 38.55, "reach": 3.39, "shape": "hook", "halfAngle": 1.12, "width": 0.495, "lunge": 0.416, "knockback": 0.974, "hitstop": 0.06}, {"name": "断河", "duration": 0.667, "contact": 0.404, "active": [0.37, 0.67], "damage": 30.98, "reach": 3.01, "shape": "crush", "halfAngle": 1.186, "width": 0.523, "lunge": 0.658, "knockback": 1.044, "hitstop": 0.063}, {"name": "定鼎", "duration": 1.008, "contact": 0.574, "active": [0.405, 0.695], "damage": 56.79, "reach": 3.68, "shape": "radial", "halfAngle": 3.142, "width": 0.551, "lunge": 0.491, "knockback": 1.114, "hitstop": 0.066}]},
 ];
+const reviewedMoveNames={
+  'dual-dao':['右斜劈','左接斩','反手撩切','错锋双斩'],
+  'tang-dao':['斜切','横截','直刺','中线落劈'],
+  'yanling-dao':['横抹','撩锋','斜落','抽步反切'],
+  'miao-dao':['踏步劈刀','转胯横切','蹬步撩刀','中线长刺'],
+  'ring-dao':['蓄肩横斩','举刀重劈','压刃斜削','沉身斜劈'],
+};
+const reviewedSkillNames={
+  'dual-dao':['双锋进斩','轮锋连切','落锋撩返','错刃剪击','绝式·四门连斩'],
+  'tang-dao':['斜切进刺','横截返切','落劈回撩','刺锋截流','绝式·三门破阵'],
+  'yanling-dao':['横抹撩锋','斜落返抹','撩锋落雁','抽步反撩','绝式·三翎连切'],
+  'miao-dao':['踏劈进刺','横江返斩','撩月落锋','长刺横截','绝式·三门长锋'],
+  'ring-dao':['蓄肩落岳','举刀返斩','压刃沉锋','沉斩横截','绝式·三叠开山'],
+};
+const reviewedDescriptions={
+  'dual-dao':'左右短刀交替斜劈与撩切，错锋双斩逐刀接续，空闲刀保持低位护持。',
+  'tang-dao':'单手直刃以短幅斜切、翻刃横截和前送直刺破防，空手护肋，中线落劈收势。',
+  'yanling-dao':'轻曲刀尖配合腰高横抹、低位撩切和侧上斜落，抬脚撤步后转胯反切。',
+  'miao-dao':'双手握住长柄，以踏步落劈、转胯宽横切、蹬步撩刀和中线长刺发挥长刃距离。',
+  'ring-dao':'双手厚背阔刃，肩蓄横斩、举刀重劈与低位压刃相接；沉身斜劈后长程制动，九环滞后摆动。',
+};
+for(const weapon of WEAPONS){
+  if(reviewedSkillNames[weapon.id]&&getReviewedAttack(weapon.id,0))weapon.skillNames=reviewedSkillNames[weapon.id];
+  if(reviewedDescriptions[weapon.id]&&getReviewedAttack(weapon.id,0))weapon.description=reviewedDescriptions[weapon.id];
+  weapon.moves.forEach((move,combo)=>{
+    const action=getReviewedAttack(weapon.id,combo);
+    if(!action)return;
+    Object.assign(move,{name:reviewedMoveNames[weapon.id][combo],duration:action.duration,contact:action.contact,active:action.active,reach:action.reach,shape:action.kind==='thrust'?'thrust':action.kind==='chop'?'crush':'arc',width:action.width,halfAngle:action.kind==='thrust'?.28:.95,reviewed:true});
+  });
+}
 const weaponById = new Map(WEAPONS.map(weapon => [weapon.id, weapon]));
 export function getWeapon(id) { return weaponById.get(id) || weaponById.get(DEFAULT_WEAPON_ID); }

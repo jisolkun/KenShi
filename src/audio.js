@@ -132,18 +132,19 @@ export function createAudio() {
     'meteor-hammer':[950,480,1.8,'chain'], 'judge-brush':[4100,2740,0.55,'brush'],
     'battle-yue':[1050,550,1.85,'heavy'],
   };
-  function weaponSlash(id, combo = 0) {
+  function weaponSlash(id, combo = 0, technique = null) {
     if (!ready() || context.currentTime - lastSlash < 0.06) return;
     lastSlash = context.currentTime;
     const [air, metal, weight, kind] = weaponVoices[id] || weaponVoices['tang-dao'];
     const pitch = [1.04,0.94,1.12,0.86][Math.abs(combo)%4];
-    const shape=getWeapon(id).moves[((combo%4)+4)%4].shape;
+    const shape=technique === 'thrust' ? 'thrust' : technique === 'chop' ? 'crush'
+      : technique === 'cut' ? 'arc' : getWeapon(id).moves[((combo%4)+4)%4].shape;
     const duration = (0.085 + weight * 0.035)*(shape==='thrust'?0.72:shape==='radial'?1.3:1);
     if(shape==='crush')tone(110,37,0.14,0.065,'sine',0.015,0.005);
     if(shape==='thrust')noise(0.045,0.09,air*1.3,air*0.8,'highpass',0,0.002);
     noise(duration,0.19+weight*0.04,air*pitch,air*0.32,weight>1.5?'bandpass':'highpass',0,0.006);
     tone(metal*pitch,metal*0.45,duration,0.025,'triangle',0.005,0.003);
-    if (kind.includes('double')) {
+    if (kind.includes('double') && !technique) {
       noise(duration*0.75,0.16,air/pitch,air*0.4,'highpass',0.037,0.004);
       tone(metal*1.2,metal*0.6,0.09,0.018,'triangle',0.04,0.003);
     }
