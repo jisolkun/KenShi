@@ -7,7 +7,7 @@
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "test": "node tests/gameplay.mjs"
+    "test": "node tests/animation.mjs && node tests/gameplay.mjs"
   },
   "dependencies": {
     "three": "^0.180.0"

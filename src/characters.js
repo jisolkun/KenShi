@@ -11,7 +11,8 @@ const materials = {
   eyes: new THREE.MeshStandardMaterial({ color: '#d7fbb8', emissive: '#8bea71', emissiveIntensity: 1.65, roughness: .5 }),
 };
 const boneNames = ['hips', 'body', 'head', 'leftArm', 'rightArm', 'leftForearm', 'rightForearm',
-  'leftLeg', 'rightLeg', 'leftShin', 'rightShin', 'weapon', 'scarf', 'cape', 'skirtLeft', 'skirtRight'];
+  'leftHand', 'rightHand', 'leftLeg', 'rightLeg', 'leftShin', 'rightShin', 'leftFoot', 'rightFoot',
+  'weapon', 'scarf', 'scarfTip', 'cape', 'capeTail', 'skirtLeft', 'skirtRight'];
 
 function cached(key, make) {
   if (!geometryCache.has(key)) geometryCache.set(key, make());
@@ -261,9 +262,17 @@ function addLimbs(body, hips, p, hero, brute, archer) {
     plate(forearm, p.ironLight, [[-.071, .09], [.07, .09], [.06, -.094], [-.057, -.108]], 0, -.185, .100,
       [1, 1, 1], [-.04, 0, 0]);
     for (const y of [-.098, -.267]) part(forearm, section([[y, .103, .102], [y + .022, .105, .104]], 10), p.gold, [0, 0, 0], [1, 1, 1], [0, 0, 0], 'metal');
-    ball(forearm, p.skin, 0, -.388, .007, .077, .092, .071);
-    ball(forearm, p.skin, side * -.060, -.385, .033, .037, .05, .033);
-    bar(forearm, hero ? '#a8896b' : '#65745c', [-.045, -.423, .055], [.047, -.423, .055], .007);
+    // A real wrist carries the hand and weapon together. Fingers wrap around
+    // the grip; the thumb crosses it rather than floating beside the blade.
+    const hand = bone(forearm, `${prefix}Hand`, 0, -.35, 0);
+    ball(hand, p.leather, 0, -.026, -.010, .069, .069, .052);
+    for (let finger = 0; finger < 4; finger++) {
+      part(hand, cached('knuckle', () => new THREE.SphereGeometry(1, 8, 5)), p.skin,
+        [-.043 + finger * .028, -.056, .043], [.017, .042, .025]);
+      bar(hand, hero ? '#ad8469' : '#65745c', [-.051 + finger * .028, -.06, .063], [-.034 + finger * .028, -.06, .063], .004);
+    }
+    ball(hand, p.skin, side * -.054, -.016, .043, .031, .049, .028);
+    plate(hand, p.iron, [[-.047, .03], [.047, .03], [.044, -.034], [-.035, -.043]], 0, -.014, -.053, [1, 1, 1], [0, 0, 0], 'cloth');
 
     const leg = bone(hips, `${prefix}Leg`, side * .167, -.083, -.002);
     part(leg, section([[-.475, .105, .104], [-.25, .13, .137], [.016, .138, .145]], 10), p.dark);
@@ -272,15 +281,17 @@ function addLimbs(body, hips, p, hero, brute, archer) {
     part(shin, section([[-.365, .082, .078], [-.21, .096, .10], [.006, .103, .106]], 10), p.leather);
     plate(shin, p.ironLight, [[-.069, .018], [.068, .018], [.069, -.205], [.039, -.296], [-.046, -.294], [-.07, -.197]], 0, -.05, .088);
     bar(shin, p.gold, [-.066, -.068, .111], [.066, -.068, .111], .009, 'metal');
-    // An angled instep and flattened sole look like fitted leather boots.
-    part(shin, section([[-.539, .105, .175, .061], [-.502, .115, .187, .063], [-.443, .104, .165, .058], [-.36, .082, .081, -.002]], 10), p.leather);
-    part(shin, section([[-.541, .113, .188, .067], [-.511, .116, .19, .068]], 10), '#242d2b');
-    bar(shin, p.gold, [-.084, -.439, .127], [.084, -.439, .127], .009, 'metal');
+    // Independent ankles allow planted soles and a toe-first running lift.
+    const foot = bone(shin, `${prefix}Foot`, 0, -.425, 0);
+    part(foot, section([[-.116, .101, .174, .058], [-.087, .111, .183, .060], [-.025, .098, .151, .054], [.065, .081, .080, -.002]], 12), p.leather);
+    part(foot, section([[-.116, .106, .181, .063], [-.09, .112, .187, .064]], 12), '#202a27');
+    plate(foot, p.iron, [[-.068, .043], [.068, .043], [.082, -.035], [.038, -.076], [-.048, -.07]], 0, -.015, .192, [1, .57, 1], [-.52, 0, 0], 'cloth');
+    bar(foot, p.gold, [-.075, -.014, .142], [.075, -.014, .142], .008, 'cloth');
   }
 }
 
 function addSword(forearm, p, heavy = false) {
-  const weapon = bone(forearm, 'weapon', 0, -.39, .034);
+  const weapon = bone(forearm, 'weapon', 0, -.04, .034);
   // Blade axis is +Y; the default wrist points it forward along character +Z.
   weapon.rotation.x = Math.PI / 2;
   bar(weapon, '#3c4035', [0, -.16, 0], [0, .13, 0], .046);
@@ -290,16 +301,19 @@ function addSword(forearm, p, heavy = false) {
   ball(weapon, p.gold, 0, -.175, 0, .065, .045, .058, 'metal');
   part(weapon, section([[.125, .12, .067], [.18, .152, .075], [.205, .11, .051]], 10), p.gold, [0, 0, 0], [1, 1, 1], [0, 0, 0], 'metal');
   const blade = [[-.053, .20], [.10, .20], [.119, .63], [.153, 1.13], [.221, 1.58], [.092, 1.89], [-.01, 1.71], [-.038, 1.19]];
-  const width = heavy ? 1.75 : 1;
+  const width = heavy ? 1.65 : .90;
   plate(weapon, '#b5cac8', blade, 0, 0, 0, [width, 1, 1], [0, 0, 0], 'metal', heavy ? .065 : .032);
   // Polished cutting edge and a darker fuller make the dao read as forged steel.
   plate(weapon, '#f1f0d9', [[.095, .23], [.111, .63], [.145, 1.13], [.211, 1.58], [.092, 1.89], [.123, 1.55], [.087, 1.09], [.072, .25]], 0, 0, .025, [width, 1, 1], [0, 0, 0], 'metal', .007);
   plate(weapon, '#829c99', [[-.028, .28], [.001, .28], [.025, 1.36], [.058, 1.66], [.012, 1.56]], 0, 0, .024, [width, 1, 1], [0, 0, 0], 'metal', .006);
+  // A slim dao has a readable point and a weighted guard without overwhelming
+  // the body's silhouette. Scale blade and fittings as a single forged object.
+  weapon.scale.set(1, heavy ? .94 : .84, 1);
   return weapon;
 }
 
 function addBow(forearm, body, p) {
-  const weapon = bone(forearm, 'weapon', 0, -.39, .036);
+  const weapon = bone(forearm, 'weapon', 0, -.04, .036);
   weapon.rotation.z = -.19;
   const points = [[0, -.70, 0], [.16, -.55, .014], [.245, -.29, .017], [.19, 0, .018], [.25, .31, .013], [.16, .55, .006], [0, .72, 0]];
   for (let i = 0; i < points.length - 1; i++) bar(weapon, i % 2 ? '#c5a36d' : '#947449', points[i], points[i + 1], .035);
@@ -316,28 +330,53 @@ function addBow(forearm, body, p) {
   }
 }
 
+// A folded textile surface. Adjacent rows share a crease and preserve volume
+// in silhouette; both sides are baked so the cape reads during a full spin.
+function textile(rows) {
+  return cached(`textile:${JSON.stringify(rows)}`, () => {
+    const vertices = [], indices = [];
+    for (const [y, width, z, fold] of rows) {
+      for (const u of [-1, -.5, 0, .5, 1]) vertices.push(u * width, y, z + (Math.abs(u) === .5 ? fold : 0));
+    }
+    for (let row = 0; row < rows.length - 1; row++) for (let col = 0; col < 4; col++) {
+      const a = row * 5 + col, b = a + 1, c = a + 5, d = c + 1;
+      indices.push(a, c, b, b, c, d, b, c, a, d, c, b);
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    geometry.setIndex(indices); geometry.computeVertexNormals();
+    // Opposite faces require separate normals instead of cancelling at a vertex.
+    const flat = geometry.toNonIndexed(); flat.computeVertexNormals(); geometry.dispose();
+    return flat;
+  });
+}
+
 function addHeroCloth(body, hips, p) {
-  const cape = bone(body, 'cape', -.06, .53, -.176);
-  plate(cape, '#315b53', [[-.20, .075], [.22, .04], [.30, -.45], [.29, -.96], [.12, -1.11], [-.17, -1.03], [-.28, -.77], [-.28, -.27]],
-    0, 0, -.102, [1, 1, 1], [.16, -.1, -.045], 'cloth', .018);
-  plate(cape, '#457c6b', [[-.035, .045], [.06, .024], [.16, -.49], [.10, -1.044], [.006, -1.093], [-.056, -.68]],
-    0, 0, -.11, [1, 1, 1], [.16, -.1, -.045], 'cloth', .010);
-  bar(cape, '#b0a576', [-.16, -1.025, -.282], [.09, -1.096, -.294], .011);
-  const scarf = bone(body, 'scarf', .008, .69, -.069);
-  // Two long, tapering black hair ribbons; an ochre sash adds a restrained accent.
+  const cape = bone(body, 'cape', -.045, .54, -.215);
+  part(cape, textile([[.04, .205, -.01, -.025], [-.18, .252, -.07, -.045], [-.48, .278, -.075, -.055]]), '#285747');
+  const tail = bone(cape, 'capeTail', 0, -.46, -.075);
+  part(tail, textile([[.0, .278, 0, -.055], [-.30, .302, -.025, -.065], [-.62, .258, -.015, -.035]]), '#34755e');
+  // Sewn gold edging and a jade central facing catch light on the moving hem.
+  part(tail, textile([[-.566, .265, -.013, -.04], [-.605, .261, -.016, -.037], [-.62, .258, -.017, -.035]]), '#b3a374');
+  part(cape, textile([[.03, .055, -.039, -.012], [-.18, .065, -.104, -.018], [-.479, .072, -.11, -.012]]), '#568d70');
+  part(tail, textile([[0, .072, -.035, -.012], [-.3, .082, -.068, -.014], [-.565, .07, -.04, -.012]]), '#568d70');
+  const scarf = bone(body, 'scarf', .005, 1.18, -.10);
   for (const side of [-1, 1]) {
-    plate(scarf, '#293e39', [[-.031, .02], [.038, .025], [.094, -.33], [.14, -.65], [.076, -.80], [.034, -.68], [.011, -.37]],
-      side * .06, .245, -.034, [1, 1, 1], [-.58, side * .25, side * .16], 'cloth', .011);
+    part(scarf, textile([[0, .024, 0, -.006], [-.22, .026, -.03, -.009], [-.42, .025, -.06, -.008]]), '#243c34', [side * .063, 0, 0], [1, 1, 1], [.18, side * .17, side * .12]);
   }
+  const tip = bone(scarf, 'scarfTip', 0, -.39, -.06);
+  for (const side of [-1, 1]) part(tip, textile([[0, .025, 0, -.008], [-.20, .028, -.02, -.01], [-.36, .012, -.035, -.005]]), '#354f40', [side * .11, 0, 0], [1, 1, 1], [0, 0, side * .10]);
   const sash = [[-.045, .03], [.05, .022], [.073, -.23], [.167, -.46], [.11, -.57], [.038, -.49], [-.018, -.25]];
-  plate(hips, '#b88449', sash, -.24, -.028, -.015, [1, 1, 1], [-.28, -.25, -.14], 'cloth');
-  // The scabbard is fixed at the belt; its curved tapered body hangs at the hip.
+  plate(hips, '#a77840', sash, -.24, -.028, -.015, [1, 1, 1], [-.28, -.25, -.14], 'cloth');
   const sheath = [[-.060, .45], [.06, .45], [.065, -.56], [.02, -.73], [-.052, -.67]];
-  plate(body, '#233f39', sheath, -.315, -.16, -.207, [1, 1, 1], [0, .10, -.30], 'cloth', .082);
-  for (const y of [.22, -.24, -.73]) {
-    bar(body, p.gold, [-.39 - y * .27, y, -.166], [-.29 - y * .27, y - .03, -.166], .016, 'metal');
+  // The sheath follows the pelvis, so twisting the chest cannot swing it into
+  // the planted legs. Its suspension rings are attached to the belt itself.
+  plate(hips, '#203b32', sheath, -.37, .07, -.19, [.85, .92, 1], [0, .10, -.35], 'cloth', .075);
+  for (const y of [.39, -.04, -.49]) bar(hips, p.gold, [-.44 - y * .30, y, -.15], [-.345 - y * .30, y - .03, -.15], .013, 'metal');
+  for (const side of [-1, 1]) {
+    ball(body, p.gold, side * .26, .535, .168, .043, .046, .025, 'metal');
+    bar(body, '#cdb879', [side * .26, .525, .19], [side * .13, .45, .225], .01, 'metal');
   }
-  ball(body, '#d0bc7d', -.26, .535, .168, .044, .047, .023, 'metal');
 }
 
 function bake(root, type) {
@@ -365,8 +404,8 @@ function bake(root, type) {
 function makeTemplate(type) {
   const hero = type === 'hero', brute = type === 'brute' || type === 'boss', archer = type === 'archer';
   const p = hero ? {
-    cloth: '#397d6a', dark: '#264e49', linen: '#e9e7ce', skin: '#d3ad88', hair: '#202a29',
-    iron: '#4f7164', ironLight: '#779079', gold: '#baaa6c', leather: '#3b4234',
+    cloth: '#34755d', dark: '#203e35', linen: '#ede7ce', skin: '#d4ac87', hair: '#1b2925',
+    iron: '#3c5a50', ironLight: '#6d8c75', gold: '#c1aa6a', leather: '#343b2c',
   } : {
     cloth: brute ? '#785947' : archer ? '#677061' : '#80675a', dark: '#414f45', linen: '#b9b697',
     skin: brute ? '#8f9a7a' : archer ? '#9cac8e' : '#a2b798', hair: '#39443a',
@@ -380,7 +419,7 @@ function makeTemplate(type) {
   addTorso(body, hips, p, hero, brute, archer);
   addLimbs(body, hips, p, hero, brute, archer);
   addHead(head, p, hero, archer, brute);
-  const forearm = body.getObjectByName('rightForearm');
+  const forearm = body.getObjectByName('rightHand');
   if (archer) addBow(forearm, body, p); else addSword(forearm, p, brute);
   if (hero) addHeroCloth(body, hips, p);
   if (brute) root.scale.set(1.31, 1.16, 1.28);
@@ -405,7 +444,9 @@ function character(type) {
   // gameplay disposer must never free it when an individual enemy dies.
   group.userData.ownedGeometries = new Set();
   group.userData.bladeAxis = '+Y';
-  group.userData.bladeLength = type === 'archer' ? 0 : 1.69;
+  group.userData.bladeLength = type === 'archer' ? 0 : 1.69 * (type === 'hero' || type === 'soldier' ? .84 : .94);
+  group.userData.archetype = type;
+  group.userData.legLengths = { thigh: .474, shin: .425, sole: .116 };
   return group;
 }
 

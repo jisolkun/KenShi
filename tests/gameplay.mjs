@@ -172,6 +172,20 @@ async function touchGesture(page, points, hold = 0) {
   } finally { await session.detach(); }
 }
 
+async function touchSwipe(page, points) {
+  const session = await page.context().newCDPSession(page);
+  const point = p => ({ x: p.x, y: p.y, radiusX: 2, radiusY: 2, force: 1, id: 1 });
+  try {
+    // Queue the native contact path in protocol order. Waiting for a rendered
+    // frame between every point makes slow software WebGL look like a long press.
+    await Promise.all([
+      session.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [point(points[0])] }),
+      ...points.slice(1).map(next => session.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [point(next)] })),
+      session.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }),
+    ]);
+  } finally { await session.detach(); }
+}
+
 async function touchDoubleTap(page, point) {
   const session = await page.context().newCDPSession(page);
   try {
@@ -236,7 +250,7 @@ async function mobileChecks(context, label) {
     const x = rect.x + rect.width / 2, y = rect.y + rect.height / 2;
     return rotated ? [{ x, y: y - 70 }, { x, y }, { x, y: y + 70 }] : [{ x: x - 70, y }, { x, y }, { x: x + 70, y }];
   });
-  await touchGesture(page, swipe);
+  await touchSwipe(page, swipe);
   const afterSwipe = await until(page, state => state.sp < beforeSwipe.sp - 3, 5000, 'real touch swipe finisher');
   assert.equal(afterSwipe.cooldowns.burst, 0, 'Touch swipe must have its own cooldown');
 
