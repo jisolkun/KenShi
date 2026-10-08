@@ -101,7 +101,7 @@ export function equipWeapon(rig,id) {
       const heel=mark(root,-.12),tip=mark(root,-lengths[id]),edge=mark(root,-lengths[id]*.55,.15),face=mark(root,-lengths[id]*.55,0,.15);
       rig.weaponBladeFrames.push({hand:side,root,heel,tip,edge,face});
     }
-    if(def.grip==='twohand')rig.offhandGrip=mark(root,id==='tang-dao'?.39:.25);
+    if(def.grip==='twohand')rig.offhandGrip=mark(root,id==='tang-dao'?.209:.25);
     merge(root,`${id}:${side}`);
   }
   rig.swords=rig.arms.map(a=>a.weapon);

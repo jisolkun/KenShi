@@ -6,6 +6,23 @@ export function bladeOrientation(axis,edge=[1,0,0]) {
 }
 const orientation=bladeOrientation;
 const caches=new Map();
+// One front plane includes armour, straps and palm radius. Intersecting convex
+// half-spaces and reach spheres keeps the shaft continuous at high carries;
+// height-dependent clearance envelopes can abruptly switch projection branches.
+const palmFront=.35;
+export function constrainPairedGrip(primary,axis,spec){
+ const right=v([.29,.365,spec.shoulderForward??0]),left=v([-.29,.365,spec.shoulderForward??0]);
+ const separation=axis.clone().multiplyScalar(-spec.supportDistance),reach=spec.armReach??.545;
+ for(let n=0;n<(spec.handClearance?32:8);n++){
+  const r=primary.clone().sub(right);if(r.length()>reach)primary.copy(right).add(r.setLength(reach));
+  const l=primary.clone().add(separation).sub(left);if(l.length()>reach)primary.copy(left).add(l.setLength(reach)).sub(separation);
+  if(spec.handClearance)for(const offset of [.029,.029-spec.supportDistance]){
+   const palm=primary.clone().addScaledVector(axis,offset);
+   if(palm.z<palmFront)primary.z+=palmFront-palm.z;
+  }
+ }
+ return primary;
+}
 function interpolate(keys,p,field) {
  let i=0;while(i<keys.length-2&&p>keys[i+1].p)i++;
  const a=keys[i],b=keys[i+1],dt=b.p-a.p,t=THREE.MathUtils.clamp((p-a.p)/dt,0,1);
@@ -38,7 +55,7 @@ function raw(spec,tracks,p) {
  }
  const transform=authoredChestTransform(stance);
  const inverse=transform.q.clone().invert();
- const hands=tracks.tracks.map((track,i)=>{const shoulder=v([i?.29:-.29,.365,0]);const grip=v(interpolate(track,p,'grip'));if(spec.rootFrame)grip.add(v([0,1.025,0])).sub(transform.position).applyQuaternion(inverse);const offset=grip.sub(shoulder);const length=offset.length();if(length>.51)offset.setLength(.548-.038*Math.exp(-(length-.51)/.038));return {grip:offset.add(shoulder).toArray(),axis:(spec.rootFrame&&track[0].angles?(()=>{const [azimuth,rawTilt]=interpolate(track,p,'angles'),tilt=Math.max(-.54,rawTilt);return v([Math.sin(azimuth)*Math.cos(tilt),Math.sin(tilt),Math.cos(azimuth)*Math.cos(tilt)]);})():v(interpolate(track,p,'axis')).normalize()).applyQuaternion(spec.rootFrame?inverse:new THREE.Quaternion())};});
+ const hands=tracks.tracks.map((track,i)=>{const shoulder=v([i?.29:-.29,.365,spec.shoulderForward??0]);const grip=v(interpolate(track,p,'grip'));if(spec.rootFrame)grip.add(v([0,1.025,0])).sub(transform.position).applyQuaternion(inverse);const offset=grip.sub(shoulder);const length=offset.length();if(length>.51)offset.setLength(.548-.038*Math.exp(-(length-.51)/.038));return {grip:offset.add(shoulder).toArray(),axis:(spec.rootFrame&&track[0].angles?(()=>{const [azimuth,rawTilt]=interpolate(track,p,'angles'),tilt=Math.max(-.54,rawTilt);return v([Math.sin(azimuth)*Math.cos(tilt),Math.sin(tilt),Math.cos(azimuth)*Math.cos(tilt)]);})():v(interpolate(track,p,'axis')).normalize()).applyQuaternion(spec.rootFrame?inverse:new THREE.Quaternion())};});
  for(const lane of spec.pointLanes??[]){
   const t=THREE.MathUtils.clamp((Math.abs(p-lane.phase)-lane.inner)/(lane.outer-lane.inner),0,1),weight=1-t*t*(3-2*t),h=hands[lane.hand];
   h.grip[0]=THREE.MathUtils.lerp(h.grip[0],lane.x,weight);
@@ -49,12 +66,8 @@ function raw(spec,tracks,p) {
   // Constrain the shaft's primary grip to the intersection of both arm
   // spheres. Derive the support only after this projection; independent
   // clamping would separate the two hands from the physical hilt.
-  const h=hands[1],primary=v(h.grip),right=v([.29,.365,0]),left=v([-.29,.365,0]);
+  const h=hands[1],primary=constrainPairedGrip(v(h.grip),h.axis,spec);
   const separation=h.axis.clone().multiplyScalar(-spec.supportDistance);
-  for(let n=0;n<8;n++){
-   const r=primary.clone().sub(right);if(r.length()>.545)primary.copy(right).add(r.setLength(.545));
-   const l=primary.clone().add(separation).sub(left);if(l.length()>.545)primary.copy(left).add(l.setLength(.545)).sub(separation);
-  }
   h.grip=primary.toArray();hands[0]={grip:primary.clone().add(separation).toArray(),axis:h.axis.clone()};
  }
  return {hands,stance};

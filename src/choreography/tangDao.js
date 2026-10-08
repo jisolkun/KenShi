@@ -3,9 +3,11 @@ import { bladeOrientation, sampleAuthoredTracks } from './trajectory.js';
 
 // A modern straight, single-edge long-handle design. Waist-led stepping and
 // connected cuts draw on twentieth-century saber manuals, not Tang reconstruction.
-const hand=(grip,axis)=>({grip,axis:new THREE.Vector3(...axis).normalize().toArray(),quaternion:bladeOrientation(axis).toArray()});
-const ready=hand([.25,.055,.26],[.13,-.37,.92]);
-const supportDistance=.361;
+const hand=(grip,axis,edge)=>({grip,axis:new THREE.Vector3(...axis).normalize().toArray(),quaternion:bladeOrientation(axis,edge).toArray()});
+const ready=hand([.14,.12,.40],[.88,-.32,.35],[0,-1,0]);
+// Both fists fit on the long hilt without pushing the rear hand into the ribs.
+export const TANG_GRIP={supportDistance:.18,shoulderForward:.11,armReach:.525,handClearance:true};
+const supportDistance=TANG_GRIP.supportDistance;
 const leftReady=hand(new THREE.Vector3(...ready.grip).addScaledVector(new THREE.Vector3(...ready.axis),-supportDistance).toArray(),ready.axis);
 const techniques=[
  {name:'right shoulder sweeping diagonal',chamber:hand([.30,.48,.11],[.91,.37,.16]),cross:hand([.18,.30,.54],[.03,-.12,.992]),exit:hand([-.20,.10,.19],[-.91,-.32,.16]),turn:[.62,-.72],height:.855},
@@ -13,20 +15,20 @@ const techniques=[
  {name:'rising diagonal',chamber:hand([.30,.025,.16],[.86,-.46,.20]),cross:hand([.16,.27,.55],[0,.25,.968]),exit:hand([-.14,.54,.17],[-.79,.58,.19]),turn:[.56,-.67],height:.865},
  {name:'advancing overhead cleave',chamber:hand([.24,.65,.25],[.48,.82,-.31]),cross:hand([.12,.33,.56],[-.13,.20,.971]),exit:hand([-.18,.08,.27],[-.78,-.49,.26]),turn:[.45,-.55],height:.82},
 ];
-const normals=techniques.map((t,i)=>({name:t.name,kind:i===3?'chop':'cut',sequence:[i],times:[.49],duration:[.84,.79,.76,.92][i]}));
+const normals=techniques.map((t,i)=>({name:t.name,kind:i===3?'chop':'cut',sequence:[i],times:[.49],duration:[.54,.51,.56,.60][i]}));
 const skills=[
- {name:'diagonal and reverse sweep',sequence:[0,1],times:[.32,.70],duration:1.35},
- {name:'reverse sweep and rising cut',sequence:[1,2],times:[.31,.70],duration:1.30},
- {name:'overhead cleave and rising return',sequence:[3,2],times:[.33,.72],duration:1.46},
- {name:'rising cut and descending diagonal',sequence:[2,0],times:[.31,.71],duration:1.34},
- {name:'three connected sweeping gates',sequence:[0,1,3],times:[.22,.50,.79],duration:2.10},
+ {name:'diagonal and reverse sweep',sequence:[0,1],times:[.32,.70],duration:.90},
+ {name:'reverse sweep and rising cut',sequence:[1,2],times:[.31,.70],duration:.87},
+ {name:'overhead cleave and rising return',sequence:[3,2],times:[.33,.72],duration:.97},
+ {name:'rising cut and descending diagonal',sequence:[2,0],times:[.31,.71],duration:.90},
+ {name:'three connected sweeping gates',sequence:[0,1,3],times:[.22,.50,.79],duration:1.60},
 ];
 export function getTangAttack(id,combo=0,state='attack') {
  if(id!=='tang-dao'||!['attack','skill'].includes(state))return null;
  const list=state==='skill'?skills:normals,index=((combo%list.length)+list.length)%list.length,spec=list[index];
  const half=state==='skill'?.095:.145;
  const contacts=spec.times.map((phase,i)=>({hand:1,kind:spec.sequence[i]===3?'chop':'cut',phase,time:phase,start:phase-half,end:phase+half,window:[phase-half,phase+half],edgeWindow:true}));
- return {...spec,kind:spec.kind??'cut',weaponId:id,contact:spec.times[0],active:[contacts[0].start,contacts.at(-1).end],contacts,shape:'arc',reach:2.15,width:.16,initialHands:[leftReady,ready],midLength:.764,tipLength:1.379,supportDistance,rootFrame:true,cacheKey:'tang-broad-v1:'+state+':'+index};
+ return {...spec,kind:spec.kind??'cut',weaponId:id,contact:spec.times[0],active:[contacts[0].start,contacts.at(-1).end],contacts,shape:'arc',reach:2.15,width:.16,initialHands:[leftReady,ready],midLength:.764,tipLength:1.379,...TANG_GRIP,rootFrame:true,cacheKey:'tang-fast-clear-v2:'+state+':'+index};
 }
 function tracksFor(spec){
  const right=[{p:0,...ready}],body=[{p:0,values:[0,0,-.06,0,0,.875]}];
@@ -81,7 +83,7 @@ export function sampleTangAttack(id,combo=0,phase=0,state='attack'){
 export function sampleTangReady(clock=0){
  // Low connected carry, with breathing arriving at the hands after the ribs.
  const breath=Math.sin(clock*1.8),follow=Math.sin(clock*1.8-.32);
- const right=hand([ready.grip[0],ready.grip[1]+follow*.009,ready.grip[2]], [ready.axis[0],ready.axis[1]+follow*.012,ready.axis[2]]);
+ const right=hand([ready.grip[0],ready.grip[1]+follow*.009,ready.grip[2]], [ready.axis[0],ready.axis[1]+follow*.012,ready.axis[2]], [0,-1,0]);
  const axis=new THREE.Vector3(...right.axis),q=right.quaternion;
  return {hands:[{grip:new THREE.Vector3(...right.grip).addScaledVector(axis,-supportDistance).toArray(),quaternion:q},{grip:right.grip,quaternion:q}],stance:{yaw:0,load:0,pelvisYaw:Math.sin(clock*.48)*.025,chestYaw:Math.sin(clock*.48-.25)*.018,pitch:-.06-breath*.008,shiftX:Math.sin(clock*.48)*.012,advance:0,bodyHeight:.875+breath*.004,feet:[{x:-.19,y:.075,z:.14},{x:.19,y:.075,z:-.14}]},contacts:[],name:'relaxed connected low carry'};
 }
