@@ -51,4 +51,27 @@
 }
 .game-interface[data-phone="true"]:not([data-mode="start"])[data-fullscreen="false"] .orientation-notice,
 .game-interface[data-phone="true"]:not([data-mode="start"])[data-landscape="false"] .orientation-notice{display:grid}
+.mobile-entry-overlay{
+  display:none;
+  position:absolute;
+  inset:0;
+  z-index:35;
+  width:100%;
+  height:100%;
+  padding:24px;
+  place-content:center;
+  justify-items:center;
+  gap:16px;
+  background:rgba(9,17,19,.96);
+  color:#eddec3;
+  text-align:center;
+  pointer-events:auto;
+}
+.game-interface[data-phone="true"][data-entry-ready="false"] .mobile-entry-overlay{display:grid}
+.mobile-entry-mark{width:70px;height:46px;border:2px solid #d3b47b;border-radius:9px;display:grid;place-items:center;color:#d3b47b;font:34px/1 Georgia,serif;transform:rotate(-90deg)}
+.mobile-entry-overlay>b{font-size:21px;letter-spacing:5px;color:#f0d49e}
+.mobile-entry-overlay>span:not(.mobile-entry-mark){max-width:290px;font-size:13px;letter-spacing:2px;line-height:1.9;color:#b7b9a6}
+.mobile-entry-overlay>i{margin-top:12px;font-size:11px;letter-spacing:4px;font-style:normal;color:#d3b47b;animation:entryPulse 1.2s ease-in-out infinite alternate}
+.mobile-entry-overlay:active{background:rgba(15,25,26,.98)}
 .game-interface .notification{z-index:40}
+@keyframes entryPulse{to{opacity:.55;transform:translateY(3px)}}

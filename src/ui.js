@@ -27,6 +27,9 @@ export function createUI(callbacks = {}) {
   root.dataset.phone = String(phoneBrowser);
   root.dataset.fullscreen = String(!phoneBrowser || isMobileFullscreen());
   root.dataset.landscape = String(!phoneBrowser || matchMedia('(orientation: landscape)').matches);
+  root.dataset.entryReady = String(!phoneBrowser || (
+    isMobileFullscreen() && matchMedia('(orientation: landscape)').matches
+  ));
   root.innerHTML = `
     <div class="battle-hud is-hidden">
       <div class="player-panel">
@@ -55,6 +58,12 @@ export function createUI(callbacks = {}) {
       <div class="intro-side"><span>风起荒寺</span><i></i><small>双刃出鞘 · 百鬼退散</small></div>
       <div class="intro-footer"><span>低多边形 · 国风动作</span><div><button class="text-button" data-action="sound" aria-label="切换声音">声音 · 开</button><button class="text-button" data-action="help">操作指引</button></div></div>
     </div>
+    <button class="mobile-entry-overlay" data-action="mobile-entry" aria-label="点击全屏横屏后继续游戏">
+      <span class="mobile-entry-mark" aria-hidden="true">↻</span>
+      <b>点击全屏 · 横屏进入</b>
+      <span>点击后进入全屏；若未自动横屏，请将手机转为横向</span>
+      <i>点击继续</i>
+    </button>
     <div class="modal-layer is-hidden"><section class="game-modal" role="dialog" aria-modal="true" aria-label="战场菜单"></section></div>
     <div class="notification" role="status"><span></span></div>
     <div class="damage-layer" aria-hidden="true"></div>
@@ -96,6 +105,9 @@ export function createUI(callbacks = {}) {
     if (!phoneBrowser) return;
     root.dataset.fullscreen = String(isMobileFullscreen());
     root.dataset.landscape = String(matchMedia('(orientation: landscape)').matches);
+    if (root.dataset.fullscreen === 'true' && root.dataset.landscape === 'true') {
+      root.dataset.entryReady = 'true';
+    }
     const title = $('.orientation-notice b');
     const message = $('.orientation-notice>span');
     if (root.dataset.fullscreen !== 'true') {
@@ -139,6 +151,8 @@ export function createUI(callbacks = {}) {
       if (previousMode === 'hide') call('resume');
     } else if (action === 'mobile-view-retry') {
       call('mobileViewRetry');
+    } else if (action === 'mobile-entry') {
+      call('mobileEntry');
     } else call(action);
   });
 
@@ -258,7 +272,7 @@ export function createUI(callbacks = {}) {
   }
 
   updateSound();
-  return { update, showScreen, notify, damage, destroy() {
+  return { update, showScreen, notify, damage, syncMobileDisplay, destroy() {
     clearTimeout(noticeTimer);
     noticeEntrance?.cancel();
     if (phoneBrowser) {

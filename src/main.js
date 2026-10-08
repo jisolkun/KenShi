@@ -191,6 +191,7 @@ const keys = new Set();
 const damageQueue = [];
 const ui = createUI({
   start: startGame,
+  mobileEntry: retryMobilePresentation,
   mobileViewRetry: retryMobilePresentation,
   pause: pauseGame,
   resume: resumeGame,
@@ -552,6 +553,7 @@ function clearDynamic() {
   fx.clear();
 }
 function reportMobilePresentation(result) {
+  ui.syncMobileDisplay();
   if (!result.entered) {
     ui.notify(result.unsupported
       ? "当前浏览器不支持网页全屏 · 请将游戏添加到手机主屏幕后打开"
