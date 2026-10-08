@@ -277,13 +277,21 @@ export function createCharacter(type = 'hero') {
   } else sword(arms[1].wrist,boss ? 1.30 : .87);
   if (heavy) for(const side of [-1,1]) mesh(arms[side===-1?0:1].shoulder,cone,'metal',[.06,.16,.07],[side*.06,.15,-.035],[0,0,-side*.35]);
   mergeStaticParts(group, type, material);
+  // Only the hero's rib armour expands. Head, shoulder joints and cape retain
+  // their own anchors, so breathing never scales limbs or weapon reach.
+  let ribcage = null;
+  if(hero){
+    const shell=chest.children.filter(child=>child.isMesh);
+    ribcage=joint(chest,'ribcage',0,.22,0);
+    for(const part of shell){chest.remove(part);part.position.y-=.22;ribcage.add(part);}
+  }
   const scale = hero ? 1 : type === 'grunt' ? .90 : narrow ? .9 : heavy ? 1.23 : 1.66;
   group.scale.setScalar(scale);
   // Keep a bind pose per joint. Every update is absolute, so interrupted moves cannot leak.
   const resetNodes = [body,...nodes];
-  const bind = resetNodes.map(n => ({node:n, p:n.position.clone(),r:n.rotation.clone()}));
+  const bind = resetNodes.map(n => ({node:n, p:n.position.clone(),r:n.rotation.clone(),s:n.scale.clone()}));
   const rig = {
-    type, group, body, chest, head, pony, legs, arms, cloths, bow, bind,
+    type, group, body, chest, ribcage, head, pony, legs, arms, cloths, bow, bind,
     idleOffset: (characterSerial++ * 2.3999632297) % TAU,
     weaponTips() { group.updateMatrixWorld(true); return tips.map(t => t.getWorldPosition(new THREE.Vector3())); },
     setFlash(amount) {
@@ -319,14 +327,14 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
     idleQ: new THREE.Quaternion(), idleBendQ: new THREE.Quaternion(), idleFootQ: new THREE.Quaternion(),
     idleRootQ: new THREE.Quaternion(), idleTarget: new THREE.Vector3(),
     secondary: [pony,...cloths].map(node=>({node,x:node.rotation.x,z:node.rotation.z,vx:0,vz:0})),
-    from: rig.bind.map(({node}) => ({p:node.position.clone(),q:node.quaternion.clone()})),
+    from: rig.bind.map(({node}) => ({p:node.position.clone(),q:node.quaternion.clone(),s:node.scale.clone()})),
   };
   const delta=clamp(dt ?? (time>motion.lastTime ? time-motion.lastTime : 1/60),0,.05);
   const locomotion=state==='idle'||state==='run';
   const key=locomotion?'locomotion':`${state}:${state==='attack'?combo:state==='skill'?skill:0}`;
   const restarted=!locomotion && phase<motion.phase-.2;
   if(motion.key!==null && (key!==motion.key||restarted)) {
-    rig.bind.forEach(({node},i)=>{motion.from[i].p.copy(node.position);motion.from[i].q.copy(node.quaternion);});
+    rig.bind.forEach(({node},i)=>{motion.from[i].p.copy(node.position);motion.from[i].q.copy(node.quaternion);motion.from[i].s.copy(node.scale);});
     motion.elapsed=0;
     motion.duration=state==='hurt'?.04:state==='roll'?.06:.08;
   } else motion.elapsed+=delta;
@@ -339,7 +347,7 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
   const idleGoal=locomotion&&movement<.2?smooth(motion.idleAge/.32):0;
   motion.idleLayer=immediate||transition===false?idleGoal:mix(motion.idleLayer,idleGoal,1-Math.exp(-delta/.12));
   if(lookYaw!==undefined)motion.lookYaw=immediate||transition===false?clamp(lookYaw,-.55,.55):mix(motion.lookYaw,clamp(lookYaw,-.55,.55),1-Math.exp(-delta/.18));
-  for(const {node,p,r} of rig.bind) {node.position.copy(p);node.rotation.copy(r);}
+  for(const {node,p,r,s} of rig.bind) {node.position.copy(p);node.rotation.copy(r);node.scale.copy(s);}
   const p=clamp(phase,0,1), hero=type==='hero', heavy=type==='brute', boss=type==='boss', archer=type==='archer';
   const L=arms[0],R=arms[1],LL=legs[0],RL=legs[1];
   const breath=Math.sin(time*2.3);
@@ -502,6 +510,7 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
     motion.targetQ.copy(node.quaternion);
     node.position.lerpVectors(motion.from[i].p,node.position,blend);
     node.quaternion.slerpQuaternions(motion.from[i].q,motion.targetQ,blend);
+    node.scale.lerpVectors(motion.from[i].s,node.scale,blend);
   });
   for(const part of motion.secondary){
     if(!locomotion&&delta>0){
@@ -534,7 +543,7 @@ function sampleLocomotion(rig,gait,blend,speed,turn,time) {
   // contact and longer airborne return preserve cadence without sliding feet.
   const cycleDistance=mix(.85,2.9,pace);
   const stance=clamp(stride*2/cycleDistance,.20,.58);
-  body.position.y=(hero?.875:.91)+Math.sin(time*2.3)*.004*(1-blend)-(hero?.035+.01*pace:.055+.025*pace)*blend-.003*Math.abs(Math.sin(gait*2))*blend;
+  body.position.y=(hero?.875:.91)+(hero?0:Math.sin(time*2.3)*.004)*(1-blend)-(hero?.035+.01*pace:.055+.025*pace)*blend-.003*Math.abs(Math.sin(gait*2))*blend;
   body.rotation.set(hero?mix(.075,.12,blend):.12*blend,Math.sin(gait)*.036*blend,-lean*.09);
   chest.rotation.x=hero?mix(.065,.13,blend):mix(-.08,.105,blend);
   chest.rotation.y=(hero?0:-.07*(1-blend))-Math.sin(gait)*(hero?.045:.078)*blend;
@@ -668,33 +677,53 @@ function sampleIdle(rig,clock,weight,alertness,lookYaw,time) {
   const hero=type==='hero';
   const alert=clamp(alertness,0,1), heavy=type==='brute'||type==='boss';
   const tempo=heavy?1.42:1.83;
-  const breath=Math.sin(clock*tempo);
+  const angle=clock*tempo;
+  const breath=hero?breathWave(angle):Math.sin(angle);
+  const shoulderBreath=hero?breathWave(angle-.24):0;
+  const elbowBreath=hero?breathWave(angle-.38):0;
+  const wristBreath=hero?breathWave(angle-.44):0;
   const balance=Math.sin(clock*.57)+.22*Math.sin(clock*.91+1.1);
   const age=rig.motion.idleAge;
   const cycle=((clock+rig.idleOffset)%9.6+9.6)%9.6;
   const guard=pulse(cycle,6.4,8.8)*smooth(age/.8);
-  body.position.x+=balance*(heavy?.016:.022)*weight;
-  body.position.z+=Math.sin(clock*.47+.7)*.004*weight;
-  body.position.y+=(breath*.005-.006-Math.sin(time*2.3)*.004)*weight;
-  chest.position.y+=breath*.008*weight;
-  chest.rotation.x+=(hero?breath*.012-.005*guard:breath*.026-.018*guard-.026*alert)*weight;
-  chest.rotation.z+=balance*.018*weight;
+  body.position.x+=balance*(hero?.008:heavy?.016:.022)*weight;
+  body.position.z+=hero?0:Math.sin(clock*.47+.7)*.004*weight;
+  body.position.y+=(hero?-.006:breath*.005-.006-Math.sin(time*2.3)*.004)*weight;
+  chest.position.y+=breath*(hero?.022:.008)*weight;
+  chest.rotation.x+=(hero?-breath*.027-.003*guard:breath*.026-.018*guard-.026*alert)*weight;
+  chest.rotation.z+=balance*(hero?.009:.018)*weight;
+  if(hero){
+    const inhale=(breath+1)*.5*weight;
+    rig.ribcage.scale.set(1+.035*inhale,1+.006*inhale,1+.065*inhale);
+  }
   chest.rotation.y+=(Math.sin(clock*.57-.7)*(hero?.012:.034)-(hero?.004:.016)*guard)*weight;
   const scan=Math.sin(clock*.43)*.23+Math.sin(clock*.19+1.5)*.075;
   const look=(clamp(lookYaw??0,-.55,.55)*(.45+.55*alert)+scan*(1-alert*.8))*weight;
   head.rotation.y+=look;
-  head.rotation.x+=(Math.sin(clock*tempo-.3)*.020-.027*guard)*weight;
+  head.rotation.x+=(hero?breath*.027+shoulderBreath*.006-.005*guard:Math.sin(clock*tempo-.3)*.020-.027*guard)*weight;
+  if(hero)head.position.y-=breath*.007*weight;
   head.rotation.z-=look*.11;
   chest.rotation.y+=look*.08;
   for(const arm of arms){
     const side=arm.side;
-    arm.shoulder.position.y+=breath*.004*weight;
-    arm.shoulder.rotation.x+=(hero?breath*.009+.010*guard:breath*.022-(side===1?.085:.028)*guard-.04*alert)*weight;
-    arm.shoulder.rotation.z+=side*(hero?breath*.008+.008*guard:breath*.022+.045*guard)*weight;
-    arm.elbow.rotation.x+=(hero?-.010*breath-.020*guard:-.034*breath-.13*guard)*weight;
-    arm.wrist.rotation.x+=(Math.sin(clock*tempo-.55)*(hero?.012:.022)+(hero?.018:.075)*guard)*weight;
-    arm.wrist.rotation.y+=side*Math.sin(clock*.67-.4)*(hero?.009:.026)*weight;
-    arm.wrist.rotation.z+=side*(hero?.009:.034)*guard*weight;
+    if(hero){
+      arm.shoulder.position.y+=shoulderBreath*.004*weight;
+      // The upper arm counterbalances chest extension to carry the blades'
+      // weight, then the elbow and grip follow the same breath a little later.
+      arm.shoulder.rotation.x+=(breath*.024+shoulderBreath*.009+.003*guard)*weight;
+      arm.shoulder.rotation.z+=side*(shoulderBreath*.004+.003*guard)*weight;
+      arm.elbow.rotation.x+=(-elbowBreath*.005-.005*guard)*weight;
+      arm.wrist.rotation.x+=(wristBreath*.003+.004*guard)*weight;
+      arm.wrist.rotation.z+=side*.002*guard*weight;
+    }else{
+      arm.shoulder.position.y+=breath*.004*weight;
+      arm.shoulder.rotation.x+=(breath*.022-(side===1?.085:.028)*guard-.04*alert)*weight;
+      arm.shoulder.rotation.z+=side*(breath*.022+.045*guard)*weight;
+      arm.elbow.rotation.x+=(-.034*breath-.13*guard)*weight;
+      arm.wrist.rotation.x+=(Math.sin(clock*tempo-.55)*.022+.075*guard)*weight;
+      arm.wrist.rotation.y+=side*Math.sin(clock*.67-.4)*.026*weight;
+      arm.wrist.rotation.z+=side*.034*guard*weight;
+    }
   }
   pony.rotation.x+=(Math.sin(clock*tempo-.9)*.075+.032*guard)*weight;
   pony.rotation.z+=(Math.sin(clock*.57-1.0)*.08)*weight;
@@ -703,6 +732,12 @@ function sampleIdle(rig,clock,weight,alertness,lookYaw,time) {
     cloths[i].rotation.z+=Math.sin(clock*.57-.8-i*.4)*.085*weight;
   }
   for(const leg of legs)plantIdleFoot(rig,leg,weight);
+}
+
+function breathWave(angle){
+  const phase=((angle/TAU)%1+1)%1;
+  // A modest lift and expansion followed by a longer, quiet release.
+  return 2*(phase<.43?smooth(phase/.43):1-smooth((phase-.43)/.57))-1;
 }
 
 function settleSecondary(motion,dt) {

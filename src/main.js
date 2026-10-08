@@ -2319,6 +2319,7 @@ if (new URLSearchParams(location.search).get("debug") === "1") {
       const joint = (node) => ({
         position: xyz(node.position),
         rotation: xyz(node.rotation),
+        scale: xyz(node.scale),
       });
       const motion = Object.fromEntries(
         Object.entries(rig.motion || {}).filter(([, value]) =>
@@ -2335,10 +2336,14 @@ if (new URLSearchParams(location.search).get("debug") === "1") {
         root: joint(rig.group),
         body: joint(rig.body),
         chest: joint(rig.chest),
+        ribcage: rig.ribcage
+          ? { ...joint(rig.ribcage), worldPos: xyz(rig.ribcage.getWorldPosition(new THREE.Vector3())) }
+          : null,
         head: joint(rig.head),
         arms: rig.arms.map((arm) => ({
           side: arm.side,
           shoulder: joint(arm.shoulder),
+          shoulderWorldPos: xyz(arm.shoulder.getWorldPosition(new THREE.Vector3())),
           elbow: joint(arm.elbow),
           wrist: joint(arm.wrist),
           worldPos: xyz(arm.wrist.getWorldPosition(new THREE.Vector3())),
