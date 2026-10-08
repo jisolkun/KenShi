@@ -18,3 +18,4 @@
 @keyframes criticalRise{0%{opacity:0;transform:translate(-50%,-10%) scale(1.65) rotate(-7deg)}10%{opacity:1;transform:translate(-50%,-50%) scale(1.16) rotate(-7deg)}24%{transform:translate(-50%,-65%) scale(1) rotate(-7deg)}64%{opacity:1}100%{opacity:0;transform:translate(-50%,-190%) scale(.84) rotate(-7deg)}}
 @media(max-width:700px){.damage-number.critical{font-size:30px}.damage-number.critical:after{font-size:13px;letter-spacing:1px}}
 @media(max-height:500px) and (orientation:landscape){.damage-number.critical{font-size:30px}.damage-number.critical:after{font-size:13px;letter-spacing:1px}}
+.notification{width:max-content}.notification span{text-wrap:balance}.notification.visible{transition:none}

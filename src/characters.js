@@ -3,6 +3,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // All body parts share geometry; each character owns its palette for hit flashes.
 const geometries = new Map();
+let characterSerial = 0;
 const geometry = (key, create) => {
   if (!geometries.has(key)) geometries.set(key, create());
   return geometries.get(key);
@@ -283,6 +284,7 @@ export function createCharacter(type = 'hero') {
   const bind = resetNodes.map(n => ({node:n, p:n.position.clone(),r:n.rotation.clone()}));
   const rig = {
     type, group, body, chest, head, pony, legs, arms, cloths, bow, bind,
+    idleOffset: (characterSerial++ * 2.3999632297) % TAU,
     weaponTips() { group.updateMatrixWorld(true); return tips.map(t => t.getWorldPosition(new THREE.Vector3())); },
     setFlash(amount) {
       const value = THREE.MathUtils.clamp(amount,0,1);
@@ -306,12 +308,17 @@ function sample(p, keys) {
 }
 
 export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,skill=0,dt,
-  gaitPhase,moveBlend,turnLean=0,attackCarry=0,hurtDirection=1,hurtStrength=1,transition=true,immediate=false} = {}) {
+  gaitPhase,moveBlend,turnLean=0,attackCarry=0,hurtDirection=1,hurtStrength=1,transition=true,immediate=false,
+  alertness=.35,idleAge,lookYaw} = {}) {
   if(dt===0&&!immediate&&transition!==false&&rig.motion)return;
   const {body,chest,head,arms,legs,pony,cloths,type} = rig;
   const motion = rig.motion ??= {
     key: null, phase: 0, lastTime: time, gait: 0, move: 0,
+    idleClock: time+rig.idleOffset, idleAge: 0, idleLayer: 0, lookYaw: 0,
     elapsed: 1, duration: .08, targetQ: new THREE.Quaternion(),
+    idleQ: new THREE.Quaternion(), idleBendQ: new THREE.Quaternion(), idleFootQ: new THREE.Quaternion(),
+    idleRootQ: new THREE.Quaternion(), idleTarget: new THREE.Vector3(),
+    secondary: [pony,...cloths].map(node=>({node,x:node.rotation.x,z:node.rotation.z,vx:0,vz:0})),
     from: rig.bind.map(({node}) => ({p:node.position.clone(),q:node.quaternion.clone()})),
   };
   const delta=clamp(dt ?? (time>motion.lastTime ? time-motion.lastTime : 1/60),0,.05);
@@ -327,6 +334,11 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
   motion.move=mix(motion.move,state==='run'?1:0,1-Math.exp(-delta/.075));
   const movement=clamp(moveBlend??motion.move,0,1);
   const gait=gaitPhase??motion.gait;
+  motion.idleClock=immediate||transition===false ? time+rig.idleOffset : motion.idleClock+delta;
+  motion.idleAge=idleAge??(locomotion&&movement<.12 ? motion.idleAge+delta : Math.max(0,motion.idleAge-delta*5));
+  const idleGoal=locomotion&&movement<.2?smooth(motion.idleAge/.32):0;
+  motion.idleLayer=immediate||transition===false?idleGoal:mix(motion.idleLayer,idleGoal,1-Math.exp(-delta/.12));
+  if(lookYaw!==undefined)motion.lookYaw=immediate||transition===false?clamp(lookYaw,-.55,.55):mix(motion.lookYaw,clamp(lookYaw,-.55,.55),1-Math.exp(-delta/.18));
   for(const {node,p,r} of rig.bind) {node.position.copy(p);node.rotation.copy(r);}
   const p=clamp(phase,0,1), hero=type==='hero', heavy=type==='brute', boss=type==='boss', archer=type==='archer';
   const L=arms[0],R=arms[1],LL=legs[0],RL=legs[1];
@@ -350,6 +362,7 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
   for(let i=0;i<cloths.length;i++){cloths[i].rotation.x=Math.sin(time*2.6+i)*.07;cloths[i].rotation.z=Math.sin(time*2.2+i)*.045;}
   if(locomotion) {
     sampleLocomotion(rig,gait,movement,speed,turnLean,time);
+    sampleIdle(rig,motion.idleClock,Math.pow(1-movement,3)*motion.idleLayer,alertness,lookYaw===undefined?undefined:motion.lookYaw,time);
   } else if(state==='attack' || state==='charge') {
     const c=((combo%4)+4)%4;
     const wind=sample(p,[[0,0],[.23,1],[.37,1],[.62,0],[1,0]]);
@@ -482,6 +495,7 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
   }
   // Blend only the opening of a changed action. Contacts and complete spin arcs
   // are sampled absolutely; quaternion interpolation never wraps a full turn.
+  if(locomotion)settleSecondary(motion,delta);
   let blend=transition&&!immediate?smooth(motion.elapsed/motion.duration):1;
   if((state==='attack'||state==='skill')&&p>=.32)blend=1;
   if(blend<1)rig.bind.forEach(({node},i)=>{
@@ -489,6 +503,13 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
     node.position.lerpVectors(motion.from[i].p,node.position,blend);
     node.quaternion.slerpQuaternions(motion.from[i].q,motion.targetQ,blend);
   });
+  for(const part of motion.secondary){
+    if(!locomotion&&delta>0){
+      part.vx=clamp((part.node.rotation.x-part.x)/delta,-1.4,1.4);
+      part.vz=clamp((part.node.rotation.z-part.z)/delta,-1.4,1.4);
+    }
+    part.x=part.node.rotation.x;part.z=part.node.rotation.z;
+  }
   motion.key=key;motion.phase=p;motion.lastTime=time;
   // World matrices are updated once by the renderer or weaponTips, not per joint.
 }
@@ -619,4 +640,77 @@ function sampleHeroAttack(rig,p,combo,gait,carry,turn) {
   body.rotation.z-=clamp(turn,-1,1)*.02;
   pony.rotation.set(.13+.25*drive,0,-dir*.27*drive);
   for(const cloth of cloths)cloth.rotation.set(-.13-.36*drive,0,-dir*.33*drive);
+}
+
+const DOWN = new THREE.Vector3(0,-1,0);
+const AXIS_X = new THREE.Vector3(1,0,0);
+function plantIdleFoot(rig,leg,weight) {
+  const m=rig.motion,a=.41,b=Math.hypot(.395,.016),gamma=Math.atan2(.016,.395);
+  // The ankle target is in character space; it stays put while the pelvis shifts.
+  m.idleRootQ.copy(rig.body.quaternion).invert();
+  m.idleTarget.set(leg.hip.position.x,.075,.026).sub(rig.body.position).applyQuaternion(m.idleRootQ).sub(leg.hip.position);
+  const d=clamp(m.idleTarget.length(),.2,a+b-.0001);
+  const beta=Math.acos(clamp((a*a+d*d-b*b)/(2*a*d),-1,1));
+  const knee=Math.PI-Math.acos(clamp((a*a+b*b-d*d)/(2*a*b),-1,1));
+  m.idleQ.setFromUnitVectors(DOWN,m.idleTarget.normalize());
+  m.idleBendQ.setFromAxisAngle(AXIS_X,-beta);
+  m.idleQ.multiply(m.idleBendQ);
+  leg.hip.quaternion.slerp(m.idleQ,weight);
+  m.idleBendQ.setFromAxisAngle(AXIS_X,knee+gamma);
+  leg.knee.quaternion.slerp(m.idleBendQ,weight);
+  m.idleFootQ.copy(rig.body.quaternion).multiply(leg.hip.quaternion).multiply(leg.knee.quaternion).invert();
+  leg.foot.quaternion.slerp(m.idleFootQ,weight);
+}
+
+function sampleIdle(rig,clock,weight,alertness,lookYaw,time) {
+  if(weight<.0001)return;
+  const {body,chest,head,arms,legs,pony,cloths,type}=rig;
+  const alert=clamp(alertness,0,1), heavy=type==='brute'||type==='boss';
+  const tempo=heavy?1.42:1.83;
+  const breath=Math.sin(clock*tempo);
+  const balance=Math.sin(clock*.57)+.22*Math.sin(clock*.91+1.1);
+  const age=rig.motion.idleAge;
+  const cycle=((clock+rig.idleOffset)%9.6+9.6)%9.6;
+  const guard=pulse(cycle,6.4,8.8)*smooth(age/.8);
+  body.position.x+=balance*(heavy?.016:.022)*weight;
+  body.position.z+=Math.sin(clock*.47+.7)*.004*weight;
+  body.position.y+=(breath*.005-.006-Math.sin(time*2.3)*.004)*weight;
+  chest.position.y+=breath*.008*weight;
+  chest.rotation.x+=(breath*.026-.018*guard-.026*alert)*weight;
+  chest.rotation.z+=balance*.018*weight;
+  chest.rotation.y+=(Math.sin(clock*.57-.7)*.034-.016*guard)*weight;
+  const scan=Math.sin(clock*.43)*.23+Math.sin(clock*.19+1.5)*.075;
+  const look=(clamp(lookYaw??0,-.55,.55)*(.45+.55*alert)+scan*(1-alert*.8))*weight;
+  head.rotation.y+=look;
+  head.rotation.x+=(Math.sin(clock*tempo-.3)*.020-.027*guard)*weight;
+  head.rotation.z-=look*.11;
+  chest.rotation.y+=look*.08;
+  for(const arm of arms){
+    const side=arm.side;
+    arm.shoulder.position.y+=breath*.004*weight;
+    arm.shoulder.rotation.x+=(breath*.022-(side===1?.085:.028)*guard-.04*alert)*weight;
+    arm.shoulder.rotation.z+=side*(breath*.022+.045*guard)*weight;
+    arm.elbow.rotation.x+=(-.034*breath-.13*guard)*weight;
+    arm.wrist.rotation.x+=(Math.sin(clock*tempo-.55)*.022+.075*guard)*weight;
+    arm.wrist.rotation.y+=side*Math.sin(clock*.67-.4)*.026*weight;
+    arm.wrist.rotation.z+=side*.034*guard*weight;
+  }
+  pony.rotation.x+=(Math.sin(clock*tempo-.9)*.075+.032*guard)*weight;
+  pony.rotation.z+=(Math.sin(clock*.57-1.0)*.08)*weight;
+  for(let i=0;i<cloths.length;i++){
+    cloths[i].rotation.x+=(-.09+Math.sin(clock*tempo-1.0-i*.4)*.07)*weight;
+    cloths[i].rotation.z+=Math.sin(clock*.57-.8-i*.4)*.085*weight;
+  }
+  for(const leg of legs)plantIdleFoot(rig,leg,weight);
+}
+
+function settleSecondary(motion,dt) {
+  for(const part of motion.secondary){
+    const targetX=part.node.rotation.x,targetZ=part.node.rotation.z;
+    // Critically damped follow-through, with finite velocity after a fast action.
+    part.vx=clamp((part.vx+(targetX-part.x)*70*dt)*Math.exp(-14*dt),-1.5,1.5);
+    part.vz=clamp((part.vz+(targetZ-part.z)*70*dt)*Math.exp(-14*dt),-1.5,1.5);
+    part.node.rotation.x=part.x+part.vx*dt;
+    part.node.rotation.z=part.z+part.vz*dt;
+  }
 }

@@ -109,6 +109,10 @@ const hero = {
   transition: { from: "idle", to: "idle", age: 1, duration: 0.08 },
   poseState: "idle",
   poseCombo: 0,
+  idleAge: 0,
+  combatAge: 10,
+  alertness: 0.18,
+  lookYaw: 0,
   angle: Math.PI,
   state: "idle",
   elapsed: 0,
@@ -143,6 +147,7 @@ const metrics = { taps: 0, rolls: 0, skills: 0, specials: 0 };
 let mode = "start",
   gameTime = 0,
   globalTime = 0,
+  presentationTime = 0,
   wave = 1,
   kills = 0,
   hits = 0,
@@ -182,6 +187,7 @@ const cameraFocus = new THREE.Vector3(0, 0, 2),
   temp = new THREE.Vector3(),
   temp2 = new THREE.Vector3();
 const keys = new Set();
+const damageQueue = [];
 const ui = createUI({
   start: startGame,
   pause: pauseGame,
@@ -254,8 +260,8 @@ function keyboardDirection() {
     .normalize();
 }
 function kickCamera(direction, amount) {
-  if (globalTime < shakeNext && amount <= shake) return;
-  shakeNext = globalTime + 0.065;
+  if (presentationTime < shakeNext && amount <= shake) return;
+  shakeNext = presentationTime + 0.065;
   shake = Math.max(shake, amount);
   shakeAge = 0;
   shakeDirection.copy(direction);
@@ -368,8 +374,12 @@ function worldToScreen(position) {
     visible: p.z > -1 && p.z < 1 && Math.abs(p.x) <= 1 && Math.abs(p.y) <= 1,
   };
 }
+function queueDamage(text, position, kind) {
+  damageQueue.push({ text, position: position.clone(), kind });
+}
 function showDamage(entity, amount, kind = "normal") {
-  const p = worldToScreen(
+  queueDamage(
+    String(amount),
     entity.pos
       .clone()
       .add(
@@ -379,8 +389,48 @@ function showDamage(entity, amount, kind = "normal") {
           0,
         ),
       ),
+    kind,
   );
-  ui.damage(String(amount), p.x, p.y, kind);
+}
+function flushDamage() {
+  for (const damage of damageQueue) {
+    const p = worldToScreen(damage.position);
+    ui.damage(damage.text, p.x, p.y, damage.kind);
+  }
+  damageQueue.length = 0;
+}
+function updateAwareness(dt) {
+  const idle = hero.state === "idle" && hero.moveVelocity.length() < 0.15;
+  hero.idleAge = idle ? hero.idleAge + dt : 0;
+  hero.combatAge += dt;
+  const threat = nearestEnemy(hero.pos, 8);
+  const proximity = threat ? 1 - threat.pos.distanceTo(hero.pos) / 8 : 0;
+  const desiredAlert = Math.max(
+    0.18,
+    proximity,
+    Math.max(0, 1 - hero.combatAge / 3.5) * 0.85,
+  );
+  hero.alertness = THREE.MathUtils.lerp(
+    hero.alertness,
+    desiredAlert,
+    1 - Math.exp(-dt * 4),
+  );
+  let desiredLook = 0;
+  if (idle && threat) {
+    const angle =
+      Math.atan2(threat.pos.x - hero.pos.x, threat.pos.z - hero.pos.z) -
+      hero.angle;
+    desiredLook = THREE.MathUtils.clamp(
+      Math.atan2(Math.sin(angle), Math.cos(angle)),
+      -0.5,
+      0.5,
+    );
+  }
+  hero.lookYaw = THREE.MathUtils.lerp(
+    hero.lookYaw,
+    desiredLook,
+    1 - Math.exp(-dt * 3.5),
+  );
 }
 function stateSnapshot() {
   const boss = enemies.find((e) => e.type === "boss" && e.state !== "dead");
@@ -404,6 +454,7 @@ function stateSnapshot() {
     sound,
     mode,
     phase: mode,
+    clocks: { simulation: globalTime, presentation: presentationTime },
     hits,
     resources: { souls: hero.souls, stamina: hero.stamina },
     inputs: { ...metrics },
@@ -432,6 +483,9 @@ function stateSnapshot() {
       focus: { x: cameraFocus.x, z: cameraFocus.z },
     },
     motion: {
+      idleAge: hero.idleAge,
+      alertness: hero.alertness,
+      lookYaw: hero.lookYaw,
       velocity: { x: hero.moveVelocity.x, z: hero.moveVelocity.z },
       speed: hero.moveVelocity.length(),
       gait: hero.gaitPhase,
@@ -501,6 +555,7 @@ function startGame() {
   lastTap = null;
   pointerStart = null;
   clearDynamic();
+  damageQueue.length = 0;
   mode = "playing";
   gameTime = 0;
   Object.keys(metrics).forEach((k) => (metrics[k] = 0));
@@ -515,6 +570,10 @@ function startGame() {
   slowTime = 0;
   hero.pos.set(0, 0, 4);
   hero.angle = Math.PI;
+  hero.idleAge = 0;
+  hero.combatAge = 10;
+  hero.alertness = 0.18;
+  hero.lookYaw = 0;
   hero.state = "idle";
   hero.elapsed = 0;
   hero.combo = 0;
@@ -563,7 +622,19 @@ function finishGame(won) {
     hits,
     total,
   });
-  if (won) safeAudio("win");
+  if (won) {
+    hero.presentationHeight = rig.group.position.y;
+    hero.state = "idle";
+    hero.elapsed = 0;
+    hero.moveVelocity.set(0, 0, 0);
+    hero.velocity.set(0, 0, 0);
+    hero.localHitStop = 0;
+    hero.moveBlend = 0;
+    hero.attackCarry = 0;
+    hero.combatAge = 10;
+    hero.idleAge = 0;
+    safeAudio("win");
+  }
 }
 
 function makeBar(type) {
@@ -676,6 +747,7 @@ function nearestEnemy(position = hero.pos, max = Infinity) {
 function beginAttack(enemy) {
   if (hero.mount > 0) return;
   hero.state = "attack";
+  hero.combatAge = 0;
   hero.elapsed = 0;
   hero.duration = attackDurations[hero.combo];
   hero.hitDone = false;
@@ -821,6 +893,7 @@ function damageHero(amount, from) {
     hero.flight > 0
   )
     return;
+  hero.combatAge = 0;
   hero.hp = Math.max(0, hero.hp - amount);
   hits++;
   hero.flash = 1;
@@ -836,8 +909,11 @@ function damageHero(amount, from) {
   hero.hurtDirection = Math.sin(Math.atan2(temp.x, temp.z) - hero.angle);
   hero.hurtStrength = 1;
   kickCamera(temp, 0.1);
-  const p = worldToScreen(hero.pos.clone().add(new THREE.Vector3(0, 2.3, 0)));
-  ui.damage(`−${amount}`, p.x, p.y, "hurt");
+  queueDamage(
+    `−${amount}`,
+    hero.pos.clone().add(new THREE.Vector3(0, 2.3, 0)),
+    "hurt",
+  );
   fx.burst(hero.pos, 0.8, 0xc47753);
   safeAudio("enemy");
   if (hero.hp <= 0) {
@@ -935,6 +1011,7 @@ function castSkill(index) {
       : nearestEnemy(hero.pos, 12);
   if (target) face(temp.subVectors(target.pos, hero.pos), 1);
   hero.state = "skill";
+  hero.combatAge = 0;
   hero.skillIndex = index;
   hero.elapsed = 0;
   hero.duration = [0.72, 0.85, 1.05, 0.85, 0.8][index];
@@ -1258,7 +1335,11 @@ function updateHero(frameDt) {
     hero.poseState = poseState;
     hero.poseCombo = hero.combo;
   } else hero.transition.age = Math.min(1, hero.transition.age + dt);
+  updateAwareness(dt);
   poseCharacter(hero.rig, {
+    idleAge: hero.idleAge,
+    alertness: hero.alertness,
+    lookYaw: hero.lookYaw,
     state: poseState,
     time: globalTime,
     dt,
@@ -1331,11 +1412,15 @@ function beginEnemyAttack(e) {
   }
 }
 function updateEnemies(dt) {
+  for (const e of enemies) {
+    (e.stepStart ||= new THREE.Vector3()).copy(e.pos);
+  }
   for (let i = enemies.length - 1; i >= 0; i--) {
     const e = enemies[i];
     const frozen = Math.min(dt, e.localHitStop || 0);
     e.localHitStop = Math.max(0, (e.localHitStop || 0) - dt);
     const tickDt = dt - frozen;
+    e.poseDt = tickDt;
     e.elapsed += tickDt;
     e.cooldown -= tickDt;
     e.poise = Math.max(0, (e.poise || 0) - tickDt);
@@ -1484,6 +1569,37 @@ function updateEnemies(dt) {
       }
       e.rig.group.position.copy(e.pos);
     }
+  }
+  // Resolve all motion before posing, including pushes by another enemy.
+  for (const e of enemies) {
+    const tickDt = e.poseDt || 0;
+    const locomotion =
+      e.state === "run" || e.state === "idle" || e.state === "recover";
+    if (e.state !== "dead") clampPosition(e.pos, e.radius);
+    const moved = e.stepStart ? e.pos.distanceTo(e.stepStart) : 0;
+    const dx = e.pos.x - e.stepStart.x,
+      dz = e.pos.z - e.stepStart.z;
+    const direction =
+      dx * Math.sin(e.angle) + dz * Math.cos(e.angle) < -0.001 ? -1 : 1;
+    const speed =
+      locomotion && tickDt > 0
+        ? THREE.MathUtils.clamp(moved / tickDt / 5.8, 0, 1)
+        : 0;
+    const movementWeight =
+      locomotion && tickDt > 0
+        ? THREE.MathUtils.clamp(moved / tickDt / e.speed, 0, 1)
+        : 0;
+    e.moveBlend = THREE.MathUtils.lerp(
+      e.moveBlend || 0,
+      movementWeight,
+      1 - Math.exp(-tickDt * 18),
+    );
+    if (locomotion)
+      e.gaitPhase =
+        (e.gaitPhase || 0) +
+        (direction * moved * Math.PI * 2) /
+          THREE.MathUtils.lerp(0.85, 2.9, speed);
+    if (e.state !== "dead") e.rig.group.position.copy(e.pos);
     e.rig.group.rotation.y = e.angle;
     poseCharacter(e.rig, {
       state:
@@ -1495,13 +1611,12 @@ function updateEnemies(dt) {
       time: globalTime,
       phase: e.duration ? Math.min(1, e.elapsed / e.duration) : 0,
       combo: e.combo % 4,
-      speed: e.state === "run" ? 0.6 : 0,
+      speed,
       skill: e.attackKind,
       dt: tickDt,
-      gaitPhase: (e.gaitPhase =
-        (e.gaitPhase || 0) +
-        (e.state === "run" ? tickDt * e.speed * Math.PI * 2 : 0)),
-      moveBlend: e.state === "run" ? 0.65 : 0,
+      gaitPhase: e.gaitPhase || 0,
+      moveBlend: e.moveBlend,
+      alertness: 0.7,
       hurtDirection: e.hurtDirection || 0,
       hurtStrength: e.hurtStrength || 0,
     });
@@ -1651,10 +1766,11 @@ function updateDrops(dt) {
       hero.souls = Math.min(100, hero.souls + (d.kind === "soul" ? 8 : 3));
       if (d.kind === "heal") {
         hero.hp = Math.min(hero.maxHp, hero.hp + 15);
-        const p = worldToScreen(
+        queueDamage(
+          "+15",
           hero.pos.clone().add(new THREE.Vector3(0, 2.2, 0)),
+          "heal",
         );
-        ui.damage("+15", p.x, p.y, "heal");
       }
       scene.remove(d.mesh);
       d.mesh.material.dispose();
@@ -2050,20 +2166,85 @@ function updateCamera(dt) {
   if (shakeAge > 0.3) shake = 0;
   camera.updateMatrixWorld(true);
 }
+function updatePresentation(dt) {
+  const state = mode === "lose" ? "dead" : "idle";
+  hero.state = state;
+  hero.moveBlend = THREE.MathUtils.lerp(
+    hero.moveBlend,
+    0,
+    1 - Math.exp(-dt * 18),
+  );
+  updateAwareness(dt);
+  const alertness = mode === "start" ? 0.25 : 0.18;
+  hero.alertness = alertness;
+  hero.lookYaw = 0;
+  rig.group.position.copy(hero.pos);
+  rig.group.position.y =
+    mode === "win" ? hero.presentationHeight || 0 : hero.mount > 0 ? 1 : 0;
+  rig.group.rotation.y = hero.angle;
+  poseCharacter(rig, {
+    state,
+    time: globalTime,
+    dt,
+    phase: state === "dead" ? 1 : 0,
+    combo: 0,
+    speed: 0,
+    moveBlend: hero.moveBlend,
+    gaitPhase: hero.gaitPhase,
+    skill: 0,
+    idleAge: hero.idleAge,
+    alertness,
+    lookYaw: 0,
+  });
+  rig.group.updateMatrixWorld(true);
+  if (mode !== "start") {
+    fx.update(dt);
+    for (let i = projectiles.length - 1; i >= 0; i--) {
+      const p = projectiles[i];
+      p.life -= dt;
+      p.mesh.position.addScaledVector(p.direction, p.speed * dt);
+      if (p.life <= 0) {
+        disposeGroup(p.mesh, false);
+        projectiles.splice(i, 1);
+      }
+    }
+    for (let i = enemies.length - 1; i >= 0; i--) {
+      const e = enemies[i];
+      if (e.state !== "dead") continue;
+      e.elapsed += dt;
+      e.deathAge += dt;
+      e.velocity.multiplyScalar(Math.exp(-dt * 7));
+      e.pos.addScaledVector(e.velocity, dt);
+      e.rig.group.position.copy(e.pos);
+      e.rig.group.position.y = -Math.min(2, Math.max(0, e.deathAge - 0.9) * 2);
+      poseCharacter(e.rig, {
+        state: "dead",
+        time: globalTime,
+        dt,
+        phase: Math.min(1, e.elapsed / e.duration),
+      });
+      if (e.deathAge > 1.85) {
+        disposeGroup(e.rig.group, false);
+        disposeGroup(e.bar);
+        enemies.splice(i, 1);
+      }
+    }
+  }
+}
 let lastTime = performance.now(),
   uiClock = 0;
 function animate(now) {
   requestAnimationFrame(animate);
   const realDt = Math.min(0.25, Math.max(0, (now - lastTime) / 1000));
   lastTime = now;
-  globalTime += realDt;
-  updateCamera(realDt);
-  let dt = realDt;
-  if (slowTime > 0) {
+  const presentationDt = mode === "pause" ? 0 : realDt;
+  presentationTime += presentationDt;
+  let dt = mode === "playing" ? realDt : 0;
+  if (mode === "playing" && slowTime > 0) {
     slowTime -= realDt;
     dt *= slowScale;
   }
-  if (hitStop > 0) {
+  if (mode === "playing" && hitStop > 0) {
     const frozen = Math.min(dt, hitStop);
     hitStop = Math.max(0, hitStop - realDt);
     dt = Math.max(0, dt - frozen);
@@ -2078,6 +2259,7 @@ function animate(now) {
       const steps = Math.ceil(dt / 0.03),
         step = dt / steps;
       for (let i = 0; i < steps && mode === "playing"; i++) {
+        globalTime += step;
         updateHero(step);
         updateEnemies(step);
         updateProjectiles(step);
@@ -2097,20 +2279,20 @@ function animate(now) {
     }
     if (destinationMarker.visible)
       destinationMarker.scale.setScalar(1 + Math.sin(globalTime * 5) * 0.08);
-  } else if (mode === "start") {
-    rig.group.position.copy(hero.pos);
-    rig.group.rotation.y = hero.angle;
-    poseCharacter(rig, {
-      state: "idle",
-      time: globalTime,
-      phase: 0,
-      combo: 0,
-      speed: 0,
-      skill: 0,
-    });
+  } else if (mode !== "pause") {
+    const steps = Math.max(1, Math.ceil(realDt / 0.03)),
+      step = realDt / steps;
+    for (let i = 0; i < steps; i++) {
+      globalTime += step;
+      updatePresentation(step);
+    }
   }
-  world.update?.(mode === "pause" ? 0 : realDt, globalTime);
-  audio.update?.(realDt);
+  // Camera sees this frame's actual simulation position; floating text is
+  // projected afterward so it stays attached to the same displayed contact.
+  if (presentationDt > 0) updateCamera(presentationDt);
+  flushDamage();
+  world.update?.(presentationDt, presentationTime);
+  audio.update?.(presentationDt);
   uiClock += realDt;
   if (uiClock > 0.065) {
     ui.update(stateSnapshot());
@@ -2131,6 +2313,42 @@ if (new URLSearchParams(location.search).get("debug") === "1") {
       return stateSnapshot();
     },
     getState: stateSnapshot,
+    getPose() {
+      rig.group.updateMatrixWorld(true);
+      const xyz = (value) => ({ x: value.x, y: value.y, z: value.z });
+      const joint = (node) => ({
+        position: xyz(node.position),
+        rotation: xyz(node.rotation),
+      });
+      const motion = Object.fromEntries(
+        Object.entries(rig.motion || {}).filter(([, value]) =>
+          ["number", "string", "boolean"].includes(typeof value),
+        ),
+      );
+      return {
+        state: hero.state,
+        clock: globalTime,
+        presentationClock: presentationTime,
+        idleAge: hero.idleAge,
+        alertness: hero.alertness,
+        lookYaw: hero.lookYaw,
+        body: joint(rig.body),
+        chest: joint(rig.chest),
+        head: joint(rig.head),
+        arms: rig.arms.map((arm) => ({
+          side: arm.side,
+          shoulder: joint(arm.shoulder),
+          elbow: joint(arm.elbow),
+          wrist: joint(arm.wrist),
+        })),
+        legs: rig.legs.map((leg) => ({
+          side: leg.side,
+          foot: joint(leg.foot),
+          worldPos: xyz(leg.foot.getWorldPosition(new THREE.Vector3())),
+        })),
+        motion,
+      };
+    },
     worldToScreen(x, z, y = 0.8) {
       return worldToScreen(
         x?.isVector3

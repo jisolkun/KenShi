@@ -326,15 +326,29 @@ export function createWorld(scene) {
   });
   const prune=group=>{for(const child of [...group.children])if(child.isGroup){prune(child);if(child.children.length===0)group.remove(child);}};
   prune(root);
-  function update(dt,time) {
-    const step=Math.min(dt,.05);
+  let environmentTime=0,environmentInitialized=false;
+  const wrap=(value,minimum,span)=>minimum+((value-minimum)%span+span)%span;
+  function update(dt) {
+    // Keep every environmental layer on the same simulation clock. The caller's
+    // wall clock can keep running during pause without moving cloth or fire.
+    const elapsed=Number.isFinite(dt)?Math.max(0,dt):0;
+    if(environmentInitialized&&elapsed===0)return;
+    environmentInitialized=true;
+    environmentTime+=elapsed;
+    const time=environmentTime;
     flags.forEach(f=>{
       const pos=f.mesh.geometry.attributes.position;
       for(let i=0;i<pos.count;i++){const x=f.original[i*3],y=f.original[i*3+1];const looseness=Math.max(0,(4.29-y)/2.1);pos.array[i*3+2]=Math.sin(time*2.6+x*3.5+f.phase)*.12*looseness+Math.sin(time*1.45+y*2)*.08*looseness;pos.array[i*3]=x+Math.sin(time*1.7+y+f.phase)*.04*looseness;}
       pos.needsUpdate=true;f.mesh.geometry.computeVertexNormals();
     });
     lanternFlames.forEach(f=>{const flicker=1+Math.sin(time*9+f.phase)*.12+Math.sin(time*16+f.phase)*.06;f.mesh.scale.y=.35*flicker;f.shell.material.emissiveIntensity=.76+flicker*.13;});
-    leaves.forEach((l,i)=>{l.x+=step*.26;l.y-=step*l.speed;l.z+=step*.13;if(l.y<.12){l.y=range(4.5,7);l.x=range(-23,20);l.z=range(-17,17);}if(l.x>24)l.x=-24;temp.position.set(l.x+Math.sin(time*.7+l.phase)*.42,l.y,l.z+Math.cos(time*.5+l.phase)*.4);temp.rotation.set(time*l.spin,l.phase+time*.4,Math.sin(time+l.phase));temp.scale.setScalar(l.scale);temp.updateMatrix();flyingLeaves.setMatrixAt(i,temp.matrix);});flyingLeaves.instanceMatrix.needsUpdate=true;
+    // Analytic drift and wrap avoid capped-dt slowdowns and frame-dependent
+    // random respawns. A long frame advances exactly as far as small frames.
+    leaves.forEach((l,i)=>{
+      const x=wrap(l.x+time*.26,-24,48),y=wrap(l.y-time*l.speed,.12,6.9),z=wrap(l.z+time*.13,-18,36);
+      temp.position.set(x+Math.sin(time*.7+l.phase)*.42,y,z+Math.cos(time*.5+l.phase)*.4);
+      temp.rotation.set(time*l.spin,l.phase+time*.4,Math.sin(time+l.phase));temp.scale.setScalar(l.scale);temp.updateMatrix();flyingLeaves.setMatrixAt(i,temp.matrix);
+    });flyingLeaves.instanceMatrix.needsUpdate=true;
     dust.forEach((d,i)=>{dustPositions[i*3]=d.x+Math.sin(time*.13+d.phase)*.8;dustPositions[i*3+1]=d.y+Math.sin(time*.45+d.phase)*.23;dustPositions[i*3+2]=d.z+Math.cos(time*.15+d.phase)*.65;});dustGeo.attributes.position.needsUpdate=true;
   }
   update(0,0);

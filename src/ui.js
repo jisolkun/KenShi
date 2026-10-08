@@ -52,9 +52,30 @@ export function createUI(callbacks = {}) {
   document.body.append(root);
   const $ = selector => root.querySelector(selector);
   const $$ = selector => [...root.querySelectorAll(selector)];
+  // HUD nodes persist for the level. Avoid re-querying and replacing unchanged
+  // text every tick, particularly while combat is paused or resources are full.
+  const hud = {
+    health: $('.health-track'), healthFill: $('.health-track i'), healthText: $('.health-track span'),
+    stamina: $('.stamina-track i'), souls: $('.soul-count'), crystals: $$('.soul-crystals i'),
+    waves: $$('.stage-steps i'), kills: $('.kill-count'), time: $('.battle-time'),
+    combo: $('.combo-panel'), comboCount: $('.combo-panel strong'),
+    boss: $('.boss-panel'), bossFill: $('.boss-track i'),
+    skills: $$('.skill-button').map(button => ({button, cost: button.querySelector('.skill-cost'), text: button.querySelector('.cooldown-text'), mask: button.querySelector('.cooldown-mask')})),
+    specials: $$('.special-button').map(button => ({button, label: button.querySelector('small')})),
+  };
+  const styleValues = new WeakMap();
+  function setStyle(el, property, value) {
+    const previous = styleValues.get(el) || {};
+    if (previous[property] === value) return;
+    el.style[property] = value;
+    previous[property] = value;
+    styleValues.set(el, previous);
+  }
+  const setText = (el, value) => { if (el.textContent !== String(value)) el.textContent = value; };
   let mode = 'start';
   let sound = true;
   let noticeTimer;
+  let noticeEntrance;
   let previousMode = 'start';
   let currentData = {};
   let previousData = {};
@@ -95,45 +116,47 @@ export function createUI(callbacks = {}) {
 
   function update(state) {
     const hp = Math.max(0, state.hp ?? 100), maxHp = state.maxHp || 100;
-    $('.health-track i').style.width = `${Math.min(100, hp / maxHp * 100)}%`;
-    $('.health-track span').textContent = `${Math.ceil(hp)} / ${maxHp}`;
-    $('.health-track').classList.toggle('low-health', hp / maxHp < 0.3);
-    $('.stamina-track i').style.width = `${Math.max(0, Math.min(100, (state.stamina ?? 100) / (state.maxStamina || 100) * 100))}%`;
+    setStyle(hud.healthFill, 'width', `${Math.min(100, hp / maxHp * 100)}%`);
+    setText(hud.healthText, `${Math.ceil(hp)} / ${maxHp}`);
+    hud.health.classList.toggle('low-health', hp / maxHp < 0.3);
+    setStyle(hud.stamina, 'width', `${Math.max(0, Math.min(100, (state.stamina ?? 100) / (state.maxStamina || 100) * 100))}%`);
     const souls = state.souls ?? 0, maxSouls = state.maxSouls || 6;
-    $('.soul-count').textContent = `${Math.ceil(souls)} / ${Math.ceil(maxSouls)}`;
-    $$('.soul-crystals i').forEach((crystal, i) => {
+    setText(hud.souls, `${Math.ceil(souls)} / ${Math.ceil(maxSouls)}`);
+    hud.crystals.forEach((crystal, i) => {
       const fill = Math.max(0, Math.min(1, souls / maxSouls * 6 - i));
       crystal.classList.toggle('filled', fill > 0);
-      crystal.style.background = `linear-gradient(0deg, #adedef ${fill * 100}%, #23393d ${fill * 100}%)`;
+      setStyle(crystal, 'background', `linear-gradient(0deg, #adedef ${fill * 100}%, #23393d ${fill * 100}%)`);
     });
-    $$('.stage-steps i').forEach((step, i) => {
+    hud.waves.forEach((step, i) => {
       step.classList.toggle('current', i + 1 === state.wave);
       step.classList.toggle('complete', i + 1 < state.wave);
     });
-    $('.kill-count').textContent = `斩敌 ${state.kills ?? 0} / ${state.total ?? 36}`;
-    $('.battle-time').textContent = timeLabel(state.time);
+    setText(hud.kills, `斩敌 ${state.kills ?? 0} / ${state.total ?? 36}`);
+    setText(hud.time, timeLabel(state.time));
     const combo = state.combo ?? 0;
-    $('.combo-panel').classList.toggle('is-hidden', combo < 2);
-    $('.combo-panel strong').textContent = combo;
+    hud.combo.classList.toggle('is-hidden', combo < 2);
+    setText(hud.comboCount, combo);
     const boss = (state.bossMaxHp || 0) > 0 && state.bossHp > 0;
-    $('.boss-panel').classList.toggle('is-hidden', !boss);
-    if (boss) $('.boss-track i').style.width = `${state.bossHp / state.bossMaxHp * 100}%`;
-    $$('.skill-button').forEach((button, i) => {
+    hud.boss.classList.toggle('is-hidden', !boss);
+    if (boss) setStyle(hud.bossFill, 'width', `${state.bossHp / state.bossMaxHp * 100}%`);
+    hud.skills.forEach(({button, cost, text, mask}, i) => {
       const skill = state.skills?.[i] || { cost: i > 2 ? 3 : 2, cooldown: 0, maxCooldown: 1 };
       const remaining = Math.max(0, skill.cooldown || 0);
       const insufficient = souls < (skill.cost || 0);
-      button.disabled = remaining > 0 || insufficient;
+      const disabled = remaining > 0 || insufficient;
+      if (button.disabled !== disabled) button.disabled = disabled;
       button.classList.toggle('cooling', remaining > 0);
       button.classList.toggle('no-souls', insufficient);
-      button.querySelector('.skill-cost').textContent = `◆ ${skill.cost || 0}`;
-      button.querySelector('.cooldown-text').textContent = remaining > 0 ? Math.ceil(remaining) : '';
-      button.querySelector('.cooldown-mask').style.height = `${Math.min(100, remaining / (skill.maxCooldown || 1) * 100)}%`;
-      button.title = `${names[i]} · ${skill.cost || 0} 魂${remaining > 0 ? ` · 冷却 ${Math.ceil(remaining)} 秒` : insufficient ? ' · 魂力不足，斩敌可获得魂力' : ` · 快捷键 ${i + 1}`}`;
+      setText(cost, `◆ ${skill.cost || 0}`);
+      setText(text, remaining > 0 ? Math.ceil(remaining) : '');
+      setStyle(mask, 'height', `${Math.min(100, remaining / (skill.maxCooldown || 1) * 100)}%`);
+      const title = `${names[i]} · ${skill.cost || 0} 魂${remaining > 0 ? ` · 冷却 ${Math.ceil(remaining)} 秒` : insufficient ? ' · 魂力不足，斩敌可获得魂力' : ` · 快捷键 ${i + 1}`}`;
+      if (button.title !== title) button.title = title;
     });
-    $$('.special-button').forEach(button => {
+    hud.specials.forEach(({button, label}) => {
       const available = state.specials?.[button.dataset.special] !== false;
-      button.disabled = !available;
-      button.querySelector('small').textContent = available ? '一次' : '已用';
+      if (button.disabled !== !available) button.disabled = !available;
+      setText(label, available ? '一次' : '已用');
     });
     if (typeof state.sound === 'boolean' && sound !== state.sound) { sound = state.sound; updateSound(); }
   }
@@ -147,6 +170,11 @@ export function createUI(callbacks = {}) {
     const modal = !['start', 'hide'].includes(next);
     $('.modal-layer').classList.toggle('is-hidden', !modal);
     if (!modal) return;
+    // A transient wave message should never cover the pause or result menu.
+    clearTimeout(noticeTimer);
+    noticeEntrance?.cancel();
+    $('.notification').classList.remove('visible');
+    $('.notification').classList.add('is-hidden');
     const controls = `<div class="modal-settings"><button class="text-button" data-action="sound">声音 · ${sound ? '开' : '关'}</button><button class="text-button" data-action="help">操作指引</button></div>`;
     let content;
     if (next === 'pause') {
@@ -166,9 +194,14 @@ export function createUI(callbacks = {}) {
   function notify(text) {
     clearTimeout(noticeTimer);
     const el = $('.notification');
-    el.querySelector('span').textContent = text;
-    el.classList.remove('visible');
-    requestAnimationFrame(() => el.classList.add('visible'));
+    noticeEntrance?.cancel();
+    setText(el.querySelector('span'), text);
+    el.classList.remove('is-hidden');
+    el.classList.add('visible');
+    noticeEntrance = el.animate([
+      { opacity: 0, transform: 'translate(-50%, -8px)' },
+      { opacity: 1, transform: 'translate(-50%, 0)' },
+    ], { duration: matchMedia('(prefers-reduced-motion: reduce)').matches ? 100 : 240, easing: 'cubic-bezier(.22,.61,.36,1)' });
     noticeTimer = setTimeout(() => el.classList.remove('visible'), 2700);
   }
 
@@ -189,5 +222,5 @@ export function createUI(callbacks = {}) {
   }
 
   updateSound();
-  return { update, showScreen, notify, damage, destroy() { clearTimeout(noticeTimer); root.remove(); } };
+  return { update, showScreen, notify, damage, destroy() { clearTimeout(noticeTimer); noticeEntrance?.cancel(); root.remove(); } };
 }

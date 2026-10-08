@@ -5,6 +5,8 @@ export function createEffects(scene, camera) {
   const temp = new THREE.Vector3(), cameraRight = new THREE.Vector3(), cameraUp = new THREE.Vector3();
   const dummy = new THREE.Object3D(), tint = new THREE.Color();
   const palette = [0xffe3a9, 0xfff8e6, 0xd9b9ff, 0xb4d3ff], trailLife = 0.105;
+  // Allow two maximum-length (250ms) frames to present; retain 60Hz ground drag.
+  const firstPresentationTimeout = 0.5, groundDrag = -60 * Math.log(0.72);
   const additive = (color, opacity = 1) => new THREE.MeshBasicMaterial({color, transparent:true, opacity, depthWrite:false, side:THREE.DoubleSide, blending:THREE.AdditiveBlending, toneMapped:false});
   function cachedGeometry(key, make) {
     if (!geometries.has(key)) geometries.set(key, make());
@@ -61,15 +63,27 @@ export function createEffects(scene, camera) {
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); mesh.frustumCulled = false; mesh.count = 0; mesh.visible = false; mesh.renderOrder = debris ? 0 : 2;
     for (let i=0;i<capacity;i++) mesh.setColorAt(i,tint.setHex(0xffffff));
     mesh.instanceColor.setUsage(THREE.DynamicDrawUsage); scene.add(mesh);
-    return {mesh,debris,cursor:0,particles:Array.from({length:capacity},()=>({active:false,pos:new THREE.Vector3(),velocity:new THREE.Vector3(),color:new THREE.Color(),age:0,life:0,x:0,y:0,z:0,angle:0,spin:0,gravity:0}))};
+    const pool = {mesh,debris,cursor:0,submitted:new Array(capacity),submittedGeneration:new Uint32Array(capacity),particles:Array.from({length:capacity},()=>({active:false,pos:new THREE.Vector3(),velocity:new THREE.Vector3(),color:new THREE.Color(),age:0,life:0,x:0,y:0,z:0,angle:0,spin:0,gravity:0,awaitingPresentation:false,generation:0}))};
+    // Simulation may run several times before a draw. Only an actual draw starts
+    // the short impact flash's fade; motion and unseen-particle timeout continue.
+    mesh.onBeforeRender = () => {
+      for (let i=0;i<mesh.count;i++) {
+        const p = pool.submitted[i];
+        if(p?.active && p.awaitingPresentation && p.generation===pool.submittedGeneration[i]) {
+          p.awaitingPresentation=false; p.age=0;
+        }
+      }
+    };
+    return pool;
   }
   const flashes = particlePool(flatShape([[1,0],[0.13,0.12],[0,0.8],[-0.13,0.12],[-1,0],[-0.13,-0.12],[0,-0.8],[0.13,-0.12]]),64);
   const slivers = particlePool(flatShape([[-0.5,0],[0,0.075],[0.5,0],[0,-0.075]]),160);
   const chips = particlePool(new THREE.OctahedronGeometry(1,0),96,true), particlePools = [flashes,slivers,chips];
-  function emit(pool,pos,velocity,color,life,x,y,z=1,gravity=0,angle=0) {
+  function emit(pool,pos,velocity,color,life,x,y,z=1,gravity=0,angle=0,awaitPresentation=false) {
     const p = pool.particles[pool.cursor++ % pool.particles.length];
     p.active=true; p.pos.copy(pos); p.velocity.copy(velocity); p.color.setHex(color);
     p.age=0; p.life=life; p.x=x; p.y=y; p.z=z; p.gravity=gravity; p.angle=angle; p.spin=(Math.random()-0.5)*8;
+    p.awaitingPresentation=awaitPresentation; p.generation=(p.generation+1)>>>0;
   }
   function updateParticles(dt) {
     cameraRight.set(1,0,0).applyQuaternion(camera.quaternion); cameraUp.set(0,1,0).applyQuaternion(camera.quaternion);
@@ -77,10 +91,10 @@ export function createEffects(scene, camera) {
       let count=0;
       for (const p of pool.particles) {
         if (!p.active) continue;
-        p.age+=dt; if(p.age>=p.life){p.active=false;continue;}
+        p.age+=dt; if(p.age>=(p.awaitingPresentation?firstPresentationTimeout:p.life)){p.active=false;continue;}
         p.velocity.y-=dt*p.gravity; p.pos.addScaledVector(p.velocity,dt);
-        if(pool.debris && p.pos.y<0.055){p.pos.y=0.055;p.velocity.y=0;p.velocity.x*=0.72;p.velocity.z*=0.72;}
-        const phase=p.age/p.life,fade=Math.pow(1-phase,pool.debris?0.4:1.3);
+        if(pool.debris && p.pos.y<0.055){const drag=Math.exp(-groundDrag*dt);p.pos.y=0.055;p.velocity.y=0;p.velocity.x*=drag;p.velocity.z*=drag;}
+        const phase=p.awaitingPresentation?0:p.age/p.life,fade=Math.pow(1-phase,pool.debris?0.4:1.3);
         dummy.position.copy(p.pos);
         if(pool.debris) dummy.rotation.set(p.angle+p.age*p.spin,p.age*p.spin,p.angle);
         else {
@@ -90,6 +104,7 @@ export function createEffects(scene, camera) {
         }
         const scale=pool.debris?Math.max(0.03,fade):0.6+0.4*fade;
         dummy.scale.set(p.x*scale,p.y*scale,p.z*scale); dummy.updateMatrix();
+        pool.submitted[count]=p;pool.submittedGeneration[count]=p.generation;
         pool.mesh.setMatrixAt(count,dummy.matrix); pool.mesh.setColorAt(count++,tint.copy(p.color).multiplyScalar(pool.debris?1:fade));
       }
       pool.mesh.count=count;pool.mesh.visible=count>0;
@@ -103,12 +118,12 @@ export function createEffects(scene, camera) {
     side.set(-direction.z,0.15,direction.x).normalize();
     cameraRight.set(1,0,0).applyQuaternion(camera.quaternion);cameraUp.set(0,1,0).applyQuaternion(camera.quaternion);
     const angle=Math.atan2(direction.dot(cameraUp),direction.dot(cameraRight)),size=0.22+weight*0.1;
-    emit(flashes,position,zero,0xfff9df,0.06+(critical?0.015:0),size,size*0.75,1,0,angle);
+    emit(flashes,position,zero,0xfff9df,0.06+(critical?0.015:0),size,size*0.75,1,0,angle,true);
     emit(flashes,position,zero,0xd3a8ef,critical?0.16:0.12,size*(critical?2.2:1.65),size*0.66,1,0,angle+0.6);
     for(let i=0,count=critical?8:Math.round(4+weight);i<count;i++){
       velocity.copy(direction).multiplyScalar(3+Math.random()*3*weight).addScaledVector(side,(Math.random()-0.5)*(critical?4.4:3));
       velocity.y+=0.2+Math.random()*1.5;point.copy(position).addScaledVector(side,(Math.random()-0.5)*0.12);
-      emit(slivers,point,velocity,palette[i%palette.length],0.13+Math.random()*0.09,0.26+Math.random()*0.35*weight,0.15+Math.random()*0.12,1,5);
+      emit(slivers,point,velocity,palette[i%palette.length],0.13+Math.random()*0.09,0.26+Math.random()*0.35*weight,0.15+Math.random()*0.12,1,5,0,true);
     }
     if(critical)ring(position,0.85+weight*0.12,0xd5b6ed,0.17);
   }
