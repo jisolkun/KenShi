@@ -19,3 +19,4 @@
 @media(max-width:700px){.damage-number.critical{font-size:30px}.damage-number.critical:after{font-size:13px;letter-spacing:1px}}
 @media(max-height:500px) and (orientation:landscape){.damage-number.critical{font-size:30px}.damage-number.critical:after{font-size:13px;letter-spacing:1px}}
 .notification{width:max-content}.notification span{text-wrap:balance}.notification.visible{transition:none}
+.game-interface[data-mode]:not([data-mode="hide"]):not([data-mode="start"]) .damage-layer{visibility:hidden}
