@@ -12,6 +12,10 @@ const specialIcons = {
   captain: icon('<path d="M12 16V9l8-5 8 5v7l-8 8zM6 35l2-8 8-4 4 6 4-6 8 4 2 8M11 12h18" stroke="currentColor" stroke-width="2"/><path d="M17 15h6v4h-6z" fill="currentColor"/>'),
 };
 const names = ['突进斩', '回旋斩', '跃空斩', '玄冰阵', '飞刃'];
+const healthRatio = (hp, maximum) => {
+  if (!Number.isFinite(hp) || !Number.isFinite(maximum) || maximum <= 0) return 0;
+  return Math.max(0, Math.min(1, hp / maximum));
+};
 const timeLabel = seconds => `${String(Math.floor((seconds || 0) / 60)).padStart(2, '0')}:${String(Math.floor((seconds || 0) % 60)).padStart(2, '0')}`;
 
 export function createUI(callbacks = {}) {
@@ -115,8 +119,9 @@ export function createUI(callbacks = {}) {
   }
 
   function update(state) {
-    const hp = Math.max(0, state.hp ?? 100), maxHp = state.maxHp || 100;
-    setStyle(hud.healthFill, 'width', `${Math.min(100, hp / maxHp * 100)}%`);
+    const maxHp = Number.isFinite(state.maxHp) && state.maxHp > 0 ? state.maxHp : 100;
+    const hp = Number.isFinite(state.hp) ? Math.max(0, Math.min(maxHp, state.hp)) : maxHp;
+    setStyle(hud.healthFill, 'width', `${healthRatio(hp, maxHp) * 100}%`);
     setText(hud.healthText, `${Math.ceil(hp)} / ${maxHp}`);
     hud.health.classList.toggle('low-health', hp / maxHp < 0.3);
     setStyle(hud.stamina, 'width', `${Math.max(0, Math.min(100, (state.stamina ?? 100) / (state.maxStamina || 100) * 100))}%`);
@@ -136,9 +141,9 @@ export function createUI(callbacks = {}) {
     const combo = state.combo ?? 0;
     hud.combo.classList.toggle('is-hidden', combo < 2);
     setText(hud.comboCount, combo);
-    const boss = (state.bossMaxHp || 0) > 0 && state.bossHp > 0;
-    hud.boss.classList.toggle('is-hidden', !boss);
-    if (boss) setStyle(hud.bossFill, 'width', `${state.bossHp / state.bossMaxHp * 100}%`);
+    const bossRatio = healthRatio(state.bossHp, state.bossMaxHp);
+    hud.boss.classList.toggle('is-hidden', bossRatio <= 0);
+    setStyle(hud.bossFill, 'width', `${bossRatio * 100}%`);
     hud.skills.forEach(({button, cost, text, mask}, i) => {
       const skill = state.skills?.[i] || { cost: i > 2 ? 3 : 2, cooldown: 0, maxCooldown: 1 };
       const remaining = Math.max(0, skill.cooldown || 0);

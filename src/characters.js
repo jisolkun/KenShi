@@ -237,8 +237,8 @@ export function createCharacter(type = 'hero') {
   }
   let bow = null;
   if (hero) {
-    sword(arms[0].wrist,.84);
-    sword(arms[1].wrist,.9);
+    arms[0].weapon=sword(arms[0].wrist,.84);
+    arms[1].weapon=sword(arms[1].wrist,.9);
   } else if (heavy) {
     const hammer = joint(arms[1].wrist,'hammer');
     mesh(hammer,cylinder,'dark',[.042,.85,.042],[0,-.35,0]);
@@ -292,6 +292,7 @@ export function createCharacter(type = 'hero') {
   const bind = resetNodes.map(n => ({node:n, p:n.position.clone(),r:n.rotation.clone(),s:n.scale.clone()}));
   const rig = {
     type, group, body, chest, ribcage, head, pony, legs, arms, cloths, bow, bind,
+    swords: hero ? arms.map(arm=>arm.weapon) : [],
     idleOffset: (characterSerial++ * 2.3999632297) % TAU,
     weaponTips() { group.updateMatrixWorld(true); return tips.map(t => t.getWorldPosition(new THREE.Vector3())); },
     setFlash(amount) {
@@ -571,9 +572,13 @@ function sampleLocomotion(rig,gait,blend,speed,turn,time) {
     const swing=Math.sin(gait+(arm.side===-1?Math.PI:0));
     if(type==='hero'){
       // The same relaxed low hands carry from rest into the first running step.
-      arm.shoulder.rotation.set(mix(.24,.34,blend)+swing*.035*blend,arm.side*-.025,arm.side*mix(.105,.13,blend));
+      arm.shoulder.rotation.set(mix(.24,.34,blend)+swing*.035*blend,arm.side*-.025,arm.side*mix(.20,.215,blend));
       arm.elbow.rotation.set(mix(-.14,-.17,blend),0,0);
-      arm.wrist.rotation.set(mix(.33,.35,blend),arm.side*.025,arm.side*.14);
+      arm.wrist.rotation.set(mix(-.4075,-.5875,blend),arm.side*.025,arm.side*.14);
+      // Side-view blade angle: up=0°, forward=90°, down=180°. The relaxed
+      // diagonal grip and moderate wrist bend share a forward/down 120° hold.
+      arm.weapon.position.set(0,-.029,0); // Handle axis passes through the palm.
+      arm.weapon.rotation.set(-.85,0,0);
     }else{
       arm.shoulder.rotation.x=mix(arm.shoulder.rotation.x,.25+swing*.18,blend);
       if(type!=='archer')arm.elbow.rotation.x=mix(arm.elbow.rotation.x,-.48,blend);

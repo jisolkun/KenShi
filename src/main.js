@@ -637,8 +637,13 @@ function finishGame(won) {
   }
 }
 
+function healthRatio(hp, maxHp) {
+  if (!Number.isFinite(hp) || !Number.isFinite(maxHp) || maxHp <= 0) return 0;
+  return THREE.MathUtils.clamp(hp / maxHp, 0, 1);
+}
 function makeBar(type) {
   const g = new THREE.Group();
+  const width = type === "boss" ? 1.76 : 1;
   const back = new THREE.Mesh(
     new THREE.PlaneGeometry(type === "boss" ? 1.8 : 1.05, 0.09),
     new THREE.MeshBasicMaterial({
@@ -646,22 +651,51 @@ function makeBar(type) {
       transparent: true,
       opacity: 0.85,
       depthTest: false,
+      depthWrite: false,
+      toneMapped: false,
     }),
   );
   const fill = new THREE.Mesh(
-    new THREE.PlaneGeometry(type === "boss" ? 1.76 : 1, 0.052),
+    new THREE.PlaneGeometry(width, 0.064),
     new THREE.MeshBasicMaterial({
-      color: type === "boss" ? 0xefaa58 : 0xdc624e,
+      color: type === "boss" ? 0xefaa58 : 0xef674f,
+      transparent: true,
+      opacity: 1,
       depthTest: false,
+      depthWrite: false,
+      toneMapped: false,
     }),
   );
+  // Both layers belong to the transparent pass. Render order guarantees that
+  // the black track draws first; an opaque fill would be covered afterward.
+  g.renderOrder = 200;
+  back.renderOrder = 200;
+  fill.renderOrder = 201;
   fill.position.z = 0.002;
   g.add(back, fill);
-  g.renderOrder = 10;
+  g.visible = false;
+  g.userData.back = back;
   g.userData.fill = fill;
-  g.userData.width = type === "boss" ? 1.76 : 1;
+  g.userData.width = width;
   scene.add(g);
   return g;
+}
+function updateEnemyBar(e) {
+  const ratio = healthRatio(e.hp, e.maxHp);
+  const fill = e.bar.userData.fill;
+  fill.scale.x = ratio;
+  fill.position.x = -(1 - ratio) * e.bar.userData.width * 0.5;
+  fill.visible = ratio > 0;
+  e.bar.visible =
+    e.state !== "dead" &&
+    ratio > 0 &&
+    (ratio < 1 || e.type === "boss" || e === hero.target);
+  e.bar.position.set(
+    e.pos.x,
+    e.type === "boss" ? 3.6 : e.type === "brute" ? 2.85 : 2.25,
+    e.pos.z,
+  );
+  e.bar.quaternion.copy(camera.quaternion);
 }
 const enemyStats = {
   grunt: { hp: 65, speed: 2.05, range: 1.55, damage: 7, radius: 0.45 },
@@ -773,6 +807,7 @@ function hurtEnemy(
 ) {
   if (e.state === "dead" || e.state === "spawn") return false;
   e.hp = Math.max(0, e.hp - damage);
+  updateEnemyBar(e);
   e.flash = 1;
   temp.subVectors(e.pos, from);
   if (temp.lengthSq() < 0.01)
@@ -951,6 +986,7 @@ function commandTap(position, enemy = null) {
   destinationMarker.scale.setScalar(1);
   if (hero.target) {
     targetMarker.visible = true;
+    updateEnemyBar(enemy);
     targetMarker.position.set(enemy.pos.x, 0.05, enemy.pos.z);
   } else targetMarker.visible = false;
 }
@@ -1620,18 +1656,7 @@ function updateEnemies(dt) {
       hurtDirection: e.hurtDirection || 0,
       hurtStrength: e.hurtStrength || 0,
     });
-    e.bar.visible =
-      e.state !== "dead" &&
-      (e.hp < e.maxHp || e.type === "boss" || e === hero.target);
-    e.bar.position.set(
-      e.pos.x,
-      e.type === "boss" ? 3.6 : e.type === "brute" ? 2.85 : 2.25,
-      e.pos.z,
-    );
-    e.bar.quaternion.copy(camera.quaternion);
-    const fill = e.bar.userData.fill;
-    fill.scale.x = e.hp / e.maxHp;
-    fill.position.x = -(1 - e.hp / e.maxHp) * e.bar.userData.width * 0.5;
+    updateEnemyBar(e);
   }
   if (enemies.filter((e) => e.state !== "dead").length === 0 && waveTimer < 0) {
     if (wave === 3) {
@@ -2337,16 +2362,22 @@ if (new URLSearchParams(location.search).get("debug") === "1") {
         body: joint(rig.body),
         chest: joint(rig.chest),
         ribcage: rig.ribcage
-          ? { ...joint(rig.ribcage), worldPos: xyz(rig.ribcage.getWorldPosition(new THREE.Vector3())) }
+          ? {
+              ...joint(rig.ribcage),
+              worldPos: xyz(rig.ribcage.getWorldPosition(new THREE.Vector3())),
+            }
           : null,
         head: joint(rig.head),
         arms: rig.arms.map((arm) => ({
           side: arm.side,
           shoulder: joint(arm.shoulder),
-          shoulderWorldPos: xyz(arm.shoulder.getWorldPosition(new THREE.Vector3())),
+          shoulderWorldPos: xyz(
+            arm.shoulder.getWorldPosition(new THREE.Vector3()),
+          ),
           elbow: joint(arm.elbow),
           wrist: joint(arm.wrist),
           worldPos: xyz(arm.wrist.getWorldPosition(new THREE.Vector3())),
+          weaponWorldPos: xyz(arm.weapon.getWorldPosition(new THREE.Vector3())),
         })),
         weaponTips: rig.weaponTips().map(xyz),
         legs: rig.legs.map((leg) => ({
@@ -2386,6 +2417,122 @@ if (new URLSearchParams(location.search).get("debug") === "1") {
       roll(new THREE.Vector3(x, 0, z));
     },
     special: useSpecial,
+    getBars() {
+      return enemies.map((e) => {
+        const bar = e.bar,
+          fill = bar.userData.fill,
+          width = bar.userData.width;
+        bar.updateMatrixWorld(true);
+        const screenPoint = (x, node, y = 0) =>
+          worldToScreen(
+            new THREE.Vector3(x, y, 0).applyMatrix4(node.matrixWorld),
+          );
+        const left = screenPoint(-width / 2, bar),
+          right = screenPoint(width / 2, bar);
+        const fillLeft = screenPoint(-width / 2, fill),
+          fillRight = screenPoint(width / 2, fill);
+        const back = bar.userData.back;
+        const backLeft = screenPoint(-back.geometry.parameters.width / 2, bar),
+          backRight = screenPoint(back.geometry.parameters.width / 2, bar),
+          backTop = screenPoint(0, bar, back.geometry.parameters.height / 2),
+          backBottom = screenPoint(
+            0,
+            bar,
+            -back.geometry.parameters.height / 2,
+          );
+        const fillTop = screenPoint(
+            0,
+            fill,
+            fill.geometry.parameters.height / 2,
+          ),
+          fillBottom = screenPoint(
+            0,
+            fill,
+            -fill.geometry.parameters.height / 2,
+          );
+        const material = (mesh) => ({
+          transparent: mesh.material.transparent,
+          opacity: mesh.material.opacity,
+          depthTest: mesh.material.depthTest,
+          depthWrite: mesh.material.depthWrite,
+          toneMapped: mesh.material.toneMapped,
+          color: mesh.material.color.getHexString(),
+          renderOrder: mesh.renderOrder,
+        });
+        return {
+          id: e.id,
+          type: e.type,
+          hp: e.hp,
+          maxHp: e.maxHp,
+          state: e.state,
+          ratio: healthRatio(e.hp, e.maxHp),
+          visible: bar.visible,
+          screen: {
+            center: screenPoint(0, bar),
+            left,
+            right,
+            width: Math.hypot(right.x - left.x, right.y - left.y),
+            fullWidthPixels: Math.hypot(
+              backRight.x - backLeft.x,
+              backRight.y - backLeft.y,
+            ),
+            height: Math.hypot(
+              backBottom.x - backTop.x,
+              backBottom.y - backTop.y,
+            ),
+            backLeft,
+            backRight,
+            backTop,
+            backBottom,
+          },
+          fill: {
+            visible: fill.visible,
+            scale: fill.scale.x,
+            x: fill.position.x,
+            height: Math.hypot(
+              fillBottom.x - fillTop.x,
+              fillBottom.y - fillTop.y,
+            ),
+            top: fillTop,
+            bottom: fillBottom,
+            left: fillLeft,
+            right: fillRight,
+            width: Math.hypot(
+              fillRight.x - fillLeft.x,
+              fillRight.y - fillLeft.y,
+            ),
+          },
+          materials: {
+            back: material(bar.userData.back),
+            fill: material(fill),
+            groupOrder: bar.renderOrder,
+          },
+        };
+      });
+    },
+    damageEnemy(id, amount) {
+      const e = enemies.find((enemy) => enemy.id === id);
+      if (!e || e.state === "dead" || !Number.isFinite(amount) || amount <= 0)
+        return false;
+      if (e.state === "spawn") e.state = "idle";
+      return hurtEnemy(e, amount, hero.pos, 1, false, false);
+    },
+    positionEnemy(id, x, z) {
+      const e = enemies.find((enemy) => enemy.id === id);
+      if (
+        !e ||
+        e.state === "dead" ||
+        !Number.isFinite(x) ||
+        !Number.isFinite(z)
+      )
+        return false;
+      e.pos.set(x, 0, z);
+      clampPosition(e.pos, e.radius);
+      e.velocity.set(0, 0, 0);
+      e.rig.group.position.copy(e.pos);
+      updateEnemyBar(e);
+      return true;
+    },
     getTargets() {
       return enemies
         .filter((e) => e.state !== "dead")
