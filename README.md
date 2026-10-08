@@ -44,14 +44,14 @@ npm run preview
 
 测试关包含三波、共36名敌人（含Boss）。清空敌人即可胜利；三星分别对应全灭、180秒内完成、受击不超过两次。普通近战采用四段双刃快斩，配合五种主动技能。这些连招、技能配置与数值属于本原型的设计参数。
 
-生产构建与25项浏览器检查已通过，覆盖核心操作、技能、支援、三波胜败及模拟触屏布局。详见 [docs/VALIDATION.md](docs/VALIDATION.md)。线上部署核对仍在进行。
+生产构建与25项浏览器检查已通过，覆盖核心操作、技能、支援、三波胜败及模拟触屏布局。详见 [docs/VALIDATION.md](docs/VALIDATION.md)。GitHub Pages 已发布，并完成 HTTPS 资源一致性与浏览器交互核对。
 
 ## GitHub Pages
 
 开发分支为 `Undead-Slayer2`。推送该分支会触发 `.github/workflows/pages.yml`，使用 Node.js 22 安装依赖，以 `/KenShi/` 为资源前缀构建并上传 Pages 产物，供检查；推送本身不发布站点。
 
-发布通过 `main` 分支上的同名工作流手动触发，`source_ref` 默认填 `Undead-Slayer2`，也可以指定提交。工作流构建该来源后，从 `main` 运行部署任务，以符合现有 `github-pages` 环境的分支策略。只有 `main` 上的手动运行执行部署。仓库 Pages 使用 GitHub Actions 工作流模式。
+发布通过 `main` 分支上的同名工作流手动触发，`source_ref` 默认填 `Undead-Slayer2`，也可以填写完整40位提交哈希；短提交号可能被 checkout 当作分支名。工作流构建该来源后，从 `main` 运行部署任务，以符合现有 `github-pages` 环境的分支策略。只有 `main` 上的手动运行执行部署。仓库 Pages 使用 GitHub Actions 工作流模式。
 
-站点地址：[https://jisolkun.github.io/KenShi/](https://jisolkun.github.io/KenShi/)。该地址的实际版本以最近一次成功部署为准。
+站点地址：[https://jisolkun.github.io/KenShi/](https://jisolkun.github.io/KenShi/)。站点已发布；验证版本为 `c1d172b45dfd67f785010b9e0ef53185a1e9a17f`，后续版本以最近一次成功部署为准。
 
 玩法资料、同期评测引用、图证与尚未确认的逐帧细节见 [docs/REFERENCE.md](docs/REFERENCE.md)。本项目只有一个测试关；模型、场景与战斗数值由本项目实现，不使用原版游戏资源。

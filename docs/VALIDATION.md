@@ -20,4 +20,12 @@
 
 使用浏览器自动化、软件WebGL和模拟触屏设备。结果证明所列交互与布局在该测试环境通过，不代表真实手机的帧率、电池消耗、所有浏览器兼容性，也不证明与原版逐帧或数值一比一。
 
-GitHub Pages 部署正在进行，本记录不宣称线上版本已完成核对。
+## GitHub Pages 发布核对
+
+站点：[https://jisolkun.github.io/KenShi/](https://jisolkun.github.io/KenShi/)。[Pages Action运行成功](https://github.com/jisolkun/KenShi/actions/runs/37720884729)，部署的游戏代码提交为 `c1d172b45dfd67f785010b9e0ef53185a1e9a17f`。
+
+传输核对：通过保留TLS证书验证的HTTPS实际GET，站点返回200，页面标题为“亡灵杀手·荒寺夜袭”。远程HTML引用的 `index-CnoVPZmO.js`（606658字节）、`index-BsIZH_19.css`及 favicon 的字节SHA256均与本地 `dist/` 完全一致。
+
+浏览器执行核对：由于测试环境浏览器CA与代理不兼容，未关闭TLS验证；使用经TLS校验的curl下载远程资源，在该线上URL的浏览器请求中回放。真实鼠标点地移动、点击敌人自动攻击并出现combo 2通过，页面错误数为0。
+
+传输与浏览器执行分别完成核对。该方式不等同于浏览器原生网络证书链检查通过，也不代表线上真实手机验证。
