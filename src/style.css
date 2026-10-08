@@ -36,6 +36,8 @@
 }
 .orientation-notice b{font-size:20px;letter-spacing:5px;color:#f0d49e}
 .orientation-notice>span{font-size:13px;letter-spacing:2px;color:#b7b9a6}
+.orientation-retry{margin-top:10px;padding:11px 18px;border:1px solid #d3b47b;background:#263a3b;color:#f0d49e;font-size:12px;letter-spacing:2px}
+.orientation-retry:active{background:#40504a}
 .orientation-icon{
   width:74px;
   height:48px;
@@ -47,6 +49,6 @@
   font:36px/1 Georgia,serif;
   transform:rotate(-90deg);
 }
-@media(orientation:portrait){
-  .game-interface[data-phone="true"]:not([data-mode="start"]) .orientation-notice{display:grid}
-}
+.game-interface[data-phone="true"]:not([data-mode="start"])[data-fullscreen="false"] .orientation-notice,
+.game-interface[data-phone="true"]:not([data-mode="start"])[data-landscape="false"] .orientation-notice{display:grid}
+.game-interface .notification{z-index:40}

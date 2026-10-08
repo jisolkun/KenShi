@@ -191,6 +191,7 @@ const keys = new Set();
 const damageQueue = [];
 const ui = createUI({
   start: startGame,
+  mobileViewRetry: retryMobilePresentation,
   pause: pauseGame,
   resume: resumeGame,
   retry: startGame,
@@ -550,9 +551,23 @@ function clearDynamic() {
   }
   fx.clear();
 }
+function reportMobilePresentation(result) {
+  if (!result.entered) {
+    ui.notify(result.unsupported
+      ? "当前浏览器不支持网页全屏 · 请将游戏添加到手机主屏幕后打开"
+      : "浏览器未允许全屏 · 请点击提示按钮重试");
+  } else if (!result.landscape) {
+    ui.notify("全屏已开启 · 请打开自动旋转并将手机转为横向");
+  }
+}
+function retryMobilePresentation() {
+  const request = requestMobileFullscreen();
+  if (request) void request.then(reportMobilePresentation);
+}
 function startGame() {
+  // Keep the Fullscreen API call at the very start of the trusted start click.
+  const mobilePresentationRequest = requestMobileFullscreen();
   audio.unlock?.();
-  requestMobileFullscreen();
   keys.clear();
   lastTap = null;
   pointerStart = null;
@@ -606,6 +621,7 @@ function startGame() {
   destinationMarker.visible = false;
   targetMarker.visible = false;
   ui.showScreen("hide");
+  if (mobilePresentationRequest) void mobilePresentationRequest.then(reportMobilePresentation);
   spawnWave(1);
   ui.notify("第一阵 · 山门尸潮");
   cameraFocus.copy(hero.pos);

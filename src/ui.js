@@ -1,4 +1,4 @@
-import { isPhoneBrowser } from './fullscreen.js';
+import { isMobileFullscreen, isPhoneBrowser } from './fullscreen.js';
 
 const icon = (content, className = '') => `<svg class="${className}" viewBox="0 0 40 40" fill="none" aria-hidden="true">${content}</svg>`;
 const icons = [
@@ -23,7 +23,10 @@ const timeLabel = seconds => `${String(Math.floor((seconds || 0) / 60)).padStart
 export function createUI(callbacks = {}) {
   const root = document.createElement('div');
   root.className = 'game-interface';
-  root.dataset.phone = String(isPhoneBrowser());
+  const phoneBrowser = isPhoneBrowser();
+  root.dataset.phone = String(phoneBrowser);
+  root.dataset.fullscreen = String(!phoneBrowser || isMobileFullscreen());
+  root.dataset.landscape = String(!phoneBrowser || matchMedia('(orientation: landscape)').matches);
   root.innerHTML = `
     <div class="battle-hud is-hidden">
       <div class="player-panel">
@@ -55,7 +58,7 @@ export function createUI(callbacks = {}) {
     <div class="modal-layer is-hidden"><section class="game-modal" role="dialog" aria-modal="true" aria-label="战场菜单"></section></div>
     <div class="notification" role="status"><span></span></div>
     <div class="damage-layer" aria-hidden="true"></div>
-    <div class="orientation-notice" role="status"><div class="orientation-icon" aria-hidden="true">↻</div><b>请横屏游玩</b><span>将手机旋转至横向后继续</span></div>
+    <div class="orientation-notice" role="status"><div class="orientation-icon" aria-hidden="true">↻</div><b>请横屏游玩</b><span>将手机旋转至横向后继续</span><button class="orientation-retry" data-action="mobile-view-retry">重新尝试全屏与横屏</button></div>
   `;
   document.body.append(root);
   const $ = selector => root.querySelector(selector);
@@ -89,6 +92,28 @@ export function createUI(callbacks = {}) {
   let previousData = {};
   let lastCriticalLabelTime = -Infinity;
   const call = (name, ...args) => callbacks[name]?.(...args);
+  const syncMobileDisplay = () => {
+    if (!phoneBrowser) return;
+    root.dataset.fullscreen = String(isMobileFullscreen());
+    root.dataset.landscape = String(matchMedia('(orientation: landscape)').matches);
+    const title = $('.orientation-notice b');
+    const message = $('.orientation-notice>span');
+    if (root.dataset.fullscreen !== 'true') {
+      setText(title, '需要全屏游玩');
+      setText(message, '点击下方按钮重试；若仍失败，请将游戏添加到手机主屏幕后打开');
+    } else if (root.dataset.landscape !== 'true') {
+      setText(title, '请横屏游玩');
+      setText(message, '浏览器未能锁定方向，请打开自动旋转并将手机转为横向');
+    }
+  };
+  const onFullscreenChange = () => syncMobileDisplay();
+  if (phoneBrowser) {
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', onFullscreenChange);
+    window.addEventListener('resize', onFullscreenChange);
+    screen.orientation?.addEventListener?.('change', onFullscreenChange);
+    syncMobileDisplay();
+  }
 
   root.addEventListener('pointerdown', event => {
     if (event.target.closest('button, .game-modal, .intro-panel')) event.stopPropagation();
@@ -112,6 +137,8 @@ export function createUI(callbacks = {}) {
     } else if (action === 'close-help') {
       showScreen(previousMode, previousData);
       if (previousMode === 'hide') call('resume');
+    } else if (action === 'mobile-view-retry') {
+      call('mobileViewRetry');
     } else call(action);
   });
 
@@ -231,5 +258,15 @@ export function createUI(callbacks = {}) {
   }
 
   updateSound();
-  return { update, showScreen, notify, damage, destroy() { clearTimeout(noticeTimer); noticeEntrance?.cancel(); root.remove(); } };
+  return { update, showScreen, notify, damage, destroy() {
+    clearTimeout(noticeTimer);
+    noticeEntrance?.cancel();
+    if (phoneBrowser) {
+      document.removeEventListener('fullscreenchange', onFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', onFullscreenChange);
+      window.removeEventListener('resize', onFullscreenChange);
+      screen.orientation?.removeEventListener?.('change', onFullscreenChange);
+    }
+    root.remove();
+  } };
 }
