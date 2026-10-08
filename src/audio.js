@@ -13,7 +13,7 @@ export class GameAudio {
     if (!this.context) {
       const AudioContext = window.AudioContext || window.webkitAudioContext;
       if (!AudioContext) return;
-      this.context = new AudioContext();
+      this.context = new AudioContext({ latencyHint: 'interactive' });
       const c = this.context;
       this.master = c.createGain();
       this.master.gain.value = this.enabled ? 0.25 : 0;
@@ -65,7 +65,7 @@ export class GameAudio {
     osc.frequency.setValueAtTime(Math.max(20, frequency), t);
     osc.frequency.exponentialRampToValueAtTime(Math.max(20, endFrequency), t + duration);
     gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(Math.max(0.001, Math.min(volume, 0.48)), t + Math.min(0.009, duration / 4));
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.001, Math.min(volume, 0.48)), t + Math.min(.003, duration / 4));
     gain.gain.exponentialRampToValueAtTime(0.0001, t + duration);
     // Roll off the harsh oscillator harmonics while keeping the metal transient audible.
     const filter = c.createBiquadFilter(); filter.type = 'lowpass'; filter.frequency.value = type === 'sawtooth' ? 1400 : 4200;
@@ -80,7 +80,7 @@ export class GameAudio {
     filter.frequency.setValueAtTime(Math.max(40, frequency), t);
     filter.frequency.exponentialRampToValueAtTime(Math.max(40, endFrequency), t + duration);
     const gain = c.createGain(); gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(Math.max(0.001, Math.min(0.4, volume)), t + 0.007);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.001, Math.min(0.4, volume)), t + .003);
     gain.gain.exponentialRampToValueAtTime(0.0001, t + duration);
     source.connect(filter).connect(gain).connect(this.master);
     this.track(source, [filter, gain], t, duration);
@@ -88,33 +88,36 @@ export class GameAudio {
   impact(strength = 1, delay = 0) {
     const weight = Math.min(1.7, Math.max(0.5, strength));
     const detune = 0.94 + Math.random() * 0.12;
-    this.tone(118 * detune, 0.18 + weight * 0.035, 0.27 * weight, 'sine', 39, delay);
-    this.tone(230 * detune, 0.08, 0.13 * weight, 'triangle', 64, delay + 0.007);
-    this.hiss(0.055, 0.2 * weight, 2900, delay, 1250);
-    this.tone(910 * detune, 0.065, 0.055 * weight, 'triangle', 480, delay + 0.014);
-    this.tone(1470 * detune, 0.105, 0.018 * weight, 'sine', 1390, delay + 0.022);
+    // All contact layers start together; no delayed thump after the blade connects.
+    this.tone(138 * detune, .115 + weight * .015, .29 * weight, 'sine', 43, delay);
+    this.tone(286 * detune, .045, .10 * weight, 'triangle', 78, delay);
+    this.hiss(.042, .23 * weight, 3300, delay, 1150);
+    this.tone(1180 * detune, .072, .035 * weight, 'sine', 820, delay);
+
   }
   play(name, strength = 1) {
     if (!this.context || !this.enabled || this.context.state !== 'running') return;
     if (this.echoSend) this.echoSend.gain.setTargetAtTime(0.075, this.context.currentTime, 0.025);
     const variation = 0.94 + Math.random() * 0.12;
     switch (name) {
+      case 'draw':
+        this.hiss(.065, .05, 950, 0, 1650);
+        break;
+      case 'seal':
+        this.hiss(.1, .035, 1700, 0, 2200);
+        break;
       case 'slash':
-        // Air lead, weighted blade cut, brief steel crack and reflected decay.
-        this.hiss(0.13, 0.16, 850 * variation, 0, 2700);
-        this.tone(180 * variation, 0.105, 0.14, 'triangle', 60, 0.025);
-        this.hiss(0.055, 0.075, 3100, 0.044, 1400);
-        this.tone(1020 * variation, 0.1, 0.025, 'sine', 650, 0.05);
+        this.hiss(.085, .13 * strength, 1050 * variation, 0, 3300);
+        this.tone(420 * variation, .07, .035 * strength, 'triangle', 155);
         break;
       case 'hit':
-        if (this.context.currentTime - this.lastHit < 0.045) return;
+        if (this.context.currentTime - this.lastHit < .028) return;
         this.lastHit = this.context.currentTime;
         this.impact(strength);
         break;
       case 'heavy':
-        this.hiss(0.22, 0.22, 580, 0, 1900);
-        this.impact(1.4 * strength, 0.035);
-        this.tone(62, 0.37, 0.25, 'sine', 28, 0.045);
+        this.hiss(.13, .2, 650, 0, 2700);
+        this.tone(245, .11, .065, 'triangle', 70);
         break;
       case 'charge':
         this.hiss(0.4, 0.085, 280, 0, 1200);
@@ -122,11 +125,9 @@ export class GameAudio {
         this.tone(180, 0.4, 0.04, 'sine', 560, 0.04);
         break;
       case 'finisher':
-        this.hiss(0.22, 0.24, 700, 0, 3200);
-        this.impact(1.7, 0.065);
-        this.tone(56, 0.62, 0.34, 'sine', 27, 0.075);
-        this.hiss(0.36, 0.14, 430, 0.08, 110);
-        this.tone(660, 0.38, 0.035, 'sine', 330, 0.09);
+        this.hiss(.075, .12, 3600, 0, 1100);
+        this.tone(74, .22, .13, 'sine', 32);
+        this.tone(780, .13, .025, 'sine', 540);
         break;
       case 'hurt':
         this.hiss(0.17, 0.17, 400, 0, 130);
@@ -134,9 +135,8 @@ export class GameAudio {
         break;
       case 'roll': this.hiss(0.2, 0.13, 580, 0, 230); break;
       case 'dash':
-        this.hiss(0.3, 0.21, 360, 0, 1700);
-        this.tone(140, 0.22, 0.13, 'triangle', 410);
-        this.hiss(0.12, 0.1, 2100, 0.14, 600);
+        this.hiss(.13, .13, 540, 0, 2200);
+        this.tone(170, .1, .055, 'triangle', 380);
         break;
       case 'whirl':
         for (let i = 0; i < 3; i++) {

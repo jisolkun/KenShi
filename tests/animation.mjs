@@ -2,16 +2,16 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { createWarrior, createEnemy } from '../src/characters.js';
 import { animateCharacter } from '../src/animation.js';
+import { ACTION_CLIPS, COMBO_CLIPS, getActionClip } from '../src/action-clips.js';
 
 // These checks measure rendered geometry and world-space foot contacts rather
 // than comparing the animator's authored angles with copies of those angles.
 const bounds = new THREE.Box3();
 const dt = 1 / 120;
-const actions = { attack: .42, heavy: .83, roll: .48, whirl: .92, burst: 1.12, dash: .48, finisher: .8, frost: .68, blades: .56 };
-for (const [type, duration] of Object.entries(actions)) {
-  for (const step of type === 'attack' ? [0, 1, 2] : [0]) {
+for (const type of Object.keys(ACTION_CLIPS)) {
+  for (const step of type === 'attack' ? COMBO_CLIPS.map((_, index) => index) : [0]) {
     const model = createWarrior();
-    const clipDuration = type === 'attack' ? [.42, .45, .6][step] : duration;
+    const clipDuration = getActionClip(type, step).duration;
     const action = { type, duration: clipDuration, age: 0, step };
     let lowest = Infinity;
     for (let frame = 0; frame <= Math.ceil(clipDuration / dt); frame++) {
@@ -30,6 +30,79 @@ for (const [type, duration] of Object.entries(actions)) {
   }
 }
 console.log('PASS all 11 attack/skill clips: finite joints and floor clearance throughout the complete animation');
+
+// Carry the real articulated state across combo cuts and interrupted skills.
+// Fresh models alone cannot reveal a blade crossing the floor during a blend.
+for (const rate of [30, 60, 120]) {
+  const model = createWarrior();
+  model.rotation.y = .35;
+  const frameDt = 1 / rate;
+  let time = 0;
+  const sequence = [
+    ['attack', 0, COMBO_CLIPS[0].comboOpen], ['attack', 1, COMBO_CLIPS[1].comboOpen], ['attack', 2, 1],
+    ['roll', 0, .75], ['dash', 0, 1], ['heavy', 0, 1], ['frost', 0, 1],
+    ['blades', 0, 1], ['whirl', 0, 1], ['burst', 0, 1], ['finisher', 0, 1],
+  ];
+  for (let frame = 0; frame < rate; frame++) {
+    time += frameDt;
+    animateCharacter(model, 0, null, time, frameDt, true);
+  }
+  const previousAnkles = Object.fromEntries(['left', 'right'].map(side =>
+    [side, model.userData.rig[`${side}Foot`].getWorldPosition(new THREE.Vector3())]));
+  for (const [type, step, end] of sequence) {
+    const clip = getActionClip(type, step);
+    const action = { type, step, duration: clip.duration, age: 0 };
+    while (action.age < clip.duration * end) {
+      const stepDt = Math.min(frameDt, clip.duration * end - action.age);
+      action.age += stepDt;
+      time += stepDt;
+      model.rotation.y = .35;
+      animateCharacter(model, 0, action, time, stepDt, true);
+      model.updateMatrixWorld(true);
+      assert([...model.position, ...model.quaternion].every(Number.isFinite), `${type} root stays finite at ${rate} Hz`);
+      for (const joint of Object.values(model.userData.rig)) {
+        assert([...joint.position, ...joint.quaternion].every(Number.isFinite), `${type} ${joint.name} stays finite through a ${rate} Hz transition`);
+      }
+      assert(bounds.setFromObject(model).min.y >= -.015, `${type} transition must clear the floor at ${rate} Hz`);
+      for (const side of ['left', 'right']) {
+        const ankle = model.userData.rig[`${side}Foot`].getWorldPosition(new THREE.Vector3());
+        if (type === 'attack') {
+          // Allow a quick lifted step; reject a contact switching to the new
+          // lunge lead in one frame before the articulated legs can follow.
+          const travel = ankle.distanceTo(previousAnkles[side]);
+          assert(travel <= stepDt * 12 + .01,
+            `combo ${step} ${side} ankle must transfer continuously at ${rate} Hz (travel ${travel.toFixed(3)}m)`);
+        }
+        previousAnkles[side].copy(ankle);
+      }
+    }
+  }
+}
+console.log('PASS continuous combo and interrupted skill sequences at 30, 60 and 120 Hz: ankle continuity, finite transforms and floor clearance');
+
+// Check the rendered palm against the physical handle at the decisive cut.
+// A reachable IK target alone does not prove the support hand grips the dao.
+for (const [type, step] of [['heavy', 0], ['burst', 0], ['attack', 2]]) {
+  const model = createWarrior();
+  const clip = getActionClip(type, step);
+  const action = { type, step, duration: clip.duration, age: 0 };
+  const contactAge = clip.duration * clip.contact;
+  let time = 0;
+  while (time < contactAge) {
+    const frameDt = Math.min(dt, contactAge - time);
+    time += frameDt;
+    action.age = time;
+    model.rotation.y = 0;
+    animateCharacter(model, 0, action, time, frameDt, true);
+  }
+  model.updateMatrixWorld(true);
+  const { leftHand, weapon } = model.userData.rig;
+  const palm = leftHand.localToWorld(new THREE.Vector3(0, -.026, -.010));
+  weapon.worldToLocal(palm);
+  const handleDistance = Math.hypot(palm.x, palm.z, Math.max(0, -.16 - palm.y, palm.y - .13));
+  assert(handleDistance < .055, `${type} support palm must hold the physical handle (gap ${handleDistance.toFixed(3)}m)`);
+}
+console.log('PASS two-handed combo finish, heavy cut and jump crash: support palm stays on the physical handle');
 
 for (const type of ['hero', 'soldier', 'brute', 'archer']) {
   const model = type === 'hero' ? createWarrior() : createEnemy(type);

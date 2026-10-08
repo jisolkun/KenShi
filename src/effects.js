@@ -35,6 +35,15 @@ export class CombatEffects {
     this.geometryCache = new Map();
     this.batches = [this.makeBatch(false), this.makeBatch(true)];
     this.tempColor = new THREE.Color();
+    this.weaponSamples = new WeakMap();
+    this.ribbonPool = Array.from({ length: 96 }, () => ({ points: new Float32Array(12), age: 0, life: .105, color: new THREE.Color() }));
+    this.ribbonLive = [];
+    this.ribbon = this.makeRibbonBatch();
+    this.ribbonAttributes = Object.values(this.ribbon.geometry.attributes);
+    this.ribbonCorners = [0, 1, 2, 2, 1, 3];
+    this.impactPool = [];
+    this.ribbonBase = new THREE.Vector3();
+    this.ribbonTip = new THREE.Vector3();
   }
   makeBatch(dust) {
     const geometry = new THREE.BufferGeometry();
@@ -49,6 +58,62 @@ export class CombatEffects {
     points.renderOrder = dust ? 3 : 5;
     this.root.add(points);
     return points;
+  }
+  makeRibbonBatch() {
+    const geometry = new THREE.BufferGeometry();
+    for (const [name, size] of [['position', 3], ['color', 3], ['alpha', 1]]) {
+      geometry.setAttribute(name, new THREE.BufferAttribute(new Float32Array(96 * 6 * size), size).setUsage(THREE.DynamicDrawUsage));
+    }
+    geometry.setDrawRange(0, 0);
+    const mesh = new THREE.Mesh(geometry, this.material(0xffffff, .82));
+    mesh.frustumCulled = false;
+    mesh.renderOrder = 5;
+    this.root.add(mesh);
+    return mesh;
+  }
+  // Sample the actual forged edge, after the animated hand/weapon matrix update.
+  // Old samples are pooled; every live edge shares one draw call and material.
+  weaponTrail(weapon, stroke, enabled, color = GOLD) {
+    if (!weapon) return;
+    let sample = this.weaponSamples.get(weapon);
+    if (!sample) {
+      sample = { base: new THREE.Vector3(), tip: new THREE.Vector3(), stroke: null, valid: false };
+      this.weaponSamples.set(weapon, sample);
+    }
+    if (!enabled) { sample.valid = false; return; }
+    weapon.updateWorldMatrix(true, false);
+    const base = this.ribbonBase.set(.08, .20, .025).applyMatrix4(weapon.matrixWorld);
+    const tip = this.ribbonTip.set(.092, 1.89, .025).applyMatrix4(weapon.matrixWorld);
+    if (sample.valid && sample.stroke === stroke && sample.tip.distanceToSquared(tip) > .0009 && sample.tip.distanceToSquared(tip) < 16) {
+      const segment = this.ribbonPool.pop();
+      if (segment) {
+        const points = segment.points;
+        sample.base.toArray(points, 0); sample.tip.toArray(points, 3);
+        base.toArray(points, 6); tip.toArray(points, 9);
+        segment.age = 0; segment.color.set(color);
+        this.ribbonLive.push(segment);
+      }
+    }
+    sample.base.copy(base); sample.tip.copy(tip); sample.stroke = stroke; sample.valid = true;
+  }
+  updateRibbon(dt) {
+    const attrs = this.ribbon.geometry.attributes;
+    let count = 0;
+    for (let i = this.ribbonLive.length - 1; i >= 0; i--) {
+      const segment = this.ribbonLive[i]; segment.age += dt;
+      if (segment.age >= segment.life) { this.ribbonPool.push(segment); this.ribbonLive.splice(i, 1); continue; }
+      const opacity = Math.pow(1 - segment.age / segment.life, 1.7);
+      // Two triangles join previous and current blade base/tip samples.
+      for (let vertex = 0; vertex < 6; vertex++) {
+        const corner = this.ribbonCorners[vertex];
+        const index = count++, offset = corner * 3;
+        attrs.position.setXYZ(index, segment.points[offset], segment.points[offset + 1], segment.points[offset + 2]);
+        attrs.color.setXYZ(index, segment.color.r, segment.color.g, segment.color.b);
+        attrs.alpha.setX(index, opacity * (corner % 2 ? .68 : .035) * (corner < 2 ? .45 : 1));
+      }
+    }
+    this.ribbon.geometry.setDrawRange(0, count);
+    for (const attribute of this.ribbonAttributes) attribute.needsUpdate = true;
   }
   material(color, opacity = 1, additive = true) {
     return new THREE.ShaderMaterial({ vertexShader: ribbonVertex, fragmentShader: ribbonFragment,
@@ -184,26 +249,28 @@ export class CombatEffects {
   impact(position, direction = 0, strength = 1, color = GOLD) {
     const forward = this.direction(direction);
     const origin = position.clone(); origin.y += 1;
-    const vertices = [], alphas = [];
-    // Longitudinal contact rays are a single mesh, rather than one object per spark.
-    for (let i = 0; i < 11; i++) {
-      const a = i / 11 * TAU + Math.random() * 0.25;
-      const length = (0.22 + Math.random() * 0.5) * Math.sqrt(strength);
-      const dx = Math.cos(a), dy = Math.sin(a);
-      const width = i % 3 === 0 ? 0.035 : 0.012;
-      vertices.push(-dy * width, dx * width, 0, dy * width, -dx * width, 0, dx * length, dy * length, 0);
-      alphas.push(0.9, 0.9, 0);
-    }
-    const flash = new THREE.Mesh(this.geometry(vertices, alphas), this.material(color, 0.9));
+    const geometry = this.cached('contact-rays', () => {
+      const vertices = [], alphas = [];
+      for (let i = 0; i < 9; i++) {
+        const angle = i / 9 * TAU, length = i % 3 ? .34 : .58;
+        const dx = Math.cos(angle), dy = Math.sin(angle), width = i % 3 ? .012 : .025;
+        vertices.push(-dy * width, dx * width, 0, dy * width, -dx * width, 0, dx * length, dy * length, 0);
+        alphas.push(.9, .9, 0);
+      }
+      return this.geometry(vertices, alphas);
+    });
+    const flash = this.impactPool.pop() || new THREE.Mesh(geometry, this.material(color, .88));
+    flash.material.uniforms.tint.value.set(color);
+    flash.material.uniforms.opacity.value = .88;
+    flash.scale.setScalar(Math.sqrt(strength));
     flash.position.copy(origin); flash.rotation.y = Math.atan2(forward.x, forward.z);
-    this.add(flash, 0.16, 'impact');
-    this.emit(position, color, 8 + Math.ceil(strength * 7), Math.sqrt(strength));
-    for (let i = 0; i < 6; i++) {
+    this.add(flash, .105, 'impact', { sharedGeometry: true, pooledImpact: true, scale: Math.sqrt(strength) });
+    for (let i = 0; i < 11; i++) {
       this.particle(origin, new THREE.Vector3(forward.x * (2 + Math.random() * 2) + (Math.random() - 0.5) * 3,
         Math.random() * 3, forward.z * (2 + Math.random() * 2) + (Math.random() - 0.5) * 3),
-        0xc49863, 0.2 + Math.random() * 0.16, 0.2 + Math.random() * 0.25, 2, 16, 1.8);
+        i < 7 ? color : 0xc49863, .12 + Math.random() * .1, .12 + Math.random() * .14, i < 7 ? 0 : 2, 16, 1.8);
     }
-    this.dust(position, forward, Math.min(strength, 2));
+    if (strength > 1.2) this.dust(position, forward, .6);
   }
   lines(position, vertices, color, duration, kind = 'glyph', opacity = 0.45) {
     const geometry = new THREE.BufferGeometry();
@@ -310,6 +377,7 @@ export class CombatEffects {
   }
   removeEffect(effect) {
     this.root.remove(effect.mesh);
+    if (effect.pooledImpact && this.impactPool.length < 24) { this.impactPool.push(effect.mesh); return; }
     // Three.js Sprite geometry is shared globally; cached ribbons live until dispose().
     if (!effect.mesh.isSprite && !effect.sharedGeometry) effect.mesh.geometry?.dispose();
     effect.mesh.material.map?.dispose();
@@ -317,6 +385,7 @@ export class CombatEffects {
   }
   update(dt) {
     dt = Math.min(Math.max(dt, 0), 0.1);
+    this.updateRibbon(dt);
     for (let i = this.effects.length - 1; i >= 0; i--) {
       const effect = this.effects[i]; effect.age += dt;
       const p = effect.age / effect.life;
@@ -328,7 +397,7 @@ export class CombatEffects {
       if (effect.spin) effect.mesh.rotation.y += dt * effect.spin;
       if (effect.kind === 'arc') effect.mesh.scale.setScalar(effect.scale * (0.94 + p * 0.08));
       if (effect.kind === 'label') effect.mesh.position.y += dt * (1.2 - p * 0.8);
-      if (effect.kind === 'impact') effect.mesh.scale.setScalar(0.85 + p * 0.45);
+      if (effect.kind === 'impact') effect.mesh.scale.setScalar(effect.scale * (.85 + p * .3));
       if (effect.kind === 'crystal') effect.mesh.scale.y = Math.min(1, 0.4 + p * 4);
     }
     const counts = [0, 0];
@@ -353,6 +422,8 @@ export class CombatEffects {
   }
   clear() {
     this.effects.forEach(effect => this.removeEffect(effect)); this.effects.length = 0;
+    this.ribbonPool.push(...this.ribbonLive); this.ribbonLive.length = 0;
+    this.weaponSamples = new WeakMap(); this.ribbon.geometry.setDrawRange(0, 0);
     this.sparkPool.push(...this.sparkLive); this.sparkLive.length = 0;
     for (const batch of this.batches) batch.geometry.setDrawRange(0, 0);
   }
@@ -361,6 +432,9 @@ export class CombatEffects {
     for (const geometry of this.geometryCache.values()) geometry.dispose();
     this.geometryCache.clear();
     for (const batch of this.batches) { batch.geometry.dispose(); batch.material.dispose(); }
-    this.root.removeFromParent(); this.sparkPool.length = 0;
+    for (const mesh of this.impactPool) mesh.material.dispose();
+    this.impactPool.length = 0;
+    this.ribbon.geometry.dispose(); this.ribbon.material.dispose();
+    this.root.removeFromParent(); this.sparkPool.length = 0; this.ribbonPool.length = 0;
   }
 }

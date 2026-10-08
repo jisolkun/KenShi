@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
 import { chromium } from '@playwright/test';
+import { getActionClip } from '../src/action-clips.js';
 
 const port = Number(process.env.TEST_PORT || 4173);
 const baseURL = process.env.TEST_URL || `http://127.0.0.1:${port}`;
@@ -387,8 +388,9 @@ try {
   const poseDifference = ['body', 'rightArm', 'rightForearm', 'leftLeg', 'rightLeg'].reduce((sum, joint) =>
     sum + ['x', 'y', 'z'].reduce((difference, axis) => difference + Math.abs(heavy.pose[joint][axis] - beforeHold.pose[joint][axis]), 0), 0);
   assert(poseDifference > .4, 'Heavy attack must animate the articulated body and limbs');
-  const impact = heavy.action === 'heavy' && heavy.actionProgress >= .55 && heavy.effects > 0 ? heavy
-    : await until(page, state => state.action === 'heavy' && state.actionProgress >= .55 && state.effects > 0, 5000, 'heavy attack impact effects');
+  const heavyContact = getActionClip('heavy').contact;
+  const impact = heavy.action === 'heavy' && heavy.actionProgress >= heavyContact && heavy.effects > 0 ? heavy
+    : await until(page, state => state.action === 'heavy' && state.actionProgress >= heavyContact && state.effects > 0, 5000, 'heavy attack impact effects');
   assert(impact.effects > 0, 'Heavy attack must produce visible effects at impact');
   assert(heavy.renderInfo.calls > 0 && heavy.renderInfo.triangles > 0, 'Character and battlefield must render real mesh geometry');
   record('Long press EX attack consumes SP, animates the skeleton and produces effects', `${heavy.renderInfo.calls} draw calls, ${heavy.renderInfo.triangles} triangles`);

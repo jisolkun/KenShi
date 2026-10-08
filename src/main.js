@@ -4,6 +4,7 @@ import { createWarrior, createEnemy } from './characters.js';
 import { CombatEffects } from './effects.js';
 import { animateCharacter } from './animation.js';
 import { GameAudio } from './audio.js';
+import { getActionClip, ENEMY_CLIPS } from './action-clips.js';
 import { initLandscape } from './landscape.js';
 import './style.css';
 
@@ -55,6 +56,12 @@ const effects = new CombatEffects(scene);
 const audio = new GameAudio();
 const temp = new THREE.Vector3();
 const temp2 = new THREE.Vector3();
+const playerMove = new THREE.Vector3();
+const screenRight = new THREE.Vector3(.756, 0, -.655);
+const screenUp = new THREE.Vector3(-.655, 0, -.756);
+const frostColor = new THREE.Color(0x80c8d6);
+const flashColor = new THREE.Color(0xffffff);
+const bladeReleaseOrigin = new THREE.Vector3();
 const gold = 0xffe4a6;
 const jade = 0x95f1d5;
 
@@ -88,6 +95,7 @@ let shake = 0;
 let slowMotion = 0;
 let cameraPunch = 0;
 let impactSerial = 0;
+let impactCooldown = 0;
 const cameraKick = new THREE.Vector3();
 let spawnSchedule = [];
 let waveTimer = null;
@@ -136,11 +144,14 @@ const player = {
   invulnerable: 0,
   flash: 0,
   hurtTimer: 0,
+  hurtDuration: .23,
+  reactionYaw: 0,
   comboStep: 0,
   comboWindow: 0,
   attackCooldown: 0,
   rollCooldown: 0,
   pendingHeavy: false,
+  pendingBladeRelease: null,
   walk: 0,
 };
 player.model.rotation.y = player.yaw;
@@ -281,6 +292,7 @@ function spawnEnemy(type, index) {
     attackKind: 'slam', attacks: 0, windupDuration: stats[type].windup, recoverDuration: .6,
     guard: type === 'brute' || type === 'boss',
     aim: new THREE.Vector3(), shotAim: new THREE.Vector3(),
+    lastHitDirection: new THREE.Vector3(0, 0, 1), reactionYaw: 0, reactionStrength: 0, reactionAge: 1, reactionDuration: .25,
   };
   model.traverse(object => { if (object.isMesh) object.userData.enemyId = enemy.id; });
   makeHealthBar(enemy);
@@ -348,6 +360,7 @@ function resetGame() {
   slowMotion = 0;
   cameraPunch = 0;
   impactSerial = 0;
+  impactCooldown = 0;
   cameraKick.set(0, 0, 0);
   nextEnemyId = 1;
   state = {
@@ -365,8 +378,11 @@ function resetGame() {
   player.action = null;
   player.flash = 0;
   player.hurtTimer = 0;
+  player.hurtDuration = .23;
+  player.reactionYaw = 0;
   player.invulnerable = 0;
   player.pendingHeavy = false;
+  player.pendingBladeRelease = null;
   player.comboStep = 0;
   player.comboWindow = 0;
   player.attackCooldown = 0;
@@ -481,9 +497,10 @@ function beginAttack(enemy, heavy = false) {
   player.comboWindow = 1.4;
   const direction = directionTo(enemy?.position || player.destination || player.position.clone().add(new THREE.Vector3(Math.sin(player.yaw), 0, Math.cos(player.yaw))));
   player.yaw = Math.atan2(direction.x, direction.z);
+  const clip = getActionClip(heavy ? 'heavy' : 'attack', player.comboStep);
   player.action = {
-    type: heavy ? 'heavy' : 'attack', age: 0,
-    duration: heavy ? 0.83 : [0.42, 0.45, 0.6][player.comboStep],
+    type: heavy ? 'heavy' : 'attack', age: 0, clip,
+    duration: clip.duration,
     direction, focus: enemy, hits: new Set(), step: player.comboStep, fired: false, impact: false,
   };
   player.pendingHeavy = false;
@@ -497,7 +514,7 @@ function roll(direction) {
     return;
   }
   state.sp -= 12;
-  player.action = { type: 'roll', age: 0, duration: 0.48, direction: direction.clone(), hits: new Set() };
+  player.action = { type: 'roll', age: 0, duration: getActionClip('roll').duration, clip: getActionClip('roll'), direction: direction.clone(), hits: new Set() };
   player.invulnerable = 0.55;
   player.rollCooldown = 0.65;
   player.yaw = Math.atan2(direction.x, direction.z);
@@ -518,22 +535,21 @@ function useSkill(name, directionOverride) {
   let direction = directionOverride || directionTo(player.target?.hp > 0 ? player.target.position : nearestEnemy(10)?.position || player.destination || player.position.clone().add(new THREE.Vector3(Math.sin(player.yaw), 0, Math.cos(player.yaw))));
   direction = direction.clone().setY(0).normalize();
   if (direction.lengthSq() < 0.1) direction.set(Math.sin(player.yaw), 0, Math.cos(player.yaw));
-  const durations = { dash: 0.48, whirl: 0.92, burst: 1.12, frost: 0.68, blades: 0.56 };
-  player.action = { type: name, age: 0, duration: durations[name], direction, hits: new Set(), pulse: 0, fired: false, trailTimer: 0 };
-  player.invulnerable = durations[name] + 0.12;
+  const clip = getActionClip(name);
+  player.action = { type: name, age: 0, duration: clip.duration, clip, direction, hits: new Set(), pulse: 0, fired: false };
+  player.invulnerable = clip.duration + 0.12;
   player.yaw = Math.atan2(direction.x, direction.z);
   player.pendingHeavy = false;
-  if (name !== 'burst') effects.skill?.(player.position, name, player.yaw);
   if (name === 'burst') {
     effects.ring(player.position, 1.2, gold, .62);
     showToast('无双 · 镇魂　范围爆发', 1.8);
     audio.play('charge');
   } else if (name === 'frost') {
     showToast('玄冰牢 · 冻缓群敌', 1.3);
-    audio.play('frost');
+    audio.play('seal');
   } else if (name === 'blades') {
-    audio.play('blades');
-  } else audio.play(name);
+    audio.play('draw');
+  } else if (name === 'dash') audio.play('dash');
   updateUI(true);
 }
 function useFinisher(direction) {
@@ -556,31 +572,35 @@ function useFinisher(direction) {
   state.sp -= 60;
   state.finisherCooldown = 3;
   if (focus) direction = directionTo(focus.position);
-  player.action = { type: 'finisher', age: 0, duration: 0.8, direction, focus, hits: new Set(), fired: false, trailTimer: 0 };
+  player.action = { type: 'finisher', age: 0, duration: getActionClip('finisher').duration, clip: getActionClip('finisher'), direction, focus, hits: new Set(), fired: false };
   player.invulnerable = 0.92;
   player.yaw = Math.atan2(direction.x, direction.z);
   player.destination = null;
   player.pendingHeavy = false;
-  audio.play('finisher');
-  effects.skill?.(player.position, 'finisher', player.yaw);
+  audio.play('draw');
+  effects.dust(player.position, direction, .6);
   showToast('瞬杀 · 寻隙处决', 1.3);
   updateUI(true);
 }
-function impactBeat(direction, strength = 1, heavy = false) {
-  // One pause per blade connection: a crowd hit never stacks the freeze.
-  if (hitstop <= .008) {
-    hitstop = heavy ? .09 : .04 + Math.min(.025, strength * .012);
-    impactSerial++;
-    cameraKick.copy(direction).multiplyScalar(heavy ? .52 : .23);
-    cameraPunch = Math.max(cameraPunch, heavy ? .95 : .3);
-  }
-  shake = Math.max(shake, heavy ? .24 : .095);
+function impactBeat(direction, strength = 1, heavy = false, strike = player.action) {
+  // A contact gets one pause, even when the blade catches a whole crowd.
+  const pulse = strike?.pulse || 0;
+  if (strike && strike.impactPulse === pulse) return;
+  if (strike) strike.impactPulse = pulse;
+  if (impactCooldown > 0) return;
+  hitstop = heavy ? .064 : .032 + Math.min(.012, strength * .007);
+  impactCooldown = heavy ? .14 : .09;
+  impactSerial++;
+  cameraKick.copy(direction).multiplyScalar(heavy ? .32 : .13);
+  cameraPunch = Math.max(cameraPunch, heavy ? .62 : .2);
+  shake = Math.max(shake, heavy ? .13 : .045);
 }
-function hitEnemy(enemy, damage, knockback = 2.2, color = gold) {
+function hitEnemy(enemy, damage, knockback = 2.2, color = gold, strike = player.action, hitDirection = strike?.direction) {
   if (enemy.hp <= 0 || enemy.mode === 'spawn') return;
-  const action = player.action;
-  const heavy = damage >= 55;
-  const direction = enemy.position.clone().sub(player.position).setY(0);
+  const heavy = damage >= 55 || strike?.type === 'finisher';
+  const direction = enemy.lastHitDirection;
+  if (hitDirection) direction.copy(hitDirection).setY(0);
+  else direction.copy(enemy.position).sub(player.position).setY(0);
   if (direction.lengthSq() < .01) direction.set(Math.sin(player.yaw),0,Math.cos(player.yaw));
   direction.normalize();
   const guarded = enemy.guard && enemy.mode === 'chase' && !heavy && enemy.stun <= 0;
@@ -595,7 +615,10 @@ function hitEnemy(enemy, damage, knockback = 2.2, color = gold) {
     enemy.attackCooldown = Math.max(enemy.attackCooldown, .5);
   }
   enemy.velocity.addScaledVector(direction, enemy.type === 'boss' ? knockback * .28 : knockback);
-  enemy.lastHitDirection = direction.clone();
+  enemy.reactionYaw = Math.atan2(direction.x, direction.z) - enemy.yaw;
+  enemy.reactionStrength = heavy ? 1.5 : guarded ? .6 : 1;
+  enemy.reactionAge = 0;
+  enemy.reactionDuration = heavy ? .32 : .22;
   state.combo++;
   state.maxCombo = Math.max(state.maxCombo, state.combo);
   state.comboTimeout = 3.1;
@@ -603,9 +626,12 @@ function hitEnemy(enemy, damage, knockback = 2.2, color = gold) {
   if (!effects.impact) effects.emit(enemy.position, color, 12, .9);
   // Normal blows are readable through animation; floating type marks the rare decisive hit.
   if (heavy || guarded || state.combo % 5 === 0) effects.label(enemy.position, heavy ? `重创 ${damage}` : guarded ? `护甲 ${damage}` : String(damage), heavy ? '#ffdfa0' : '#fff4d5', heavy ? 33 : 22);
-  audio.play('hit', heavy ? 1.35 : .8);
-  impactBeat(direction, heavy ? 1.5 : 1, heavy);
-  if (heavy) slowMotion = Math.max(slowMotion, .12);
+  if (!strike || strike.soundPulse !== (strike.pulse || 0)) {
+    audio.play('hit', heavy ? 1.35 : guarded ? .65 : .9);
+    if (strike) strike.soundPulse = strike.pulse || 0;
+  }
+  impactBeat(direction, heavy ? 1.5 : 1, heavy, strike);
+  if (heavy) slowMotion = Math.max(slowMotion, .07);
   if (enemy.hp <= 0) killEnemy(enemy);
 }
 function killEnemy(enemy) {
@@ -632,13 +658,17 @@ function hurtPlayer(damage, source) {
   state.comboTimeout = 0;
   player.invulnerable = 0.9;
   player.flash = 0.32;
-  player.hurtTimer = damage >= 12 ? .29 : .23;
+  player.hurtDuration = damage >= 12 ? .29 : .23;
+  player.hurtTimer = player.hurtDuration;
   player.action = null;
   player.attackCooldown = .23;
   shake = 0.34;
   hitstop = Math.max(hitstop, .055);
   cameraPunch = .6;
-  temp.copy(player.position).sub(source).setY(0).normalize();
+  temp.copy(player.position).sub(source).setY(0);
+  if (temp.lengthSq() < .001) temp.set(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
+  temp.normalize();
+  player.reactionYaw = Math.atan2(temp.x, temp.z) - player.yaw;
   cameraKick.copy(temp).multiplyScalar(.38);
   player.position.addScaledVector(temp, 0.55);
   clampPosition(player.position);
@@ -654,7 +684,7 @@ function strikeArea(radius, damage, action, full = false, knockback = 3, color =
     if (displacement.length() > radius + (enemy.type === 'boss' ? 0.5 : 0.2)) continue;
     if (!full && displacement.lengthSq() > 0.6 && displacement.normalize().dot(action.direction) < 0.08) continue;
     action.hits.add(enemy.id);
-    hitEnemy(enemy, damage, knockback, color);
+    hitEnemy(enemy, damage, knockback, color, action, full && action.type !== 'dash' ? null : action.direction);
   }
 }
 function spawnPickup(position, type) {
@@ -674,89 +704,97 @@ function shootEnemy(enemy) {
   projectiles.push({ mesh, direction, age: 0, life: 3, speed: 8, damage: stats[enemy.type].damage, friendly: false, source: enemy.position.clone() });
 }
 function shootBlades(action) {
+  const hand = player.model.userData.rig?.leftHand;
+  if (hand) {
+    hand.updateWorldMatrix(true, false);
+    hand.getWorldPosition(bladeReleaseOrigin);
+  } else {
+    bladeReleaseOrigin.copy(player.position);
+    bladeReleaseOrigin.y = 1.2;
+  }
   for (const angle of [-0.24, 0, 0.24]) {
     const direction = action.direction.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), angle);
     const mesh = new THREE.Mesh(new THREE.OctahedronGeometry(0.23), new THREE.MeshBasicMaterial({ color: 0xfde4af }));
     mesh.scale.set(0.45, 0.35, 2.6);
-    mesh.position.copy(player.position);
-    mesh.position.y = 1.2;
+    mesh.position.copy(bladeReleaseOrigin);
     mesh.rotation.y = Math.atan2(direction.x, direction.z);
     scene.add(mesh);
-    projectiles.push({ mesh, direction, age: 0, life: 1.4, speed: 14, damage: 43, friendly: true, hits: new Set(), source: player.position.clone() });
+    projectiles.push({ mesh, direction, age: 0, life: 1.4, speed: 14, damage: 43, friendly: true, hits: new Set(), source: bladeReleaseOrigin.clone() });
   }
 }
-function updateAction(dt) {
+function driveProgress(progress, start, end) {
+  const t = THREE.MathUtils.clamp((progress - start) / Math.max(.001, end - start), 0, 1);
+  return t * t * (3 - 2 * t);
+}
+function updateAction(dt, allowCombo = true) {
   const action = player.action;
   if (!action) return;
-  const previous = action.age;
+  const clip = action.clip || getActionClip(action.type, action.step);
+  const previous = action.age / action.duration;
   action.age += dt;
   const p = action.age / action.duration;
+  const drive = driveProgress(p, clip.driveStart, clip.driveEnd) - driveProgress(previous, clip.driveStart, clip.driveEnd);
   if (action.type === 'roll') {
-    player.position.addScaledVector(action.direction, dt * 10.5 * (1 - p * 0.6));
-    const rollHeight = player.position.y;
+    player.position.addScaledVector(action.direction, drive * 3.55);
     clampPosition(player.position);
-    player.position.y = rollHeight;
-    if (Math.floor(previous * 22) !== Math.floor(action.age * 22)) effects.trail(player.position, player.yaw, 0xb9d1bd);
+    if (!action.departed && p >= clip.driveStart) {
+      action.departed = true;
+      effects.dust(player.position, action.direction, .5);
+    }
   } else if (action.type === 'attack' || action.type === 'heavy') {
-    if (p > .27 && p < .51 && (!action.focus || action.focus.hp <= 0 || action.focus.position.distanceTo(player.position) > 1.25)) player.position.addScaledVector(action.direction, dt * (action.type === 'heavy' ? 3.2 : 3.4));
+    const heavy = action.type === 'heavy';
+    const distance = action.focus?.hp > 0 ? action.focus.position.distanceTo(player.position) : Infinity;
+    player.position.addScaledVector(action.direction, Math.min(drive * (heavy ? .95 : [.6, .7, .85][action.step]), Math.max(0, distance - 1.25)));
     clampPosition(player.position);
-    if (p >= (action.type === 'heavy' ? 0.55 : 0.42) && !action.fired) {
+    if (!action.air && p >= clip.trailStart) {
+      action.air = true;
+      audio.play(heavy ? 'heavy' : 'slash', heavy ? 1 : [.9, 1.05, 1.2][action.step]);
+    }
+    if (p >= clip.contact && !action.fired) {
       action.fired = true;
-      const heavy = action.type === 'heavy';
-      effects.arc(player.position, player.yaw + (action.step % 2 ? 0.6 : -0.4), heavy ? 3.2 : action.step === 2 ? 2.55 : 2.15, heavy ? 0xffc782 : gold, heavy ? 0.33 : 0.21, heavy || action.step === 2);
       strikeArea(heavy ? 3.3 : action.step === 2 ? 2.7 : 2.45, heavy ? 65 : [23, 26, 36][action.step], action, false, heavy ? 5.2 : 2.8);
-      effects.dust?.(player.position, action.direction, heavy ? 1.2 : .45);
-      audio.play(heavy ? 'heavy' : 'slash');
-      if (heavy) effects.ring(player.position, 3.2, gold, 0.35);
+      effects.dust(player.position, action.direction, heavy ? .85 : .25);
     }
   } else if (action.type === 'dash') {
-    if (p < 0.75) {
-      player.position.addScaledVector(action.direction, dt * 18);
-      clampPosition(player.position);
-      strikeArea(1.95, 48, action, true, 5, jade);
+    player.position.addScaledVector(action.direction, drive * 6.48);
+    clampPosition(player.position);
+    if (!action.departed && p >= clip.driveStart) {
+      action.departed = true;
+      effects.dust(player.position, action.direction, 1);
     }
-    action.trailTimer += dt;
-    if (action.trailTimer > 0.045) {
-      action.trailTimer = 0;
-      effects.trail(player.position, player.yaw);
-      effects.arc(player.position, player.yaw, 1.65, jade, 0.14);
-    }
+    if (p >= clip.contact && previous < clip.driveEnd) strikeArea(1.95, 48, action, true, 5, jade);
   } else if (action.type === 'whirl') {
-    const pulse = Math.min(3, Math.floor((action.age + 0.08) / 0.23));
-    if (pulse > action.pulse) {
-      action.pulse = pulse;
+    const contacts = clip.contacts;
+    while (action.pulse < contacts.length && p >= contacts[action.pulse]) {
+      action.pulse++;
       action.hits.clear();
-      effects.arc(player.position, player.yaw + pulse * 1.8, 3.9, gold, 0.3, true);
-      strikeArea(4.0, 29, action, true, 3.7);
+      strikeArea(4, 29, action, true, 3.7);
+      audio.play('slash', 1.05);
+      effects.dust(player.position, player.yaw + action.pulse * 2.1, .45);
     }
-  } else if (action.type === 'burst') {
-    if (p > 0.57 && !action.fired) {
-      action.fired = true;
-      audio.play('burst');
-      const groundPosition = player.position.clone().setY(0);
-      effects.skill?.(groundPosition, 'burst', player.yaw);
-      effects.arc(groundPosition, player.yaw, 6.1, 0xffefd0, 0.55, true);
-      strikeArea(6.6, 112, action, true, 8.5);
-      if (action.hits.size) { shake = .45; slowMotion = .17; }
-    }
+  } else if (action.type === 'burst' && p >= clip.contact && !action.fired) {
+    action.fired = true;
+    audio.play('burst');
+    temp.copy(player.position).setY(0);
+    effects.skill(temp, 'burst', player.yaw);
+    strikeArea(6.6, 112, action, true, 8.5);
+    if (action.hits.size) slowMotion = .1;
   } else if (action.type === 'finisher') {
-    if (!action.focus && p > .1 && p < .36) {
-      player.position.addScaledVector(action.direction, dt * 15);
-      clampPosition(player.position);
-    }
-    if (p < 0.4 && action.focus?.hp > 0 && action.focus.position.distanceTo(player.position) > 1.35) {
-      action.direction.copy(action.focus.position).sub(player.position).setY(0).normalize();
-      player.position.addScaledVector(action.direction, dt * 20);
-      player.yaw = Math.atan2(action.direction.x, action.direction.z);
-      clampPosition(player.position);
-      action.trailTimer += dt;
-      if (action.trailTimer >= 0.04) { effects.trail(player.position, player.yaw, gold); action.trailTimer = 0; }
-    }
-    if (p >= 0.43 && !action.fired) {
+    // Arrive before the authored cut; then settle into the finishing stance.
+    const travel = driveProgress(p, clip.driveStart, clip.contact) - driveProgress(previous, clip.driveStart, clip.contact);
+    if (action.focus?.hp > 0) {
+      const distance = player.position.distanceTo(action.focus.position);
+      if (distance > 1.35 && travel > 0) {
+        action.direction.copy(action.focus.position).sub(player.position).setY(0).normalize();
+        player.position.addScaledVector(action.direction, Math.min(travel * 8, distance - 1.35));
+        player.yaw = Math.atan2(action.direction.x, action.direction.z);
+      }
+    } else player.position.addScaledVector(action.direction, travel * 3.4);
+    clampPosition(player.position);
+    if (!action.air && p >= clip.trailStart) { action.air = true; audio.play('slash', 1.3); }
+    if (p >= clip.contact && !action.fired) {
       action.fired = true;
-      effects.arc(player.position, player.yaw, 3.4, gold, 0.36);
-      effects.ring(player.position, 3.5, gold, 0.45);
-      audio.play('burst');
+      audio.play('finisher');
       const focus = action.focus;
       if (focus?.hp > 0 && focus.position.distanceTo(player.position) < 3.5) {
         hitEnemy(focus, focus.type === 'boss' ? 155 : focus.hp, 7, gold);
@@ -765,42 +803,37 @@ function updateAction(dt) {
           effects.label(player.position, '+24', '#b5ecd4', 27);
           showToast('瞬杀成功 · 气血恢复', 1.8);
         } else showToast('尸将重创 · 乘势追击', 1.5);
-      }
-      if (focus?.hp >= 0 && focus.position.distanceTo(player.position) < 3.5) slowMotion = .17;
-    }
-  } else if (action.type === 'frost') {
-    if (p > 0.36 && !action.fired) {
-      action.fired = true;
-      effects.ring(player.position, 6.2, 0xb6e9f2, 0.8);
-      effects.arc(player.position, player.yaw, 5.8, 0xc0f4f5, 0.6, true);
-      for (const enemy of enemies) {
-        if (enemy.hp > 0 && enemy.position.distanceTo(player.position) < 6.2) {
-          enemy.frost = 5.5;
-          action.hits.add(enemy.id);
-          hitEnemy(enemy, 22, 1, 0x9ce2f4);
-        }
+        slowMotion = .11;
       }
     }
-  } else if (action.type === 'blades') {
-    if (p > 0.3 && !action.fired) { action.fired = true; shootBlades(action); effects.arc(player.position, player.yaw, 1.8, gold, 0.2); }
-  }
-  if (action.age >= action.duration) {
-    player.action = null;
-    if (action.type === 'roll') {
-      player.model.rotation.x = 0;
-      const hips = player.model.userData.rig?.hips;
-      if (hips) hips.rotation.x = player.model.userData.rest.hips.rotation.x;
-      const weapon = player.model.userData.rig?.weapon;
-      if (weapon) weapon.rotation.x = THREE.MathUtils.euclideanModulo(weapon.rotation.x, Math.PI * 2);
+  } else if (action.type === 'frost' && p >= clip.contact && !action.fired) {
+    action.fired = true;
+    effects.skill(player.position, 'frost', player.yaw);
+    audio.play('frost');
+    for (const enemy of enemies) {
+      if (enemy.hp > 0 && enemy.position.distanceTo(player.position) < 6.2) {
+        enemy.frost = 5.5;
+        action.hits.add(enemy.id);
+        hitEnemy(enemy, 22, 1, 0x9ce2f4, action, null);
+      }
     }
+  } else if (action.type === 'blades' && p >= clip.contact && !action.fired) {
+    action.fired = true;
+    player.pendingBladeRelease = action;
   }
+  // Preserve the return-cut chamber and accept the next target during recovery.
+  if (allowCombo && action.type === 'attack' && action.fired && p >= clip.comboOpen) {
+    const target = player.target?.hp > 0 && player.target.position.distanceTo(player.position) <= 2.8 ? player.target : nearestEnemy(2.5);
+    if (target) { player.action = null; beginAttack(target, player.pendingHeavy); return; }
+  }
+  if (action.age >= action.duration) player.action = null;
 }
 function setModelAppearance(model, flash, opacity = 1, frost = 0) {
   for (const material of model.userData.ownedMaterials) {
     if (material.color && material.userData.baseColor) {
       material.color.copy(material.userData.baseColor);
-      if (frost > 0) material.color.lerp(new THREE.Color(0x80c8d6), 0.45);
-      if (flash > 0) material.color.lerp(new THREE.Color(0xffffff), 0.8);
+      if (frost > 0) material.color.lerp(frostColor, 0.45);
+      if (flash > 0) material.color.lerp(flashColor, 0.8);
     }
     if (material.emissive && material.userData.baseEmissive) {
       material.emissive.copy(material.userData.baseEmissive);
@@ -819,10 +852,9 @@ function updatePlayer(dt) {
   player.rollCooldown = Math.max(0, player.rollCooldown - dt);
   player.comboWindow = Math.max(0, player.comboWindow - dt);
   if (player.target?.hp <= 0) player.target = null;
-  const move = new THREE.Vector3();
+  const move = playerMove.set(0, 0, 0);
   // Screen-space WASD is an optional desktop aid; pointer movement is primary.
-  const right = new THREE.Vector3(0.756, 0, -0.655);
-  const up = new THREE.Vector3(-0.655, 0, -0.756);
+  const right = screenRight, up = screenUp;
   if (input.has('KeyW') || input.has('ArrowUp')) move.add(up);
   if (input.has('KeyS') || input.has('ArrowDown')) move.sub(up);
   if (input.has('KeyD') || input.has('ArrowRight')) move.add(right);
@@ -850,10 +882,20 @@ function updatePlayer(dt) {
       }
     }
   }
-  updateAction(dt);
+  updateAction(dt, !manualMove);
   player.walk = THREE.MathUtils.damp(player.walk, walking ? 1 : 0, 10, dt);
   player.model.rotation.y = player.yaw;
   animateCharacter(player.model, player.walk, player.action, visualTime, dt, true, player);
+  if (player.pendingBladeRelease) {
+    shootBlades(player.pendingBladeRelease);
+    player.pendingBladeRelease = null;
+    audio.play('blades');
+  }
+  const activeClip = player.action?.clip;
+  const progress = player.action ? player.action.age / player.action.duration : 0;
+  effects.weaponTrail(player.model.userData.rig.weapon, player.action,
+    !!activeClip && progress >= activeClip.trailStart && progress <= activeClip.trailEnd && activeClip.trailEnd > activeClip.trailStart,
+    player.action?.type === 'dash' ? jade : gold);
   setModelAppearance(player.model, player.flash);
   if (player.invulnerable > 0 && !player.action && player.flash <= 0) player.model.visible = Math.floor(visualTime * 16) % 2 === 0;
   else player.model.visible = true;
@@ -880,14 +922,18 @@ function updateEnemies(dt) {
       const p = enemy.deathAge / 1.15;
       enemy.position.addScaledVector(enemy.velocity, dt);
       enemy.velocity.multiplyScalar(Math.exp(-4 * dt));
-      enemy.model.rotation.x = -Math.min(1.55, p * 3.4);
-      enemy.model.rotation.z = Math.sin(enemy.id) * Math.min(.35, p);
+      enemy.model.position.x = enemy.position.x;
+      enemy.model.position.z = enemy.position.z;
+      const fall = Math.min(1.55, p * 3.4);
+      enemy.model.rotation.x = Math.cos(enemy.reactionYaw) * fall;
+      enemy.model.rotation.z = -Math.sin(enemy.reactionYaw) * fall;
       enemy.model.position.y = Math.sin(Math.min(1, p * 2) * Math.PI) * .65 - Math.max(0, p - .5) * 1.3;
       setModelAppearance(enemy.model, 0, Math.max(0, 1 - p));
       if (p >= 1) { disposeEnemy(enemy); enemies.splice(i, 1); }
       continue;
     }
     enemy.flash = Math.max(0, enemy.flash - dt);
+    enemy.reactionAge += dt;
     enemy.stun = Math.max(0, enemy.stun - dt);
     enemy.frost = Math.max(0, enemy.frost - dt);
     const localDt = dt * (enemy.frost > 0 ? 0.44 : 1);
@@ -912,7 +958,7 @@ function updateEnemies(dt) {
         enemy.warningDisk.material.opacity = .1 + anticipation * .22;
         enemy.warningOutline.material.opacity = .4 + anticipation * .5;
         enemy.warningOutline.scale.setScalar(.5 + anticipation * .5);
-        if (enemy.type === 'boss' && enemy.attackKind === 'slam' && anticipation > .78) {
+        if (enemy.type === 'boss' && enemy.attackKind === 'slam' && anticipation > ENEMY_CLIPS.boss.anticipation) {
           const toAim = enemy.aim.clone().sub(enemy.position).setY(0);
           if (toAim.length() > .55) enemy.position.addScaledVector(toAim.normalize(), localDt * 7);
         }
@@ -922,7 +968,7 @@ function updateEnemies(dt) {
             const boss = enemy.type === 'boss';
             const sweep = boss && enemy.attackKind === 'sweep';
             const radius = boss ? (sweep ? 4.25 : 2.85) : enemy.type === 'brute' ? 2.3 : 1.75;
-            effects.arc(enemy.aim, enemy.yaw, radius, sweep ? 0xffb270 : 0xd88e65, boss ? .38 : .24, sweep);
+
             effects.dust?.(enemy.aim, direction, boss ? 1.8 : .55);
             if (boss) {
               audio.play('boss');
@@ -984,6 +1030,11 @@ function updateEnemies(dt) {
     enemy.model.rotation.y = enemy.yaw;
     enemy.walk = THREE.MathUtils.damp(enemy.walk, walking ? 1 : 0, 10, dt);
     animateCharacter(enemy.model, enemy.walk, null, visualTime + enemy.id * 0.2, dt, false, enemy);
+    const clip = ENEMY_CLIPS[enemy.type];
+    const bladeActive = enemy.type !== 'archer' && enemy.stun <= 0 &&
+      (enemy.mode === 'windup' && 1 - enemy.timer / enemy.windupDuration >= clip.anticipation ||
+       enemy.mode === 'recover' && 1 - enemy.timer / enemy.recoverDuration <= clip.follow);
+    effects.weaponTrail(enemy.model.userData.rig.weapon, enemy, bladeActive, 0xe99b76);
     if (enemy.mode !== 'spawn') setModelAppearance(enemy.model, enemy.flash, 1, enemy.frost);
     enemy.healthBar.visible = enemy.type === 'boss' || enemy.hp < enemy.maxHp || player.target === enemy;
     enemy.healthBar.position.copy(enemy.position);
@@ -1007,7 +1058,7 @@ function updateProjectiles(dt) {
         const flatDistance = (enemy.position.x - projectile.mesh.position.x) ** 2 + (enemy.position.z - projectile.mesh.position.z) ** 2;
         if (flatDistance < (enemy.type === 'boss' ? 1.5 : 0.9) ** 2) {
           projectile.hits.add(enemy.id);
-          hitEnemy(enemy, projectile.damage, 3.3);
+          hitEnemy(enemy, projectile.damage, 3.3, gold, projectile, projectile.direction);
         }
       }
     } else {
@@ -1316,6 +1367,7 @@ function frame(now) {
       const steps = Math.max(1, Math.ceil(realDt / 0.04));
       const stepDt = realDt / steps;
       for (let step = 0; step < steps; step++) {
+        impactCooldown = Math.max(0, impactCooldown - stepDt);
         let simulationDt = stepDt;
         if (slowMotion > 0) {
           slowMotion = Math.max(0, slowMotion - stepDt);
@@ -1362,9 +1414,13 @@ const api = {
     cooldowns: { ...state.cooldowns },
     action: player.action?.type || null, actionProgress: player.action ? player.action.age / player.action.duration : 0,
     pose: Object.fromEntries(Object.entries(player.model.userData.rig || {}).filter(([_,o])=>o?.rotation).map(([k,o])=>[k,{x:o.rotation.x,y:o.rotation.y,z:o.rotation.z}])),
+    actionDuration: player.action?.duration || 0, actionContact: player.action?.clip?.contact ?? null,
+    actionStep: player.action?.step ?? null, actionPulse: player.action?.pulse || 0,
+    hurtTimer: player.hurtTimer, hurtDuration: player.hurtDuration, reactionYaw: player.reactionYaw,
+    weaponTrailSegments: effects.ribbonLive.length, impactSerial,
     cameraHeight: cameraViewHeight, hitstop, slowMotion,
     renderInfo: { calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures }, targetId: player.target?.id || null,
-    rollCooldown: player.rollCooldown, finisherCooldown: state.finisherCooldown, effects: effects.effects.length + effects.sparkLive.length,
+    rollCooldown: player.rollCooldown, finisherCooldown: state.finisherCooldown, effects: effects.effects.length + effects.sparkLive.length + effects.ribbonLive.length,
   }),
   enemyPositions: () => enemies.filter(enemy => enemy.hp > 0).map(enemy => ({ id: enemy.id, type: enemy.type, hp: enemy.hp, mode: enemy.mode, attackKind: enemy.attackKind, telegraph: enemy.telegraph.visible, x: enemy.position.x, z: enemy.position.z })),
   screenToWorld: (x, y) => { const point = pointerWorld(x, y); return point ? { x: point.x, z: point.z } : null; },

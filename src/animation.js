@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { getActionClip, ENEMY_CLIPS } from './action-clips.js';
 
 const TAU = Math.PI * 2;
 const clamp = (value, min = 0, max = 1) => Math.max(min, Math.min(max, value));
@@ -8,33 +9,48 @@ const damp = (a, b, rate, dt) => mix(a, b, 1 - Math.exp(-rate * dt));
 const pose = (body, rightArm, leftArm, rightForearm, leftForearm, hips, rightLeg, leftLeg, rightShin, leftShin, rightHand) =>
   ({ body, rightArm, leftArm, rightForearm, leftForearm, hips, rightLeg, leftLeg, rightShin, leftShin, rightHand });
 
-// Poses are offsets from the authored bind pose. The sword belongs to the hand,
-// so every wrist adjustment also moves the grip, knuckles and thumb.
-const guard = pose([.055, -.14, .015], [-.30, -.20, -.19], [-.30, .16, .16], [-.64, .10, -.08], [-.70, -.12, .12],
-  [0, .05, 0], [-.12, 0, -.03], [.08, 0, .03], [.24, 0, 0], [.24, 0, 0], [.30, .04, -.10]);
+// Compact asymmetric guard: the blade protects the forward line while the
+// empty hand sits near the ribs. Hip and chest wind in opposite directions.
+const guard = pose([.20, -.34, -.055], [-.46, -.32, -.30], [-.22, .28, .30], [-.94, .15, -.13], [-1.22, -.14, .21],
+  [0, .14, .025], [-.20, 0, -.04], [.14, 0, .04], [.38, 0, 0], [.31, 0, 0], [.48, -.05, -.17]);
 const cuts = [
-  {
-    wind: pose([-.04, -.66, -.07], [-1.08, -.62, -.67], [-.48, .30, .55], [-1.05, .16, -.12], [-.92, 0, .08], [0, -.22, -.025], [-.25, 0, 0], [.20, 0, 0], [.40, 0, 0], [.25, 0, 0], [.47, -.08, .12]),
-    hit: pose([.13, .21, .045], [-.78, .12, -.92], [-.43, -.27, .53], [-.18, -.08, .08], [-.8, 0, .06], [0, .13, .025], [.15, 0, 0], [-.40, 0, 0], [.24, 0, 0], [.42, 0, 0], [.82, -.15, -.28]),
-    end: pose([.14, .66, .10], [-.43, .76, -.88], [-.36, -.42, .48], [-.24, -.16, .14], [-.60, 0, 0], [0, .27, .03], [.2, 0, 0], [-.45, 0, 0], [.2, 0, 0], [.4, 0, 0], [.91, -.23, -.34]),
+  { // Draw diagonally through the forward shoulder; leave the blade loaded.
+    wind: pose([.10, -.90, -.12], [-.68, -.74, -.58], [-.15, .52, .43], [-1.25, .20, -.24], [-1.43, -.14, .22], [0, .29, .055], [-.28, 0, 0], [.18, 0, 0], [.46, 0, 0], [.32, 0, 0], [.56, -.10, .12]),
+    hit: pose([.34, .34, .10], [-.88, .35, -1.05], [-.56, -.47, .59], [-.12, -.10, .12], [-1.06, .08, .16], [0, -.24, -.06], [.18, 0, 0], [-.48, 0, 0], [.32, 0, 0], [.51, 0, 0], [.86, -.15, -.33]),
+    end: pose([.27, .87, .14], [-.52, .96, -.91], [-.36, -.64, .48], [-.35, -.21, .13], [-1.14, .05, .13], [0, -.31, -.045], [.22, 0, 0], [-.43, 0, 0], [.34, 0, 0], [.50, 0, 0], [.86, -.24, -.40]),
   },
-  {
-    wind: pose([.02, .62, .08], [-.56, .84, -.84], [-.34, -.34, .53], [-.47, -.15, .12], [-.77, 0, 0], [0, .24, .02], [.20, 0, 0], [-.20, 0, 0], [.25, 0, 0], [.35, 0, 0], [.9, -.2, -.3]),
-    hit: pose([.16, -.22, -.025], [-.80, -.42, -.61], [-.38, .20, .57], [-.19, .08, -.08], [-.73, 0, 0], [0, -.10, -.02], [-.32, 0, 0], [.17, 0, 0], [.35, 0, 0], [.25, 0, 0], [.94, .07, .19]),
-    end: pose([.10, -.74, -.09], [-.72, -.94, -.30], [-.36, .41, .60], [-.50, .18, -.10], [-.56, 0, 0], [0, -.28, -.03], [-.40, 0, 0], [.22, 0, 0], [.4, 0, 0], [.23, 0, 0], [.51, .11, .25]),
+  { // The return cut starts in the first cut's chamber, without an idle reset.
+    wind: pose([.22, .83, .12], [-.56, .92, -.91], [-.33, -.53, .44], [-.47, -.21, .13], [-1.15, .07, .12], [0, -.26, -.04], [.16, 0, 0], [-.32, 0, 0], [.34, 0, 0], [.48, 0, 0], [.87, -.23, -.36]),
+    hit: pose([.35, -.46, -.11], [-.89, -.43, -.66], [-.23, .52, .65], [-.10, .12, -.13], [-1.19, -.14, .18], [0, .29, .05], [-.44, 0, 0], [.20, 0, 0], [.50, 0, 0], [.31, 0, 0], [.96, .10, .26]),
+    end: pose([.22, -.90, -.15], [-.86, -.97, -.31], [-.28, .60, .50], [-.69, .24, -.13], [-1.19, -.11, .17], [0, .32, .06], [-.40, 0, 0], [.22, 0, 0], [.48, 0, 0], [.34, 0, 0], [.60, .15, .28]),
   },
-  {
-    wind: pose([-.17, -.33, -.035], [-2.30, -.32, -.30], [-1.10, .2, .45], [-.77, .05, .10], [-1.2, -.05, .02], [0, -.12, 0], [-.27, 0, 0], [.2, 0, 0], [.4, 0, 0], [.32, 0, 0], [.72, 0, -.02]),
-    hit: pose([.30, .17, .055], [-.78, .16, -.30], [-.71, -.13, .39], [-.18, 0, .02], [-.65, -.08, .08], [0, .09, 0], [.18, 0, 0], [-.47, 0, 0], [.3, 0, 0], [.5, 0, 0], [1.0, 0, -.07]),
-    end: pose([.37, .35, .09], [-.36, .28, -.26], [-.55, -.20, .33], [-.13, 0, .02], [-.55, 0, .08], [0, .14, 0], [.28, 0, 0], [-.56, 0, 0], [.33, 0, 0], [.55, 0, 0], [.8, 0, -.09]),
+  { // A rising elbow turns the return chamber into a descending execution.
+    wind: pose([.01, -.62, -.085], [-2.34, -.51, -.42], [-1.38, .32, .41], [-.94, .12, .07], [-1.26, -.08, .08], [0, .24, .03], [-.31, 0, 0], [.18, 0, 0], [.51, 0, 0], [.36, 0, 0], [.79, -.05, -.06]),
+    hit: pose([.43, .31, .09], [-.97, .25, -.84], [-.89, -.28, .42], [-.13, -.03, .04], [-.50, -.09, .11], [0, -.19, -.04], [.23, 0, 0], [-.58, 0, 0], [.43, 0, 0], [.63, 0, 0], [.99, -.04, -.11]),
+    end: pose([.40, .55, .12], [-.58, .45, -.65], [-.55, -.38, .36], [-.25, -.06, .04], [-.72, -.04, .10], [0, -.25, -.04], [.27, 0, 0], [-.53, 0, 0], [.43, 0, 0], [.57, 0, 0], [.82, -.06, -.14]),
   },
 ];
 const overhead = {
-  wind: pose([-.19, -.20, 0], [-2.58, -.18, -.26], [-2.05, .18, .27], [-.63, .03, .05], [-1.0, -.05, -.08], [0, -.09, 0], [-.32, 0, 0], [.24, 0, 0], [.55, 0, 0], [.45, 0, 0], [.8, 0, .04]),
-  hit: pose([.38, .14, .035], [-.75, .18, -.23], [-.85, -.12, .22], [-.13, 0, .03], [-.44, -.04, -.06], [0, .065, 0], [.35, 0, 0], [-.66, 0, 0], [.45, 0, 0], [.60, 0, 0], [1.08, 0, -.07]),
-  end: pose([.44, .24, .03], [-.38, .22, -.19], [-.64, -.12, .25], [-.17, 0, .02], [-.42, -.03, -.02], [0, .10, 0], [.39, 0, 0], [-.72, 0, 0], [.46, 0, 0], [.64, 0, 0], [.72, 0, -.06]),
+  wind: pose([-.14, -.58, -.09], [-2.65, -.35, -.36], [-2.12, .24, .34], [-.83, .06, .08], [-1.15, -.06, -.05], [0, .23, .05], [-.30, 0, 0], [.28, 0, 0], [.60, 0, 0], [.48, 0, 0], [.79, -.04, .03]),
+  hit: pose([.50, .37, .105], [-1.00, .28, -.88], [-1.01, -.22, .27], [-.10, 0, .04], [-.42, -.04, -.06], [0, -.20, -.045], [.37, 0, 0], [-.69, 0, 0], [.53, 0, 0], [.74, 0, 0], [1.05, -.03, -.09]),
+  end: pose([.43, .51, .11], [-.54, .36, -.69], [-.73, -.25, .30], [-.25, 0, .03], [-.56, -.03, -.01], [0, -.25, -.04], [.36, 0, 0], [-.60, 0, 0], [.50, 0, 0], [.66, 0, 0], [.78, -.03, -.08]),
 };
-const bowDraw = pose([.025, -.38, .025], [-1.24, .55, -.38], [-1.43, -.40, .39], [-1.40, .12, .03], [-.13, -.12, 0], [0, -.1, 0], [-.15, 0, 0], [.14, 0, 0], [.24, 0, 0], [.24, 0, 0], [0, 0, 0]);
+const finishing = {
+  wind: pose([.31, -.99, -.14], [-.78, -.98, -.32], [-.27, .54, .51], [-1.26, .22, -.12], [-1.32, -.12, .18], [0, .34, .06], [-.38, 0, 0], [.27, 0, 0], [.48, 0, 0], [.38, 0, 0], [.54, .17, .22]),
+  hit: pose([.44, .45, .13], [-.70, .37, -1.20], [-.64, -.50, .71], [-.09, -.14, .07], [-.76, .05, .18], [0, -.29, -.06], [.32, 0, 0], [-.66, 0, 0], [.45, 0, 0], [.67, 0, 0], [.99, -.22, -.37]),
+  end: pose([.29, 1.01, .16], [-.44, .91, -.88], [-.24, -.62, .53], [-.62, -.24, .13], [-1.23, .04, .15], [0, -.34, -.05], [.19, 0, 0], [-.43, 0, 0], [.35, 0, 0], [.48, 0, 0], [.70, -.24, -.37]),
+};
+const bowDraw = pose([.13, -.64, .05], [-1.28, .64, -.38], [-1.47, -.49, .43], [-1.59, .15, .03], [-.10, -.12, 0], [0, .20, -.03], [-.25, 0, 0], [.16, 0, 0], [.38, 0, 0], [.31, 0, 0], [0, 0, 0]);
+const frostSeal = {
+  wind: pose([.12, -.64, -.10], [-.60, -.51, -.43], [-.62, .76, .44], [-1.14, .12, -.09], [-1.55, -.22, .24], [0, .24, .04], [-.26, 0, 0], [.20, 0, 0], [.42, 0, 0], [.35, 0, 0], [.65, .02, -.16]),
+  hit: pose([.36, .30, .08], [-.68, -.16, -.52], [-1.51, -.37, .62], [-.64, .09, -.10], [-.08, -.05, .08], [0, -.20, -.04], [.23, 0, 0], [-.34, 0, 0], [.43, 0, 0], [.47, 0, 0], [.62, .04, -.14]),
+  end: pose([.27, .57, .09], [-.52, .07, -.45], [-1.27, -.50, .68], [-.85, .08, -.10], [-.35, -.03, .12], [0, -.24, -.03], [.19, 0, 0], [-.31, 0, 0], [.37, 0, 0], [.44, 0, 0], [.60, .04, -.14]),
+};
+const fanRelease = {
+  wind: pose([.17, .65, .07], [-.52, .58, -.70], [-.68, -.45, .52], [-.96, -.21, .12], [-1.66, .15, .17], [0, -.23, -.035], [.19, 0, 0], [-.24, 0, 0], [.34, 0, 0], [.40, 0, 0], [.82, -.20, -.27]),
+  hit: pose([.30, -.59, -.11], [-.83, -.45, -.66], [-1.38, .42, .91], [-.18, .13, -.09], [-.08, -.16, .05], [0, .24, .035], [-.34, 0, 0], [.18, 0, 0], [.46, 0, 0], [.35, 0, 0], [.92, .13, .21]),
+  end: pose([.25, -.86, -.13], [-.78, -.76, -.44], [-1.11, .60, .99], [-.64, .14, -.11], [-.44, -.14, .09], [0, .29, .04], [-.29, 0, 0], [.20, 0, 0], [.42, 0, 0], [.34, 0, 0], [.66, .13, .22]),
+};
 
 function blendPose(a, b, t) {
   const result = {};
@@ -45,15 +61,23 @@ function blendPose(a, b, t) {
   return result;
 }
 
-// Contact markers match the gameplay hit windows. The cutting stroke is quick;
-// anticipation, follow-through and recovery have independent readable timings.
-function strikePose(progress, clip, contact = .42, heavy = false) {
-  const release = contact - (heavy ? .15 : .17);
-  const follow = contact + (heavy ? .11 : .13);
-  if (progress < release) return blendPose(guard, clip.wind, smooth(progress / release));
-  if (progress < contact) return blendPose(clip.wind, clip.hit, smooth((progress - release) / (contact - release)));
+// A fast stroke is followed by a brief contact accent, then a relaxed
+// recovery. Combo recovery keeps the previous blade chamber alive.
+function strikePose(progress, clip, timing, recoveryPose = guard, entryPose = guard) {
+  const { anticipation, contact, follow, recovery } = timing;
+  if (progress < anticipation) return blendPose(entryPose, clip.wind, smooth(progress / anticipation));
+  if (progress < contact) return blendPose(clip.wind, clip.hit, smooth((progress - anticipation) / (contact - anticipation)));
   if (progress < follow) return blendPose(clip.hit, clip.end, smooth((progress - contact) / (follow - contact)));
-  return blendPose(clip.end, guard, smooth((progress - follow) / (1 - follow)));
+  if (progress < recovery) return blendPose(clip.end, recoveryPose, .18 * smooth((progress - follow) / (recovery - follow)));
+  return blendPose(clip.end, recoveryPose, .18 + .82 * smooth((progress - recovery) / (1 - recovery)));
+}
+function envelope(p, start, end) {
+  return smooth(p / start) * (1 - smooth((p - end) / (1 - end)));
+}
+function lungeFeet(progress, timing, lead = -1, reach = .44, width = .23) {
+  const step = clamp((progress - timing.driveStart * .35) / (timing.contact - timing.driveStart * .35));
+  return [-1, 1].map(side => ({ x: side * width, z: side === lead ? mix(.06, reach, smooth(step)) : -.28,
+    lift: side === lead ? Math.sin(step * Math.PI) * .16 : 0, pitch: 0, planted: side !== lead || step >= 1 }));
 }
 
 function motionState(model) {
@@ -76,9 +100,17 @@ function beginLayer(state, key, rig, dt) {
       state.from[name] ||= new THREE.Quaternion();
       state.from[name].copy(object.quaternion);
     }
-    for (const foot of Object.values(state.feet)) foot.planted = false;
+    for (const [side, foot] of Object.entries(state.feet)) {
+      foot.planted = false;
+      foot.start ||= new THREE.Vector3();
+      rig[`${side}Foot`]?.getWorldPosition(foot.start);
+    }
+    state.gaitTransition = 0;
+    state.handoverLead = key?.type === 'attack' ? (key.step % 2 ? 'right' : 'left') : null;
+    state.handoverLeadTime = state.handoverLead ? getActionClip(key.type, key.step || 0).duration * getActionClip(key.type, key.step || 0).contact : 0;
+    state.handoverDuration = state.handoverLead ? state.handoverLeadTime + .125 : .12;
   }
-  state.transition = Math.min(1, state.transition + dt / .085);
+  state.transition = Math.min(1, state.transition + dt / .055);
 }
 
 function gaitFoot(phase, speed, stride, side, backwards) {
@@ -110,10 +142,15 @@ function solveFoot(model, rig, state, side, footTarget, dt, lock) {
     (lengths.sole + footTarget.lift + Math.abs(Math.sin(footTarget.pitch)) * .17) * state.scale.y,
     model.position.z - Math.sin(yaw) * localX + Math.cos(yaw) * localZ);
   if (state.gaitTransition < 1 && contact.start) {
-    const blend = smooth(state.gaitTransition);
+    const progress = state.handoverLead
+      ? prefix === state.handoverLead ? clamp(state.gaitTransition * state.handoverDuration / state.handoverLeadTime) : clamp((state.gaitTransition * state.handoverDuration - state.handoverLeadTime) / .125)
+      : state.gaitTransition;
+    const blend = smooth(progress);
     state.world.lerpVectors(contact.start, state.world, blend);
     state.world.y += Math.sin(blend * Math.PI) * .10;
-    lock = false;
+    // One foot supports the change of combo lead while the other swings.
+    // Release only the moving contact; the new lead lands before its mate lifts.
+    if (progress > 0 && progress < 1 || !state.handoverLead) lock = false;
   }
   if (footTarget.planted && lock) {
     if (!contact.planted) { contact.anchor.copy(state.world); contact.yaw = yaw; }
@@ -125,7 +162,7 @@ function solveFoot(model, rig, state, side, footTarget, dt, lock) {
   // Contacts outside reach occur after teleports, hard turns or knockback.
   // Release that contact and place the foot beneath the moving center of mass.
   const reach = lengths.thigh + lengths.shin - .002;
-  if (state.point.length() > reach + .10 && contact.planted) {
+  if (state.point.length() > reach - .002 && contact.planted) {
     contact.planted = false;
     contact.anchor.set(model.position.x + Math.cos(yaw) * localX + Math.sin(yaw) * localZ,
       lengths.sole * state.scale.y, model.position.z - Math.sin(yaw) * localX + Math.cos(yaw) * localZ);
@@ -133,12 +170,21 @@ function solveFoot(model, rig, state, side, footTarget, dt, lock) {
   }
   const distance = clamp(state.point.length(), .16, reach);
   const upper = lengths.thigh, lower = lengths.shin;
-  const knee = Math.PI - Math.acos(clamp((upper * upper + lower * lower - distance * distance) / (2 * upper * lower), -1, 1));
-  const hipBend = Math.acos(clamp((upper * upper + distance * distance - lower * lower) / (2 * upper * distance), -1, 1));
-  const pitch = Math.atan2(-state.point.z, -state.point.y);
-  const spread = Math.atan2(state.point.x, Math.hypot(state.point.y, state.point.z));
-  leg.rotation.set(pitch - hipBend, 0, spread);
-  shin.rotation.set(knee, 0, 0);
+  // Quaternion two-bone solve keeps the ankle at the exact contact even with
+  // a banked, counter-rotating pelvis. Euler hip spread skews the knee plane.
+  state.legIK ||= { direction: new THREE.Vector3(), pole: new THREE.Vector3(), knee: new THREE.Vector3(),
+    lower: new THREE.Vector3(), down: new THREE.Vector3(0, -1, 0), upperQ: new THREE.Quaternion(), lowerQ: new THREE.Quaternion() };
+  const ik = state.legIK;
+  ik.direction.copy(state.point).normalize();
+  ik.pole.set(0, 0, 1).addScaledVector(ik.direction, -ik.direction.z).normalize();
+  const along = (upper * upper + distance * distance - lower * lower) / (2 * distance);
+  const height = Math.sqrt(Math.max(0, upper * upper - along * along));
+  ik.knee.copy(ik.direction).multiplyScalar(along).addScaledVector(ik.pole, height);
+  ik.lower.copy(ik.direction).multiplyScalar(distance).sub(ik.knee).normalize();
+  ik.upperQ.setFromUnitVectors(ik.down, ik.knee.normalize());
+  ik.lowerQ.setFromUnitVectors(ik.down, ik.lower);
+  leg.quaternion.copy(ik.upperQ);
+  shin.quaternion.copy(ik.upperQ.invert().multiply(ik.lowerQ));
   // A world-aligned ankle cancels the parent's hip/knee rotation. This also
   // lets the toes retain their facing direction through torso counter-rotation.
   shin.updateWorldMatrix(true, false);
@@ -201,112 +247,136 @@ export function animateCharacter(model, walk, action, time, dt, isPlayer = false
   const cycle = state.phase, stride = Math.sin(cycle);
   const backwards = dx * Math.sin(yaw) + dz * Math.cos(yaw) < -.0001;
   let target = blendPose({}, guard, isPlayer ? 1 : .72);
-  const breathe = Math.sin(time * 2.25);
-  target.body = [.055 + moving * .15 + breathe * .008, -.11 + stride * .065 * moving, -state.turn * .017 * moving];
-  target.hips = [0, .04 - stride * .055 * moving, Math.cos(cycle) * .025 * moving];
-  target.leftArm = [-.29 + stride * .43 * moving, .14, .16 + moving * .045];
-  target.rightArm = [-.31 - stride * .23 * moving, -.2, -.19];
-  target.leftForearm = [-.70 - Math.max(0, -stride) * .30 * moving, -.12, .12];
-  target.rightForearm = [-.64 - Math.max(0, stride) * .17 * moving, .10, -.08];
-  let pelvisY = -.07 + breathe * .007 - moving * .06;
-  let pelvisZ = 0, rootY = 0, spin = 0, airborne = false;
+  const breathe = Math.sin(time * 2.1), settle = Math.sin(time * 1.05);
+  const speedLean = moving * clamp(state.speed / 5.6);
+  target.body = [.20 + speedLean * .20 + breathe * .009, -.34 + stride * .15 * moving - state.turn * .028, -.055 - state.turn * .046 * moving + settle * .008];
+  target.hips = [0, .14 - stride * .11 * moving + state.turn * .012, .025 + Math.cos(cycle) * .040 * moving];
+  target.leftArm = [-.22 + stride * .61 * moving, .28 - stride * .12 * moving, .30 + moving * .11];
+  target.rightArm = [-.46 - stride * .15 * moving, -.32 + stride * .10 * moving, -.30 - moving * .12];
+  target.leftForearm = [-1.22 - Math.max(0, -stride) * .22 * moving, -.14, .21];
+  target.rightForearm = [-.94 - Math.max(0, stride) * .20 * moving, .15, -.13];
+  target.rightHand = [.48 + moving * .09, -.05, -.17];
+  let pelvisY = -.17 + breathe * .006 - moving * .025 + Math.cos(cycle * 2) * .013 * moving;
+  let pelvisZ = .035 + speedLean * .045, pelvisX = settle * .008, rootY = 0, spin = 0, airborne = false;
   let footwork = null;
-  const p = action ? clamp(action.age / action.duration) : 0;
   const type = action?.type;
+  const timing = action ? getActionClip(type, action.step || 0) : null;
+  const p = action ? clamp(action.age / (action.duration || timing.duration)) : 0;
   const enemySweep = !action && entity?.attackKind === 'sweep' && (entity.mode === 'windup' || entity.mode === 'recover');
   if (action) {
     if (type === 'attack' || type === 'heavy' || type === 'finisher') {
-      const heavy = type === 'heavy';
-      target = strikePose(p, heavy ? overhead : cuts[type === 'finisher' ? 0 : (action.step || 0) % 3], heavy ? .55 : type === 'finisher' ? .43 : .42, heavy);
-      const weight = Math.sin(Math.PI * p);
-      pelvisY = -.075 - weight * (heavy ? .13 : .07);
-      pelvisZ = weight * .065;
-      const step = clamp(p / (heavy ? .48 : .37));
-      footwork = [-1, 1].map(side => ({ x: side * .24, z: side < 0 ? mix(.02, .40, smooth(step)) : -.25,
-        lift: side < 0 ? Math.sin(step * Math.PI) * .14 : 0, pitch: 0, planted: side > 0 || step >= 1 }));
+      const heavy = type === 'heavy', step = (action.step || 0) % 3;
+      const clip = heavy ? overhead : type === 'finisher' ? finishing : cuts[step];
+      const chained = type === 'attack' && step < 2;
+      const chamber = chained ? blendPose(clip.end, cuts[step + 1].wind, .28) : guard;
+      target = strikePose(p, clip, timing, chamber, type === 'attack' && step > 0 ? cuts[step - 1].end : guard);
+      const load = envelope(p, timing.anticipation, timing.recovery);
+      const contactWeight = smooth((p - timing.anticipation) / (timing.contact - timing.anticipation));
+      pelvisY = -.17 - load * (heavy ? .115 : type === 'finisher' ? .10 : .055);
+      pelvisZ = .025 + load * .10;
+      pelvisX = load * (step === 1 ? .065 : -.055) * (1 - contactWeight * 1.6);
+      footwork = lungeFeet(p, timing, step === 1 ? 1 : -1, heavy ? .52 : .46);
+      if (type === 'finisher') spin = smooth((p - timing.contact) / (timing.follow - timing.contact)) * .33 * (1 - smooth((p - timing.recovery) / (1 - timing.recovery)));
     } else if (type === 'roll') {
-      const tuck = smooth(p / .15) * (1 - smooth((p - .80) / .20));
-      const folded = pose([1.08, 0, -.13], [-1.48, .18, -.33], [-1.70, -.2, .38], [-1.30, .1, 0], [-1.57, 0, 0],
-        [0, 0, 0], [-1.73, 0, -.07], [-1.92, 0, .1], [2.25, 0, 0], [2.27, 0, 0], [.15, 0, 0]);
+      const tuck = envelope(p, .12, .77);
+      const folded = pose([1.01, .12, -.19], [-1.40, .29, -.42], [-1.82, -.29, .49], [-1.42, .12, .03], [-1.65, -.04, .02],
+        [0, 0, 0], [-1.69, 0, -.08], [-2.04, 0, .13], [2.20, 0, 0], [2.35, 0, 0], [.18, -.07, -.02]);
       target = blendPose(guard, folded, tuck);
-      target.head = [.43 * tuck, 0, 0];
-      target.hips = [smooth((p - .06) / .88) * TAU, 0, 0];
-      target.leftFoot = [-.50 * tuck, 0, 0]; target.rightFoot = [-.50 * tuck, 0, 0];
-      pelvisY = -.07 - .25 * tuck;
-      rootY = .055 * Math.sin(Math.PI * p);
+      target.head = [.45 * tuck, -.10 * tuck, .09 * tuck];
+      target.hips = [smooth((p - .06) / .84) * TAU, 0, -.11 * Math.sin(p * Math.PI)];
+      target.leftFoot = [-.50 * tuck, 0, 0]; target.rightFoot = [-.44 * tuck, 0, 0];
+      pelvisY = -.17 - .20 * tuck;
+      pelvisZ = .08 * tuck;
+      rootY = .065 * Math.sin(Math.PI * p);
       airborne = true;
     } else if (type === 'whirl') {
-      const extend = smooth(p / .18) * (1 - smooth((p - .8) / .2));
-      target = blendPose(guard, pose([.09, .17, -.06], [-.53, -.04, -1.29], [-.44, .02, 1.03], [-.16, 0, -.06], [-.47, 0, .06],
-        [0, 0, 0], [-.2, 0, -.06], [.2, 0, .06], [.3, 0, 0], [.3, 0, 0], [.56, 0, -.12]), extend);
-      spin = smooth(p) * TAU * 2;
-      pelvisY = -.10;
-      footwork = [-1, 1].map(side => ({ x: side * .23, z: Math.sin(p * TAU * 2 + (side < 0 ? 0 : Math.PI)) * .16,
-        lift: Math.max(0, side * Math.sin(p * TAU * 2)) * .10, pitch: 0, planted: false }));
+      const extend = envelope(p, timing.anticipation, timing.recovery);
+      const spiral = pose([.27, -.26, -.15], [-.68, -.16, -1.33], [-.32, .37, .81], [-.13, .07, -.11], [-1.02, -.15, .20],
+        [0, .18, .04], [-.30, 0, -.08], [.23, 0, .08], [.45, 0, 0], [.38, 0, 0], [.84, -.12, -.26]);
+      target = blendPose(guard, spiral, extend);
+      // Cross-step, accelerating draw, then two tight pivots and a brake.
+      const rotate = smooth((p - .10) / .73);
+      spin = rotate * TAU * 2;
+      target.body[0] += Math.sin(p * TAU * 3) * .055 * extend;
+      target.body[1] += Math.sin(p * TAU * 3) * .19 * extend;
+      pelvisY = -.17 - extend * .07;
+      footwork = [-1, 1].map(side => ({ x: side * (.22 + .025 * Math.sin(p * TAU * 3)), z: Math.sin(spin * 1.5 + (side < 0 ? 0 : Math.PI)) * .20,
+        lift: Math.max(0, side * Math.sin(spin * 1.5)) * .14, pitch: 0, planted: false }));
     } else if (type === 'burst') {
-      target = strikePose(p, overhead, .57, true);
-      const takeoff = smooth((p - .18) / .12), landing = smooth((p - .48) / .09);
-      const flight = p >= .22 && p <= .57 ? Math.sin(clamp((p - .22) / .35) * Math.PI) : 0;
-      rootY = 1.05 * flight;
-      pelvisY = -.07 - .19 * (1 - takeoff) * Math.sin(clamp(p / .22) * Math.PI / 2) - .24 * landing * (1 - smooth((p - .66) / .34));
+      target = strikePose(p, overhead, timing);
+      const flight = p >= .22 && p < timing.contact ? Math.sin(clamp((p - .22) / (timing.contact - .22)) * Math.PI) : 0;
+      const load = Math.sin(clamp(p / .22) * Math.PI) * (p < .22 ? 1 : 0);
+      const land = smooth((p - .49) / .09) * (1 - smooth((p - .68) / .30));
+      rootY = .94 * flight;
+      pelvisY = -.17 - .11 * load - .14 * land;
       const fold = Math.max(0, flight);
-      target.leftLeg[0] -= fold * .70; target.rightLeg[0] -= fold * .65;
-      target.leftShin[0] += fold * .9; target.rightShin[0] += fold * .8;
-      target.leftFoot = [-.32 * fold, 0, 0]; target.rightFoot = [-.3 * fold, 0, 0];
-      airborne = flight > .015 && p > .27 && p < .51;
-      footwork = [-1, 1].map(side => ({ x: side * .26, z: side * -.12, lift: 0, pitch: 0, planted: true }));
+      target.leftLeg[0] -= fold * .88; target.rightLeg[0] -= fold * .72;
+      target.leftShin[0] += fold * 1.10; target.rightShin[0] += fold * 1.10;
+      target.leftFoot = [-.32 * fold, 0, 0]; target.rightFoot = [-.25 * fold, 0, 0];
+      target.body[1] -= .30 * flight;
+      airborne = flight > .10 && p > .24 && p < timing.contact - .025;
+      footwork = [-1, 1].map(side => ({ x: side * .28, z: side * -.18, lift: 0, pitch: 0, planted: true }));
     } else if (type === 'dash') {
-      const drive = smooth(p / .12) * (1 - smooth((p - .75) / .25));
-      target = blendPose(guard, pose([.55, -.23, -.06], [-.72, -.8, -.36], [-.85, .3, .57], [-.32, .14, -.15], [-1.0, .05, .06],
-        [0, -.08, 0], [.1, 0, -.07], [-.8, 0, .09], [.4, 0, 0], [.75, 0, 0], [.60, .05, .18]), drive);
-      pelvisY = -.07 - .22 * drive;
-      const dashPhase = p * TAU * 1.4;
-      footwork = [-1, 1].map(side => gaitFoot(dashPhase, drive, .75, side, false));
+      const draw = pose([.57, -.82, -.14], [-.58, -.99, -.29], [-.83, .48, .61], [-1.08, .21, -.14], [-1.36, -.10, .16],
+        [0, .27, .04], [.12, 0, -.08], [-.86, 0, .10], [.48, 0, 0], [.86, 0, 0], [.52, .12, .24]);
+      const passing = { wind: draw, hit: cuts[0].hit, end: finishing.end };
+      target = strikePose(p, passing, timing);
+      const drive = envelope(p, timing.anticipation, timing.driveEnd);
+      target.body[0] += .13 * drive;
+      pelvisY = -.17 - .10 * drive;
+      pelvisZ = .10 * drive;
+      footwork = [-1, 1].map(side => gaitFoot(p * TAU * 1.55, drive, .83, side, false));
     } else if (type === 'frost') {
-      const gather = pose([-.07, -.23, 0], [-.62, -.24, -.34], [-.77, .52, .46], [-1.10, .08, -.04], [-1.32, -.16, .17],
-        [0, -.08, 0], [-.15, 0, 0], [.16, 0, 0], [.35, 0, 0], [.35, 0, 0], [.62, .05, -.15]);
-      const release = pose([.16, .18, .03], [-.58, -.15, -.45], [-1.38, -.24, .56], [-.36, .05, -.05], [-.16, 0, .12],
-        [0, .06, 0], [.18, 0, 0], [-.28, 0, 0], [.4, 0, 0], [.4, 0, 0], [.52, .08, -.1]);
-      target = strikePose(p, { wind: gather, hit: release, end: release }, .36);
-      target.leftHand = [-.24 * Math.sin(p * Math.PI), 0, -.18];
-      pelvisY = -.11 - Math.sin(p * Math.PI) * .10;
+      target = strikePose(p, frostSeal, timing);
+      target.leftHand = [-.38 * envelope(p, timing.anticipation, timing.recovery), .13, -.22];
+      pelvisY = -.17 - .075 * envelope(p, timing.anticipation, timing.recovery);
+      pelvisZ = .065;
+      footwork = lungeFeet(p, timing, -1, .35, .26);
     } else if (type === 'blades') {
-      const gather = blendPose(guard, cuts[1].wind, .7);
-      gather.leftArm = [-1.0, .1, .58]; gather.leftForearm = [-1.45, -.2, .12];
-      const release = blendPose(guard, cuts[1].hit, .7);
-      release.leftArm = [-1.42, -.23, .55]; release.leftForearm = [-.1, 0, .04];
-      target = strikePose(p, { wind: gather, hit: release, end: release }, .30);
-      pelvisY = -.1;
+      target = strikePose(p, fanRelease, timing);
+      target.leftHand = [.23 * envelope(p, timing.anticipation, timing.follow), -.16, .26];
+      pelvisY = -.17 - .035 * Math.sin(p * Math.PI);
+      footwork = lungeFeet(p, timing, 1, .34);
     }
   } else if (entity) {
+    const enemyTiming = ENEMY_CLIPS[entity.type] || ENEMY_CLIPS.soldier;
+    const enemyClip = entity.attackKind === 'sweep' ? cuts[0] : overhead;
     if (entity.mode === 'windup') {
       const progress = clamp(1 - entity.timer / (entity.windupDuration || 1));
-      const archer = entity.type === 'archer';
-      const clip = entity.attackKind === 'sweep' ? cuts[0] : overhead;
-      // Enemies finish their stroke in the final telegraph frames. Contact is
-      // already authored when gameplay switches to recovery and applies damage.
-      if (archer) target = blendPose(guard, bowDraw, smooth(progress / .8));
-      else if (progress < .77) target = blendPose(guard, clip.wind, smooth(progress / .77));
-      else target = blendPose(clip.wind, clip.hit, smooth((progress - .77) / .23));
-      pelvisY = -.07 - Math.sin(progress * Math.PI) * .11;
-      if (enemySweep) spin = smooth((progress - .77) / .23) * Math.PI;
+      const release = enemyTiming.anticipation;
+      if (entity.type === 'archer') {
+        target = blendPose(guard, bowDraw, smooth(progress / .65));
+        target.rightForearm[0] -= .07 * Math.sin(progress * Math.PI);
+      } else if (progress < release) target = blendPose(guard, enemyClip.wind, smooth(progress / (release * .70)));
+      else target = blendPose(enemyClip.wind, enemyClip.hit, smooth((progress - release) / (1 - release)));
+      pelvisY = -.11 - .075 * Math.sin(progress * Math.PI);
+      pelvisZ = .045 * smooth((progress - release) / (1 - release));
+      if (enemySweep) spin = smooth((progress - release) / (1 - release)) * Math.PI;
+      footwork = lungeFeet(progress, { driveStart: release, contact: 1 }, -1, .35);
     } else if (entity.mode === 'recover') {
       const progress = clamp(1 - entity.timer / (entity.recoverDuration || .6));
       if (entity.type === 'archer') {
-        const released = blendPose(bowDraw, guard, .32);
-        released.leftForearm = [-.25, -.13, 0];
-        target = blendPose(released, guard, smooth(progress));
-      } else {
-        const clip = entity.attackKind === 'sweep' ? cuts[0] : overhead;
-        target = progress < .20 ? blendPose(clip.hit, clip.end, smooth(progress / .2))
-          : blendPose(clip.end, guard, smooth((progress - .2) / .8));
-      }
-      pelvisY = -.075 - .09 * (1 - smooth(progress));
-      if (enemySweep) spin = Math.PI + smooth(progress / .4) * Math.PI;
+        const released = blendPose(bowDraw, guard, .28);
+        released.rightForearm = [-.94, .35, -.05];
+        released.leftForearm = [-.17, -.13, 0];
+        target = blendPose(released, guard, smooth((progress - .08) / .92));
+      } else if (progress < enemyTiming.follow) target = blendPose(enemyClip.hit, enemyClip.end, smooth(progress / enemyTiming.follow));
+      else target = blendPose(enemyClip.end, guard, smooth((progress - enemyTiming.recovery) / (1 - enemyTiming.recovery)));
+      pelvisY = -.11 - .08 * (1 - smooth(progress));
+      if (enemySweep) spin = Math.PI + smooth(progress / .48) * Math.PI;
     }
     if (entity.stun > 0) {
-      target.body[0] -= .40; target.body[2] += .13;
-      target.head = [-.18, .08, 0]; target.rightArm[2] -= .2; target.leftArm[2] += .25; pelvisY -= .06;
+      const reaction = entity.reactionAge == null ? clamp(entity.stun / .25) : 1 - smooth(entity.reactionAge / (entity.reactionDuration || .25));
+      const strength = reaction * (entity.reactionStrength || 1);
+      const direction = entity.reactionYaw || 0;
+      target.body[0] -= Math.cos(direction) * .40 * strength;
+      target.body[1] += Math.sin(direction) * .34 * strength;
+      target.body[2] -= Math.sin(direction) * .20 * strength;
+      target.head = [-.20 * strength, -.12 * Math.sin(direction) * strength, .06 * strength];
+      target.rightArm[2] -= .26 * strength; target.leftArm[2] += .32 * strength;
+      target.rightForearm[0] += .24 * strength;
+      pelvisY -= .035 * strength;
+      pelvisX += .055 * Math.sin(direction) * strength;
     }
   }
   if (enemySweep && spin > 0) {
@@ -314,18 +384,21 @@ export function animateCharacter(model, walk, action, time, dt, isPlayer = false
       lift: Math.max(0, side * Math.sin(spin)) * .08, pitch: 0, planted: false }));
   }
   if (isPlayer && entity?.hurtTimer > 0) {
-    const recoil = clamp(entity.hurtTimer / .15);
-    target.body[0] -= .39 * recoil; target.body[2] -= .12 * recoil;
+    const recoil = clamp(entity.hurtTimer / (entity.hurtDuration || .23));
+    const direction = entity.reactionYaw || 0;
+    target.body[0] -= .38 * Math.cos(direction) * recoil; target.body[2] -= .18 * Math.sin(direction) * recoil;
+    target.body[1] += .25 * Math.sin(direction) * recoil;
     target.head = [-.22 * recoil, .10 * recoil, .05 * recoil];
-    target.leftArm[2] += .27 * recoil; target.rightArm[2] -= .2 * recoil; pelvisY -= .065 * recoil;
+    target.leftArm[2] += .31 * recoil; target.rightArm[2] -= .24 * recoil; pelvisY -= .035 * recoil;
   }
   if (entity?.type === 'archer') target.rightHand = [0, 0, 0];
-  target.head ||= [-target.body[0] * .43 + breathe * .006, -target.body[1] * .55, -target.body[2] * .5];
+  target.head ||= [-target.body[0] * .56 + breathe * .006, -target.body[1] * .67 + state.turn * .036, -target.body[2] * .60];
   // Layer delayed motion down the cloth chain. Acceleration and turning move
   // the fabric; a low-amplitude breeze keeps a resting silhouette alive.
-  const energy = moving + (action ? Math.sin(p * Math.PI) * .6 : 0);
-  target.cape = [.10 + energy * .28 + Math.sin(time * 3.1) * .025, -state.turn * .05, Math.sin(time * 2.8) * .023];
-  target.capeTail = [.06 + energy * .32 + Math.sin(time * 5.6 - .9) * (.04 + energy * .04), -state.turn * .035, Math.sin(time * 3.1 - 1) * .05];
+  const energy = moving + (action ? envelope(p, timing.anticipation, timing.recovery) * .9 : 0);
+  const twist = target.body[1] - guard.body[1];
+  target.cape = [.10 + energy * .28 + Math.sin(time * 3.1) * .025, -state.turn * .05 - twist * .13, Math.sin(time * 2.8) * .023 - twist * .07];
+  target.capeTail = [.06 + energy * .32 + Math.sin(time * 5.6 - .9) * (.04 + energy * .04), -state.turn * .035 - twist * .10, Math.sin(time * 3.1 - 1) * .05 - twist * .06];
   target.scarf = [.16 + energy * .32, -state.turn * .065, Math.sin(time * 5.3) * .04];
   target.scarfTip = [.13 + energy * .4 + Math.sin(time * 7 - .9) * .075, -state.turn * .04, Math.sin(time * 6.2 - 1) * .065];
   if (type === 'roll') {
@@ -333,8 +406,8 @@ export function animateCharacter(model, walk, action, time, dt, isPlayer = false
     target.cape[0] -= fold * .55; target.capeTail[0] -= fold * .7;
     target.scarf[0] -= fold * 1.25; target.scarfTip[0] -= fold * .8;
   }
-  target.skirtLeft = [moving * Math.max(0, -stride) * .37 + (action ? .08 : 0), 0, -.055];
-  target.skirtRight = [moving * Math.max(0, stride) * .37 + (action ? .08 : 0), 0, .055];
+  target.skirtLeft = [.07 + moving * Math.max(0, -stride) * .37 + (action ? .08 : 0), 0, -.055];
+  target.skirtRight = [.07 + moving * Math.max(0, stride) * .37 + (action ? .08 : 0), 0, .055];
   const layer = action || (entity?.stun > 0 ? 'stunned' : entity?.mode || 'locomotion');
   beginLayer(state, layer, rig, dt);
   const transition = smooth(state.transition);
@@ -346,10 +419,10 @@ export function animateCharacter(model, walk, action, time, dt, isPlayer = false
     if (type === 'roll' && name === 'hips') object.rotation.copy(state.euler);
     else {
       if (state.from[name] && transition < 1) state.q.copy(state.from[name]).slerp(new THREE.Quaternion().setFromEuler(state.euler), transition);
-      object.quaternion.slerp(state.q, 1 - Math.exp(-(name.startsWith('cape') || name.startsWith('scarf') ? 12 : action || entity?.mode === 'windup' ? 65 : 19) * dt));
+      object.quaternion.slerp(state.q, 1 - Math.exp(-(name.startsWith('cape') || name.startsWith('scarf') ? 12 : action || entity?.mode === 'windup' || entity?.hurtTimer > 0 || entity?.stun > 0 ? 150 : 22) * dt));
     }
     object.position.copy(base.position);
-    if (name === 'hips') { object.position.y += pelvisY; object.position.z += pelvisZ; }
+    if (name === 'hips') { object.position.y += pelvisY; object.position.z += pelvisZ; object.position.x += pelvisX; }
   }
   model.position.y = rootY;
   model.rotation.x = 0; model.rotation.z = 0; model.rotation.y = yaw + spin;
@@ -358,16 +431,18 @@ export function animateCharacter(model, walk, action, time, dt, isPlayer = false
     const useGait = !action && (!entity || entity.mode === 'chase' || entity.mode == null) && moving > .05;
     if (state.wasMoving !== undefined && state.wasMoving !== useGait) {
       state.gaitTransition = 0;
+      state.handoverLead = null;
+      state.handoverDuration = .12;
       for (const side of ['left', 'right']) {
         const foot = state.feet[side];
         if (foot) { foot.planted = false; foot.start ||= new THREE.Vector3(); rig[`${side}Foot`]?.getWorldPosition(foot.start); }
       }
     }
     state.wasMoving = useGait;
-    state.gaitTransition = Math.min(1, state.gaitTransition + dt / .12);
+    state.gaitTransition = Math.min(1, state.gaitTransition + dt / (state.handoverDuration || .12));
     for (const side of [-1, 1]) {
       const desired = footwork?.[side < 0 ? 0 : 1] || (useGait ? gaitFoot(cycle, moving, strideScale * moving, side, backwards)
-        : { x: side * .20, z: side < 0 ? .10 : -.10, lift: 0, pitch: 0, planted: true });
+        : { x: side * .24, z: side < 0 ? .20 : -.18, lift: 0, pitch: 0, planted: true });
       solveFoot(model, rig, state, side, desired, dt, type !== 'whirl' && type !== 'dash' && !enemySweep);
     }
   } else {
@@ -375,6 +450,14 @@ export function animateCharacter(model, walk, action, time, dt, isPlayer = false
   }
   if (type === 'heavy' || type === 'burst' || type === 'attack' && action.step === 2) {
     supportSword(model, rig, smooth(p / .22) * (1 - smooth((p - .72) / .24)));
+  }
+  if (type === 'burst' && airborne) {
+    // The landing begins when an articulated sole reaches the floor; keep the
+    // last airborne frames clear before ground IK takes over on both ankles.
+    model.updateWorldMatrix(true, true);
+    state.bounds ||= new THREE.Box3();
+    const soleY = Math.min(state.bounds.setFromObject(rig.leftFoot).min.y, state.bounds.setFromObject(rig.rightFoot).min.y);
+    model.position.y += Math.max(0, .002 - soleY);
   }
   if (type === 'roll' && rig.rightHand && rig.weapon) {
     // Carry the dao outside the shoulder roll, tilted safely above the ground.
@@ -392,7 +475,7 @@ export function animateCharacter(model, walk, action, time, dt, isPlayer = false
     let clearance = Math.max(0, .23 - state.point.y);
     model.updateWorldMatrix(true, true);
     state.bounds ||= new THREE.Box3();
-    for (const joint of [rig.head, rig.leftFoot, rig.rightFoot, rig.scarf]) {
+    for (const joint of [rig.head, rig.leftFoot, rig.rightFoot, rig.scarf, rig.skirtLeft, rig.skirtRight]) {
       if (joint) clearance = Math.max(clearance, .002 - state.bounds.setFromObject(joint).min.y);
     }
     model.position.y += clearance;
