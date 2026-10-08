@@ -186,6 +186,7 @@ export function createCharacter(type = 'hero') {
   const arms = [];
   for (const side of [-1,1]) {
     const hip = joint(body, `${side === -1 ? 'left' : 'right'}-hip`, side*.155 * width, -.035,0);
+    hip.rotation.order = 'YXZ';
     mesh(hip, cylinder, 'cloth', [.098,.42,.10], [0,-.205,0]);
     mesh(hip, box, 'armor', [.135,.26,.10], [0,-.17,.076], [0,0,side*.045]);
     const knee = joint(hip, 'knee', 0,-.41,0);
@@ -304,8 +305,28 @@ function sample(p, keys) {
   return keys[keys.length-1][1];
 }
 
-export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,skill=0} = {}) {
+export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,skill=0,dt,
+  gaitPhase,moveBlend,turnLean=0,attackCarry=0,hurtDirection=1,hurtStrength=1,transition=true,immediate=false} = {}) {
+  if(dt===0&&!immediate&&transition!==false&&rig.motion)return;
   const {body,chest,head,arms,legs,pony,cloths,type} = rig;
+  const motion = rig.motion ??= {
+    key: null, phase: 0, lastTime: time, gait: 0, move: 0,
+    elapsed: 1, duration: .08, targetQ: new THREE.Quaternion(),
+    from: rig.bind.map(({node}) => ({p:node.position.clone(),q:node.quaternion.clone()})),
+  };
+  const delta=clamp(dt ?? (time>motion.lastTime ? time-motion.lastTime : 1/60),0,.05);
+  const locomotion=state==='idle'||state==='run';
+  const key=locomotion?'locomotion':`${state}:${state==='attack'?combo:state==='skill'?skill:0}`;
+  const restarted=!locomotion && phase<motion.phase-.2;
+  if(motion.key!==null && (key!==motion.key||restarted)) {
+    rig.bind.forEach(({node},i)=>{motion.from[i].p.copy(node.position);motion.from[i].q.copy(node.quaternion);});
+    motion.elapsed=0;
+    motion.duration=state==='hurt'?.04:state==='roll'?.06:.08;
+  } else motion.elapsed+=delta;
+  motion.gait+=locomotion?delta*clamp(speed,0,1)*12:0;
+  motion.move=mix(motion.move,state==='run'?1:0,1-Math.exp(-delta/.075));
+  const movement=clamp(moveBlend??motion.move,0,1);
+  const gait=gaitPhase??motion.gait;
   for(const {node,p,r} of rig.bind) {node.position.copy(p);node.rotation.copy(r);}
   const p=clamp(phase,0,1), hero=type==='hero', heavy=type==='brute', boss=type==='boss', archer=type==='archer';
   const L=arms[0],R=arms[1],LL=legs[0],RL=legs[1];
@@ -327,27 +348,8 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
   if(archer){L.shoulder.rotation.x=-.65;L.elbow.rotation.x=-.8;L.wrist.rotation.x=1.38;R.shoulder.rotation.x=-.72;R.elbow.rotation.x=-1.5;R.wrist.rotation.x=2.22;}
   pony.rotation.x=Math.sin(time*3)*.05;
   for(let i=0;i<cloths.length;i++){cloths[i].rotation.x=Math.sin(time*2.6+i)*.07;cloths[i].rotation.z=Math.sin(time*2.2+i)*.045;}
-  if(state==='run') {
-    const cycle=time*(hero?12.6:heavy?8.5:10.5), amplitude=.49*clamp(speed,.2,1);
-    body.position.y-=.07+Math.abs(Math.sin(cycle))*.028;
-    body.rotation.x=.13;
-    chest.rotation.x=.15;
-    chest.rotation.y=Math.sin(cycle)*.085;
-    head.rotation.x=-.17;
-    for(const leg of legs){
-      const a=cycle+(leg.side===-1?Math.PI:0),s=Math.sin(a);
-      leg.hip.rotation.x=s*amplitude-.12;
-      leg.knee.rotation.x=.23+Math.max(0,-s)*.76;
-      leg.foot.rotation.x=-leg.knee.rotation.x*.35;
-    }
-    if(hero){
-      L.shoulder.rotation.set(.65+Math.sin(cycle)*.14,.12,-.23);L.elbow.rotation.x=-.36;L.wrist.rotation.x=.22;
-      R.shoulder.rotation.set(.52-Math.sin(cycle)*.14,-.10,.24);R.elbow.rotation.x=-.48;R.wrist.rotation.x=.34;
-    } else {
-      L.shoulder.rotation.x=.20-Math.sin(cycle)*.25;R.shoulder.rotation.x=.18+Math.sin(cycle)*.26;
-    }
-    pony.rotation.x=.35+Math.sin(cycle)*.09;
-    for(const c of cloths){c.rotation.x=-.42+Math.sin(cycle)*.10;c.rotation.z=Math.sin(cycle*.5)*.13;}
+  if(locomotion) {
+    sampleLocomotion(rig,gait,movement,speed,turnLean,time);
   } else if(state==='attack' || state==='charge') {
     const c=((combo%4)+4)%4;
     const wind=sample(p,[[0,0],[.23,1],[.37,1],[.62,0],[1,0]]);
@@ -404,6 +406,7 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
     }
     pony.rotation.x=.17+.23*exert;pony.rotation.z=-direction*.22*exert;
     for(const cloth of cloths){cloth.rotation.x=-.15-.28*exert;cloth.rotation.z=-direction*.38*exert;}
+    if(hero) sampleHeroAttack(rig,p,c,gait,attackCarry,turnLean);
   } else if(state==='roll') {
     const tuck=Math.sin(Math.PI*p);
     body.position.y=sample(p,[[0,.91],[.125,.88],[.25,.63],[.375,.99],[.5,.94],[.625,.94],[.75,.30],[.875,.53],[1,.91]])+.08*smooth(p/.05)*smooth((1-p)/.05);
@@ -416,13 +419,17 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
     pony.rotation.x=-.40*tuck;
     for(const c of cloths){c.rotation.x=-.6*tuck;c.rotation.z=.2*Math.sin(p*TAU);}
   } else if(state==='hurt') {
-    const stagger=Math.sin(Math.PI*p);
-    body.position.z-=.13*stagger;body.position.y-=.06*stagger;
-    body.rotation.set(-.23*stagger,.24*stagger,-.13*stagger);
-    chest.rotation.x=-.16-.23*stagger;chest.rotation.y=.20*stagger;
-    head.rotation.y=-.48*stagger;head.rotation.x=-.23*stagger;
-    R.shoulder.rotation.x=.35*stagger;L.shoulder.rotation.z=-.35-.25*stagger;
-    LL.hip.rotation.x=-.25-.40*stagger;RL.knee.rotation.x=.3+.36*stagger;
+    const stagger=sample(p,[[0,0],[.12,1],[.33,.72],[.65,.27],[1,0]])*clamp(hurtStrength,0,1);
+    const side=clamp(hurtDirection,-1,1);
+    const resistance=heavy?.52:boss?.34:1;
+    body.position.z-=.12*stagger*resistance;body.position.x+=side*.065*stagger*resistance;
+    body.position.y-=.025*stagger;
+    body.rotation.set(-.25*stagger*resistance,side*.23*stagger,-side*.16*stagger*resistance);
+    chest.rotation.x=-.08-.24*stagger;chest.rotation.y=side*.30*stagger;
+    head.rotation.y=-side*.55*stagger;head.rotation.x=-.24*stagger;
+    R.shoulder.rotation.x+=.4*stagger;L.shoulder.rotation.z-=.28*stagger;
+    LL.hip.rotation.x=-.15-.30*stagger;RL.knee.rotation.x=.28+.30*stagger;
+    LL.hip.rotation.z=side*.10*stagger;RL.hip.rotation.z=side*.10*stagger;
   } else if(state==='dead') {
     const fall=smooth(p);
     body.position.y=mix(.91,.42,fall);body.position.z=-.16*fall;
@@ -473,5 +480,143 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
     pony.rotation.x=.2+.4*energy;pony.rotation.z=-.35*energy;
     for(const c of cloths){c.rotation.x=-.15-.65*energy;c.rotation.z=.35*energy;}
   }
+  // Blend only the opening of a changed action. Contacts and complete spin arcs
+  // are sampled absolutely; quaternion interpolation never wraps a full turn.
+  let blend=transition&&!immediate?smooth(motion.elapsed/motion.duration):1;
+  if((state==='attack'||state==='skill')&&p>=.32)blend=1;
+  if(blend<1)rig.bind.forEach(({node},i)=>{
+    motion.targetQ.copy(node.quaternion);
+    node.position.lerpVectors(motion.from[i].p,node.position,blend);
+    node.quaternion.slerpQuaternions(motion.from[i].q,motion.targetQ,blend);
+  });
+  motion.key=key;motion.phase=p;motion.lastTime=time;
   // World matrices are updated once by the renderer or weaponTips, not per joint.
+}
+
+// A planted stance followed by a short lifted return; solve both leg joints so
+// ankle height stays steady instead of lifting the entire character each step.
+function legTarget(leg,y,z,weight=1) {
+  const a=.41,b=.395,d=clamp(Math.hypot(y,z),.12,a+b-.002);
+  const hip=Math.atan2(-z,-y)-Math.acos(clamp((a*a+d*d-b*b)/(2*a*d),-1,1));
+  const knee=Math.PI-Math.acos(clamp((a*a+b*b-d*d)/(2*a*b),-1,1));
+  leg.hip.rotation.x=mix(leg.hip.rotation.x,hip,weight);
+  leg.knee.rotation.x=mix(leg.knee.rotation.x,knee,weight);
+  leg.foot.rotation.x=mix(leg.foot.rotation.x,-hip-knee,weight);
+}
+
+function sampleLocomotion(rig,gait,blend,speed,turn,time) {
+  const {body,chest,head,legs,arms,pony,cloths,type}=rig;
+  const lean=clamp(turn,-1,1)*blend;
+  const pace=clamp(speed,0,1), stride=(type==='brute'?.215:.235)+.085*pace;
+  // gaitPhase is a complete left/right cycle. At sprint speed a short ground
+  // contact and longer airborne return preserve cadence without sliding feet.
+  const cycleDistance=mix(.85,2.9,pace);
+  const stance=clamp(stride*2/cycleDistance,.20,.58);
+  body.position.y=.91+Math.sin(time*2.3)*.004*(1-blend)-(.055+.025*pace)*blend-.003*Math.abs(Math.sin(gait*2))*blend;
+  body.rotation.set(.12*blend,Math.sin(gait)*.036*blend,-lean*.09);
+  chest.rotation.x=mix(-.08,.105,blend);
+  chest.rotation.y=-.07*(1-blend)-Math.sin(gait)*.078*blend;
+  chest.rotation.z=lean*.035;
+  head.rotation.x=mix(.045,-.17,blend);
+  head.rotation.y=-chest.rotation.y*.6;
+  head.rotation.z=lean*.045;
+  for(const leg of legs){
+    const u=((gait/TAU+(leg.side===-1?.5:0))%1+1)%1;
+    let z,lift;
+    if(u<stance){z=stride*(1-2*u/stance);lift=0;}
+    else{const t=(u-stance)/(1-stance);z=mix(-stride,stride,smooth(t));lift=(.08+.025*pace)*Math.sin(Math.PI*t);}
+    const ankle=.069+lift;
+    const hipY=body.position.y-.035;
+    legTarget(leg,ankle-hipY,z,blend);
+    leg.hip.rotation.x-=body.rotation.x*blend;
+    leg.hip.rotation.y=-lean*.08;
+    leg.hip.rotation.z=lean*.055+(leg.side===-1?-.018:.018)*blend;
+    leg.foot.rotation.y=lean*.065;
+    // A slight toe peel only during the returning foot, never on the stance foot.
+    if(u>stance)leg.foot.rotation.x+=.12*Math.sin(Math.PI*(u-stance)/(1-stance))*blend;
+  }
+  for(const arm of arms){
+    const swing=Math.sin(gait+(arm.side===-1?Math.PI:0));
+    if(type==='hero'){
+      const targetX=(arm.side===-1?.66:.55)+swing*.075;
+      arm.shoulder.rotation.x=mix(arm.shoulder.rotation.x,targetX,blend);
+      arm.shoulder.rotation.y=mix(arm.shoulder.rotation.y,arm.side*-.10,blend);
+      arm.shoulder.rotation.z=mix(arm.shoulder.rotation.z,arm.side*.23,blend);
+      arm.elbow.rotation.x=mix(arm.elbow.rotation.x,arm.side===-1?-.38:-.49,blend);
+      arm.wrist.rotation.x=mix(arm.wrist.rotation.x,.24,blend);
+    }else{
+      arm.shoulder.rotation.x=mix(arm.shoulder.rotation.x,.25+swing*.18,blend);
+      if(type!=='archer')arm.elbow.rotation.x=mix(arm.elbow.rotation.x,-.48,blend);
+    }
+  }
+  pony.rotation.x=mix(pony.rotation.x,.25+pace*.11+Math.sin(gait-.8)*.055,blend);
+  pony.rotation.z=-lean*.20+Math.sin(gait-.7)*.025*blend;
+  for(let i=0;i<cloths.length;i++){
+    cloths[i].rotation.x=mix(cloths[i].rotation.x,-.25-.12*pace+Math.sin(gait-.65+i)*.055,blend);
+    cloths[i].rotation.z=-lean*.19+Math.sin(gait-.9+i)*.075*blend;
+  }
+}
+
+function sampleHeroAttack(rig,p,combo,gait,carry,turn) {
+  const {body,chest,head,arms,legs,pony,cloths}=rig;
+  const wind=sample(p,[[0,0],[.19,1],[.29,1],[.49,0],[1,0]]);
+  const cut=sample(p,[[0,0],[.29,0],[.50,1],[.72,1],[1,.26]]);
+  const drive=pulse(p,.29,.81), recover=smooth((p-.75)/.25);
+  const dir=combo===1?-1:1;
+  body.position.set(0,.91-.045*wind-.025*drive,.085*drive+.015*cut);
+  body.rotation.set(.035*drive,dir*(-.34*wind+.34*cut),-dir*.025*drive);
+  chest.rotation.set(-.08+.20*drive,dir*(-.57*wind+.66*cut),dir*.035*drive);
+  head.rotation.set(-.06-.08*drive,-body.rotation.y*.65-chest.rotation.y*.55,0);
+  const leading=combo===1?1:0;
+  for(let i=0;i<legs.length;i++){
+    const leg=legs[i],front=i===leading;
+    leg.hip.rotation.set(-.15,0,0);leg.knee.rotation.x=.28;leg.foot.rotation.set(-.13,0,0);
+    const z=front?(.07+.22*drive):(-.05-.12*drive);
+    legTarget(leg,.072-(body.position.y-.035),z);
+    leg.hip.rotation.y=dir*(front?-.09:.12)*drive;
+    // Distance phase can keep a restrained carry step underneath a moving cut.
+    const follow=clamp(carry,0,1)*.17;
+    leg.hip.rotation.x+=Math.sin(gait+i*Math.PI)*.24*follow;
+    leg.knee.rotation.x+=Math.max(0,-Math.sin(gait+i*Math.PI))*.32*follow;
+  }
+  const active=combo===1?arms[0]:arms[1],off=combo===1?arms[1]:arms[0];
+  active.shoulder.rotation.set(
+    sample(p,[[0,combo===1?-.35:-.30],[.19,.32],[.29,.28],[.47,-1.40],[.64,-.89],[1,-.53]]),
+    dir*sample(p,[[0,-.13],[.22,-.84],[.29,-.84],[.49,.78],[.72,.83],[1,.12]]),
+    dir*sample(p,[[0,.22],[.23,.61],[.29,.61],[.49,-.44],[.68,-.30],[1,.20]]));
+  active.elbow.rotation.set(sample(p,[[0,-1.02],[.23,-1.73],[.29,-1.73],[.47,-.15],[.67,-.55],[1,-.97]]),0,0);
+  active.wrist.rotation.set(-.16+.25*cut,dir*.12,dir*(-.24*wind+.38*cut));
+  off.shoulder.rotation.set(.10+.26*wind-.39*drive,-dir*.12,-dir*(.23+.19*drive));
+  off.elbow.rotation.set(-.66-.57*wind-.13*drive,0,0);
+  off.wrist.rotation.set(.15,-dir*.16,-dir*.12);
+  if(combo===2){
+    body.rotation.y=-.12*wind+.08*cut;
+    chest.rotation.y=-.20*wind+.10*cut;chest.rotation.x=.02+.27*drive;
+    body.position.z=.12*drive+.012*cut;
+    for(const arm of arms){
+      arm.shoulder.rotation.set(.23*wind-1.47*cut,arm.side*(-.50*wind+.18*cut),arm.side*(.08*wind+.15*cut));
+      arm.elbow.rotation.set(-.94-.77*wind+.76*cut,0,0);
+      arm.wrist.rotation.set(.08,arm.side*-.18,arm.side*(-.18*wind-.08*cut));
+    }
+  } else if(combo===3){
+    // Sweep around a planted left foot; the right leg takes a short crossing step.
+    const spin=sample(p,[[0,0],[.24,-.57],[.31,-.57],[.77,TAU-.12],[1,TAU]]);
+    body.rotation.set(0,spin,0);
+    body.position.set(.038*Math.sin(spin)*drive,.91-.075*wind-.035*drive,.035*drive);
+    chest.rotation.set(.10*drive,-.25*wind+.16*drive,0);
+    head.rotation.y=-.19*wind;
+    for(const arm of arms){
+      arm.shoulder.rotation.set(.27*wind-.88*drive,arm.side*.18,arm.side*(.24+1.02*drive));
+      arm.elbow.rotation.set(-.88*wind-.30-.25*recover,0,0);
+      arm.wrist.rotation.set(.08,arm.side*.12,arm.side*.14);
+    }
+    legTarget(legs[0],.072-(body.position.y-.035),-.03);
+    legTarget(legs[1],.072+.08*drive-(body.position.y-.035),.14*Math.sin(spin));
+    legs[0].hip.rotation.y=-spin;
+    legs[0].foot.rotation.y=.12*drive;
+    legs[1].hip.rotation.y=-spin*.70;
+  }
+  body.rotation.z-=clamp(turn,-1,1)*.02;
+  pony.rotation.set(.13+.25*drive,0,-dir*.27*drive);
+  for(const cloth of cloths)cloth.rotation.set(-.13-.36*drive,0,-dir*.33*drive);
 }

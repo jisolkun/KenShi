@@ -34,12 +34,39 @@ renderer.toneMappingExposure = 1.16;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87958b);
 scene.fog = new THREE.Fog(0x8b9a8e, 35, 85);
-const camera = new THREE.PerspectiveCamera(
-  39,
-  innerWidth / innerHeight,
-  0.1,
-  100,
+// Estimated from original gameplay screenshots; these are our tuning values.
+const cameraSettings = {
+  yaw: Math.PI / 4,
+  pitch: THREE.MathUtils.degToRad(58),
+  span: 11.2,
+  distance: 36,
+};
+const camera = new THREE.OrthographicCamera(-10, 10, 5.6, -5.6, 0.1, 100);
+const cameraRight = new THREE.Vector3(
+  Math.cos(cameraSettings.yaw),
+  0,
+  -Math.sin(cameraSettings.yaw),
 );
+const cameraBack = new THREE.Vector3(
+  Math.sin(cameraSettings.yaw),
+  0,
+  Math.cos(cameraSettings.yaw),
+);
+const cameraOffset = new THREE.Vector3(
+  Math.sin(cameraSettings.yaw) * Math.cos(cameraSettings.pitch),
+  Math.sin(cameraSettings.pitch),
+  Math.cos(cameraSettings.yaw) * Math.cos(cameraSettings.pitch),
+).multiplyScalar(cameraSettings.distance);
+function resizeCamera() {
+  const halfHeight = cameraSettings.span / 2;
+  const halfWidth = (halfHeight * innerWidth) / innerHeight;
+  camera.left = -halfWidth;
+  camera.right = halfWidth;
+  camera.top = halfHeight;
+  camera.bottom = -halfHeight;
+  camera.updateProjectionMatrix();
+}
+resizeCamera();
 const hemi = new THREE.HemisphereLight(0xd9e7df, 0x3b3830, 2.0);
 scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffd49b, 3.3);
@@ -68,7 +95,20 @@ scene.add(rig.group);
 const hero = {
   rig,
   pos: new THREE.Vector3(0, 0, 4),
-  velocity: new THREE.Vector3(),
+  velocity: new THREE.Vector3(), // External knockback, separate from locomotion.
+  moveVelocity: new THREE.Vector3(),
+  gaitPhase: 0,
+  moveBlend: 0,
+  turnLean: 0,
+  attackCarry: 0,
+  localHitStop: 0,
+  attackHits: new Set(),
+  impactDone: false,
+  globalImpactDone: false,
+  nextAttackIn: 0,
+  transition: { from: "idle", to: "idle", age: 1, duration: 0.08 },
+  poseState: "idle",
+  poseCombo: 0,
   angle: Math.PI,
   state: "idle",
   elapsed: 0,
@@ -122,7 +162,17 @@ let enemies = [],
   drops = [],
   companions = [];
 const specials = { horse: true, eagle: true, captain: true };
-const attackDurations = [0.38, 0.4, 0.43, 0.58];
+const attackDurations = [0.32, 0.34, 0.4, 0.5];
+const attackWindows = [
+  [0.38, 0.58],
+  [0.38, 0.58],
+  [0.4, 0.62],
+  [0.42, 0.72],
+];
+const attackContacts = [0.43, 0.43, 0.47, 0.48];
+let shakeAge = 1,
+  shakeNext = 0;
+const shakeDirection = new THREE.Vector3();
 const attackDamages = [18, 19, 22, 32];
 const attackRanges = [2.12, 2.15, 2.45, 2.55];
 const raycaster = new THREE.Raycaster(),
@@ -183,12 +233,108 @@ targetMarker.visible = false;
 function safeAudio(name, ...args) {
   audio[name]?.(...args);
 }
-function face(direction, rate = 1) {
+function face(direction, rate = 0.35) {
   if (direction.lengthSq() < 0.001) return;
   const desired = Math.atan2(direction.x, direction.z);
   hero.angle +=
     Math.atan2(Math.sin(desired - hero.angle), Math.cos(desired - hero.angle)) *
     rate;
+}
+function keyboardDirection() {
+  const horizontal =
+    Number(keys.has("d") || keys.has("arrowright")) -
+    Number(keys.has("a") || keys.has("arrowleft"));
+  const vertical =
+    Number(keys.has("s") || keys.has("arrowdown")) -
+    Number(keys.has("w") || keys.has("arrowup"));
+  return cameraRight
+    .clone()
+    .multiplyScalar(horizontal)
+    .addScaledVector(cameraBack, vertical)
+    .normalize();
+}
+function kickCamera(direction, amount) {
+  if (globalTime < shakeNext && amount <= shake) return;
+  shakeNext = globalTime + 0.065;
+  shake = Math.max(shake, amount);
+  shakeAge = 0;
+  shakeDirection.copy(direction);
+  shakeDirection.y = 0;
+  if (shakeDirection.lengthSq() < 0.001) shakeDirection.copy(cameraRight);
+  shakeDirection.normalize();
+}
+function locomotion(
+  dt,
+  direction,
+  distance = Infinity,
+  maxSpeed = 5.8,
+  stoppingDistance = 0,
+) {
+  const remaining = Math.max(0, distance - stoppingDistance);
+  const desired = direction?.clone().normalize() || new THREE.Vector3();
+  const speed = direction ? Math.min(maxSpeed, remaining / 0.09) : 0;
+  desired.multiplyScalar(speed);
+  const response = speed > hero.moveVelocity.length() ? 24 : 27;
+  hero.moveVelocity.lerp(desired, 1 - Math.exp(-dt * response));
+  if (hero.moveVelocity.lengthSq() < 0.0025 && speed === 0)
+    hero.moveVelocity.set(0, 0, 0);
+  const displacement = hero.moveVelocity.clone().multiplyScalar(dt);
+  if (direction && distance < Infinity && displacement.length() > remaining) {
+    displacement.copy(direction).normalize().multiplyScalar(remaining);
+    hero.moveVelocity.copy(displacement).multiplyScalar(dt > 0 ? 1 / dt : 0);
+  }
+  hero.pos.add(displacement);
+  if (direction && direction.lengthSq() > 0.1) {
+    const desiredAngle = Math.atan2(direction.x, direction.z);
+    const delta = Math.atan2(
+      Math.sin(desiredAngle - hero.angle),
+      Math.cos(desiredAngle - hero.angle),
+    );
+    hero.turnLean = THREE.MathUtils.lerp(
+      hero.turnLean,
+      THREE.MathUtils.clamp(delta * 0.9, -1, 1),
+      1 - Math.exp(-dt * 12),
+    );
+    face(direction, 1 - Math.exp(-dt * 24));
+  } else hero.turnLean *= Math.exp(-dt * 12);
+}
+function movementGoal() {
+  const keyboard = keyboardDirection();
+  if (keyboard.lengthSq() > 0) {
+    hero.destination = null;
+    hero.target = null;
+    destinationMarker.visible = false;
+    targetMarker.visible = false;
+    return { direction: keyboard, distance: Infinity, stoppingDistance: 0 };
+  }
+  if (hero.destination) {
+    const delta = hero.destination.clone().sub(hero.pos);
+    const distance = delta.length();
+    if (distance < 0.035) {
+      hero.pos.copy(hero.destination);
+      hero.destination = null;
+      hero.moveVelocity.set(0, 0, 0);
+      destinationMarker.visible = false;
+      return null;
+    }
+    return { direction: delta.normalize(), distance, stoppingDistance: 0 };
+  }
+  if (hero.target && hero.target.state !== "dead") {
+    const delta = hero.target.pos.clone().sub(hero.pos);
+    const distance = delta.length();
+    return {
+      direction: delta.normalize(),
+      distance,
+      stoppingDistance: Math.max(
+        1.15,
+        attackRanges[hero.combo] + hero.target.radius - 0.38,
+      ),
+    };
+  }
+  return null;
+}
+function locomotionState() {
+  hero.state = hero.moveVelocity.length() > 0.12 ? "run" : "idle";
 }
 function clampPosition(pos, radius = 0.5) {
   const b = world.bounds;
@@ -219,7 +365,7 @@ function worldToScreen(position) {
   return {
     x: (p.x * 0.5 + 0.5) * innerWidth,
     y: (-p.y * 0.5 + 0.5) * innerHeight,
-    visible: p.z > -1 && p.z < 1,
+    visible: p.z > -1 && p.z < 1 && Math.abs(p.x) <= 1 && Math.abs(p.y) <= 1,
   };
 }
 function showDamage(entity, amount, kind = "normal") {
@@ -272,6 +418,30 @@ function stateSnapshot() {
       stamina: hero.stamina,
       state: hero.state,
       combo: hero.combo,
+      speed: hero.moveVelocity.length(),
+      velocity: { x: hero.moveVelocity.x, z: hero.moveVelocity.z },
+      gait: hero.gaitPhase,
+      transition: { ...hero.transition },
+    },
+    camera: {
+      type: "orthographic",
+      yaw: THREE.MathUtils.radToDeg(cameraSettings.yaw),
+      pitch: THREE.MathUtils.radToDeg(cameraSettings.pitch),
+      span: cameraSettings.span,
+      horizontalSpan: (cameraSettings.span * innerWidth) / innerHeight,
+      focus: { x: cameraFocus.x, z: cameraFocus.z },
+    },
+    motion: {
+      velocity: { x: hero.moveVelocity.x, z: hero.moveVelocity.z },
+      speed: hero.moveVelocity.length(),
+      gait: hero.gaitPhase,
+      moveBlend: hero.moveBlend,
+      turnLean: hero.turnLean,
+      transition: { ...hero.transition },
+      localHitStop: hero.localHitStop,
+      destination: hero.destination
+        ? { x: hero.destination.x, z: hero.destination.z }
+        : null,
     },
     hero: {
       x: hero.pos.x,
@@ -360,6 +530,16 @@ function startGame() {
   hero.flight = 0;
   hero.disengage = 0;
   hero.velocity.set(0, 0, 0);
+  hero.moveVelocity.set(0, 0, 0);
+  hero.gaitPhase = 0;
+  hero.moveBlend = 0;
+  hero.turnLean = 0;
+  hero.localHitStop = 0;
+  hero.nextAttackIn = 0;
+  hero.attackHits.clear();
+  hero.transition = { from: "idle", to: "idle", age: 1, duration: 0.08 };
+  hero.poseState = "idle";
+  hero.poseCombo = 0;
   for (const s of skills) s.cooldown = 0;
   Object.keys(specials).forEach((k) => (specials[k] = true));
   destinationMarker.visible = false;
@@ -499,8 +679,13 @@ function beginAttack(enemy) {
   hero.elapsed = 0;
   hero.duration = attackDurations[hero.combo];
   hero.hitDone = false;
+  hero.attackHits.clear();
+  hero.impactDone = false;
+  hero.globalImpactDone = false;
+  hero.attackCarry = hero.destination
+    ? Math.min(1, hero.moveVelocity.length() / 5.8)
+    : 0;
   hero.attackTarget = enemy;
-  face(temp.subVectors(enemy.pos, hero.pos));
   if (!hero.destination) hero.target = enemy;
   destinationMarker.visible = !!hero.destination;
   safeAudio("slash", hero.combo);
@@ -512,6 +697,7 @@ function hurtEnemy(
   force = 1,
   critical = false,
   skill = false,
+  playerContact = false,
 ) {
   if (e.state === "dead" || e.state === "spawn") return false;
   e.hp = Math.max(0, e.hp - damage);
@@ -520,15 +706,48 @@ function hurtEnemy(
   if (temp.lengthSq() < 0.01)
     temp.set(Math.sin(hero.angle), 0, Math.cos(hero.angle));
   temp.normalize();
+  const hitDirection = temp.clone();
+  e.hurtDirection = Math.sin(
+    Math.atan2(hitDirection.x, hitDirection.z) - e.angle,
+  );
+  e.hurtStrength = critical ? 1 : 0.65;
+  e.localHitStop = Math.max(e.localHitStop || 0, critical ? 0.038 : 0.027);
   e.velocity.addScaledVector(temp, force * (e.type === "boss" ? 0.4 : 1));
   showDamage(e, damage, critical ? "critical" : skill ? "skill" : "normal");
-  fx.burst(e.pos, critical ? 1.2 : 0.55);
+  if (fx.impact)
+    fx.impact(
+      e.pos
+        .clone()
+        .add(new THREE.Vector3(0, e.type === "boss" ? 1.3 : 1.05, 0)),
+      hitDirection,
+      critical ? 1.35 : 0.75,
+      critical,
+    );
+  else fx.burst(e.pos, critical ? 1.2 : 0.55);
   combo++;
   comboTimeout = 3;
   hero.souls = Math.min(100, hero.souls + 2);
-  shake = Math.max(shake, critical ? 0.25 : 0.12);
-  hitStop = Math.max(hitStop, critical ? 0.065 : 0.043);
-  safeAudio("hit", critical ? 1 : 0.6);
+  if (playerContact || e.pos.distanceTo(hero.pos) < 6)
+    kickCamera(hitDirection, critical ? 0.075 : 0.035);
+  const isPlayerContact =
+    playerContact &&
+    ((hero.state === "attack" && !skill) ||
+      (hero.state === "skill" && skill && hero.skillIndex !== 4));
+  if (isPlayerContact && !hero.impactDone) {
+    hero.impactDone = true;
+    hero.localHitStop = critical ? 0.038 : 0.029;
+  }
+  if (
+    playerContact &&
+    hero.state === "attack" &&
+    hero.combo === 3 &&
+    !skill &&
+    !hero.globalImpactDone
+  ) {
+    hero.globalImpactDone = true;
+    hitStop = Math.max(hitStop, 0.025);
+  }
+  safeAudio("hit", critical ? 1.5 : 0.75, hero.combo);
   if (e.hp <= 0) {
     e.state = "dead";
     e.elapsed = 0;
@@ -537,9 +756,12 @@ function hurtEnemy(
     kills++;
     hero.souls = Math.min(100, hero.souls + 5);
     dropLoot(e.pos);
-    if (critical || e.type === "boss") {
-      slowTime = 0.25;
-      slowScale = 0.45;
+    e.deathDirection = hitDirection;
+    e.deathImpactDone = false;
+    safeAudio("kill");
+    if (e.type === "boss") {
+      slowTime = 0.24;
+      slowScale = 0.5;
     }
     if (hero.target === e) hero.target = null;
     return true;
@@ -547,7 +769,8 @@ function hurtEnemy(
   if (e.type === "boss") {
     // Ordinary blades preserve the general's wind-up. Finishers and skills
     // can break his stance, with a recovery window that prevents a stun loop.
-    const heavyHit = skill || (critical && hero.state === "attack" && hero.combo === 3);
+    const heavyHit =
+      skill || (critical && hero.state === "attack" && hero.combo === 3);
     if (!heavyHit || (e.poise || 0) > 0) return true;
     e.poise = 3.2;
   }
@@ -557,7 +780,8 @@ function hurtEnemy(
   e.cooldown = Math.max(e.cooldown, 0.7);
   return true;
 }
-function attackHit() {
+function attackHit(phase = attackContacts[hero.combo]) {
+  const firstContact = !hero.hitDone;
   hero.hitDone = true;
   const c = hero.combo,
     r = attackRanges[c],
@@ -565,28 +789,33 @@ function attackHit() {
   const origin = hero.pos.clone();
   let count = 0;
   for (const e of enemies) {
-    if (e.state === "dead" || e.state === "spawn") continue;
+    if (e.state === "dead" || e.state === "spawn" || hero.attackHits.has(e.id))
+      continue;
     const delta = temp2.subVectors(e.pos, origin),
       d = delta.length();
     if (d > r + e.radius) continue;
     const dot = d < 0.01 ? 1 : delta.dot(forward) / d;
     if (c !== 3 && dot < (c === 2 ? 0.45 : -0.12)) continue;
     const crit = c === 3 || Math.random() < 0.12;
+    hero.attackHits.add(e.id);
     hurtEnemy(
       e,
       Math.round(attackDamages[c] * (crit ? 1.5 : 1)),
       origin,
       c === 3 ? 5.8 : 2.8,
       crit,
+      false,
+      true,
     );
     count++;
   }
-  fx.arc(origin, hero.angle, r, c);
-  if (count === 0) safeAudio("slash", c);
+  if (firstContact) fx.arc(origin, hero.angle, r, c);
 }
 function damageHero(amount, from) {
   if (
     mode !== "playing" ||
+    hero.hp <= 0 ||
+    hero.state === "dead" ||
     hero.invulnerable > 0 ||
     hero.mount > 0 ||
     hero.flight > 0
@@ -603,8 +832,10 @@ function damageHero(amount, from) {
   hero.combo = 0;
   temp.subVectors(hero.pos, from).normalize();
   hero.velocity.addScaledVector(temp, 5);
-  shake = 0.33;
-  hitStop = 0.055;
+  hero.localHitStop = 0.04;
+  hero.hurtDirection = Math.sin(Math.atan2(temp.x, temp.z) - hero.angle);
+  hero.hurtStrength = 1;
+  kickCamera(temp, 0.1);
   const p = worldToScreen(hero.pos.clone().add(new THREE.Vector3(0, 2.3, 0)));
   ui.damage(`−${amount}`, p.x, p.y, "hurt");
   fx.burst(hero.pos, 0.8, 0xc47753);
@@ -628,10 +859,16 @@ function commandTap(position, enemy = null) {
   clampPosition(p);
   hero.target = enemy && enemy.state !== "dead" ? enemy : null;
   hero.destination = hero.target ? null : p;
-  hero.disengage = hero.target ? 0 : 0.75;
-  if (hero.state === "attack" && hero.elapsed / hero.duration >= 0.52) {
-    hero.state = "idle";
+  hero.disengage = hero.target ? 0 : 0.12;
+  if (
+    hero.state === "attack" &&
+    hero.hitDone &&
+    hero.elapsed / hero.duration >= 0.66
+  ) {
     hero.combo = (hero.combo + 1) % 4;
+    hero.comboTimer = 0;
+    hero.nextAttackIn = 0.12;
+    locomotionState();
   }
   destinationMarker.visible = !hero.target;
   destinationMarker.position.set(p.x, 0.045, p.z);
@@ -659,6 +896,8 @@ function roll(direction) {
   hero.stamina -= 23;
   metrics.rolls++;
   hero.state = "roll";
+  hero.localHitStop = 0;
+  hero.moveVelocity.set(0, 0, 0);
   hero.elapsed = 0;
   hero.duration = 0.43;
   hero.rollDirection.copy(d);
@@ -694,12 +933,15 @@ function castSkill(index) {
     hero.target && hero.target.state !== "dead"
       ? hero.target
       : nearestEnemy(hero.pos, 12);
-  if (target) face(temp.subVectors(target.pos, hero.pos));
+  if (target) face(temp.subVectors(target.pos, hero.pos), 1);
   hero.state = "skill";
   hero.skillIndex = index;
   hero.elapsed = 0;
   hero.duration = [0.72, 0.85, 1.05, 0.85, 0.8][index];
   hero.skillHits.clear();
+  hero.impactDone = false;
+  hero.globalImpactDone = false;
+  hero.localHitStop = 0;
   hero.hitDone = false;
   hero.destination = null;
   hero.invulnerable = index === 2 ? 0.88 : 0.38;
@@ -730,67 +972,128 @@ function skillHit(radius, damage, force, full = true, once = true) {
     )
       continue;
     hero.skillHits.add(e.id);
-    hurtEnemy(e, damage, hero.pos, force, true, true);
+    hurtEnemy(e, damage, hero.pos, force, true, true, true);
     did = true;
-    if (hero.skillIndex === 3 && e.state !== "dead" && (e.type !== "boss" || e.state === "hurt")) {
+    if (
+      hero.skillIndex === 3 &&
+      e.state !== "dead" &&
+      (e.type !== "boss" || e.state === "hurt")
+    ) {
       e.state = "frozen";
       e.elapsed = 0;
       e.duration = 2.6;
       e.cooldown = 3;
     }
   }
-  if (did) {
-    slowTime = 0.2;
-    slowScale = 0.6;
+  if (did && !hero.globalImpactDone) {
+    hero.globalImpactDone = true;
+    hitStop = Math.max(hitStop, 0.032);
   }
 }
-function updateHero(dt) {
+function updateHero(frameDt) {
+  const frozen = Math.min(frameDt, hero.localHitStop);
+  hero.localHitStop = Math.max(0, hero.localHitStop - frameDt);
+  const dt = frameDt - frozen;
+  const previousPosition = hero.pos.clone();
+  const previousPhase = hero.duration ? hero.elapsed / hero.duration : 0;
   hero.elapsed += dt;
-  hero.invulnerable = Math.max(0, hero.invulnerable - dt);
-  hero.flash = Math.max(0, hero.flash - dt * 7);
+  hero.invulnerable = Math.max(0, hero.invulnerable - frameDt);
+  hero.flash = Math.max(0, hero.flash - frameDt * 7);
   hero.rig.setFlash?.(hero.flash);
-  hero.stamina = Math.min(100, hero.stamina + dt * 27);
-  hero.souls = Math.min(100, hero.souls + dt * 1.4);
-  hero.disengage = Math.max(0, hero.disengage - dt);
-  hero.comboTimer += dt;
+  hero.stamina = Math.min(100, hero.stamina + frameDt * 27);
+  hero.souls = Math.min(100, hero.souls + frameDt * 1.4);
+  hero.disengage = Math.max(0, hero.disengage - frameDt);
+  hero.nextAttackIn = Math.max(0, hero.nextAttackIn - frameDt);
+  hero.comboTimer += frameDt;
   if (hero.comboTimer > 1.8 && hero.state !== "attack") hero.combo = 0;
-  hero.velocity.multiplyScalar(Math.exp(-dt * 9));
+  hero.velocity.multiplyScalar(Math.exp(-dt * 10));
   hero.pos.addScaledVector(hero.velocity, dt);
   if (hero.target?.state === "dead") hero.target = null;
-  const keyboard = temp
-    .set(
-      (keys.has("d") || keys.has("arrowright") ? 1 : 0) -
-        (keys.has("a") || keys.has("arrowleft") ? 1 : 0),
-      0,
-      (keys.has("s") || keys.has("arrowdown") ? 1 : 0) -
-        (keys.has("w") || keys.has("arrowup") ? 1 : 0),
-    )
-    .normalize()
-    .clone();
+  const maxSpeed = hero.mount > 0 ? 12 : hero.flight > 0 ? 8.5 : 5.8;
+  function navigate() {
+    const goal = movementGoal();
+    locomotion(
+      dt,
+      goal?.direction,
+      goal?.distance ?? Infinity,
+      maxSpeed,
+      goal?.stoppingDistance || 0,
+    );
+    locomotionState();
+  }
   if (hero.state === "roll") {
-    const phase = hero.elapsed / hero.duration;
+    const phase = Math.min(1, hero.elapsed / hero.duration);
+    face(hero.rollDirection, 1 - Math.exp(-dt * 30));
     move(hero.pos, hero.rollDirection, 13 * (1 - phase * 0.45), dt);
     hero.ghostTimer -= dt;
-    if (hero.ghostTimer <= 0) {
+    if (hero.ghostTimer <= 0 && dt > 0) {
       fx.ghost(hero.rig);
       hero.ghostTimer = 0.09;
     }
-    if (phase >= 1) hero.state = "idle";
+    if (phase >= 1) {
+      hero.moveVelocity.copy(hero.rollDirection).multiplyScalar(2.5);
+      locomotionState();
+    }
   } else if (hero.state === "attack") {
     const phase = hero.elapsed / hero.duration;
-    if (phase < 0.48 && hero.attackTarget && !hero.destination) {
-      const direction = temp.subVectors(hero.attackTarget.pos, hero.pos);
-      if (direction.length() > 1.2) {
-        face(direction, Math.min(1, dt * 18));
-        move(hero.pos, direction.normalize(), 3.3, dt);
-      }
-    }
-    if (!hero.hitDone && phase >= (hero.combo === 2 ? 0.53 : 0.49)) attackHit();
-    if (phase >= 1) {
+    const travelling = !!hero.destination || keyboardDirection().lengthSq() > 0;
+    if (travelling) {
+      const goal = movementGoal();
+      const carry = phase < 0.35 ? 0.75 : phase < 0.66 ? 0.43 : 1;
+      locomotion(
+        dt,
+        goal?.direction,
+        goal?.distance ?? Infinity,
+        maxSpeed * carry,
+        0,
+      );
+      hero.attackCarry = THREE.MathUtils.clamp(
+        hero.moveVelocity.length() / maxSpeed,
+        0,
+        1,
+      );
+    } else if (
+      hero.attackTarget &&
+      hero.attackTarget.state !== "dead" &&
+      phase < 0.56
+    ) {
+      const direction = hero.attackTarget.pos.clone().sub(hero.pos),
+        distance = direction.length();
+      locomotion(
+        dt,
+        direction.normalize(),
+        distance,
+        3.6,
+        1.35 + hero.attackTarget.radius * 0.35,
+      );
+      hero.attackCarry = 0;
+    } else locomotion(dt, null);
+    const window = attackWindows[hero.combo];
+    if (
+      dt > 0 &&
+      phase >= attackContacts[hero.combo] &&
+      previousPhase < window[1]
+    )
+      attackHit(Math.min(phase, window[1]));
+    if (travelling && hero.hitDone && phase >= 0.66) {
       hero.combo = (hero.combo + 1) % 4;
       hero.comboTimer = 0;
-      if (hero.destination) hero.disengage = 0.55;
-      hero.state = "idle";
+      hero.nextAttackIn = 0.12;
+      locomotionState();
+    } else if (phase >= (hero.combo === 3 ? 0.96 : 0.9)) {
+      hero.combo = (hero.combo + 1) % 4;
+      hero.comboTimer = 0;
+      const next =
+        hero.target || nearestEnemy(hero.pos, attackRanges[hero.combo] + 1);
+      if (
+        next &&
+        hero.pos.distanceTo(next.pos) <
+          attackRanges[hero.combo] + next.radius + 0.35 &&
+        hero.mount <= 0 &&
+        !(hero.flight > 0)
+      )
+        beginAttack(next);
+      else navigate();
     }
   } else if (hero.state === "skill") {
     const phase = hero.elapsed / hero.duration,
@@ -801,6 +1104,10 @@ function updateHero(dt) {
       hero.ghostTimer = 0.1;
     }
     if (index === 0 && phase > 0.22 && phase < 0.73) {
+      if (!hero.hitDone) {
+        hero.hitDone = true;
+        safeAudio("skillImpact", index);
+      }
       move(hero.pos, hero.dashDirection, 17, dt);
       skillHit(2.3, 58, 6, false);
     }
@@ -808,6 +1115,7 @@ function updateHero(dt) {
       if (!hero.hitDone) {
         fx.arc(hero.pos, hero.angle, 3.8, 3, 0xe1c0ff);
         hero.hitDone = true;
+        safeAudio("skillImpact", index);
         skillHit(3.8, 75, 7);
       }
       hero.angle += dt * 15;
@@ -816,20 +1124,26 @@ function updateHero(dt) {
       move(hero.pos, hero.dashDirection, 6.5, dt);
     if (index === 2 && phase >= 0.72 && !hero.hitDone) {
       hero.hitDone = true;
+      safeAudio("skillImpact", index);
       skillHit(4.5, 100, 9);
       fx.ring(hero.pos, 4.5, 0xebd9ae, 0.55);
       fx.burst(hero.pos, 2);
-      shake = 0.5;
-      hitStop = 0.07;
+      kickCamera(hero.dashDirection, 0.15);
+      if (!hero.globalImpactDone) {
+        hero.globalImpactDone = true;
+        hitStop = Math.max(hitStop, 0.04);
+      }
     }
     if (index === 3 && phase >= 0.4 && !hero.hitDone) {
       hero.hitDone = true;
+      safeAudio("skillImpact", index);
       skillHit(5, 52, 2);
       fx.ring(hero.pos, 5, 0xb3cddd, 1.1);
       fx.arc(hero.pos, hero.angle, 4.8, 3, 0xb2d7f2);
     }
     if (index === 4 && phase >= 0.4 && !hero.hitDone) {
       hero.hitDone = true;
+      safeAudio("skillImpact", index);
       for (let i = -2; i <= 2; i++)
         spawnProjectile(
           hero.pos.clone().add(new THREE.Vector3(0, 1, 0)),
@@ -846,52 +1160,26 @@ function updateHero(dt) {
         );
       fx.arc(hero.pos, hero.angle, 2.6, 1);
     }
-    if (phase >= 1) hero.state = "idle";
+    hero.moveVelocity.multiplyScalar(Math.exp(-dt * 25));
+    if (phase >= 1) locomotionState();
   } else if (hero.state === "hurt" || hero.state === "dead") {
-    if (hero.state === "hurt" && hero.elapsed >= hero.duration)
-      hero.state = "idle";
-    if (hero.state === "dead" && hero.elapsed >= hero.duration) finishGame(false);
+    hero.moveVelocity.multiplyScalar(Math.exp(-dt * 28));
+    if (hero.state === "hurt" && hero.elapsed >= hero.duration) navigate();
+    if (hero.state === "dead" && hero.elapsed >= hero.duration)
+      finishGame(false);
   } else {
-    hero.state = "idle";
-    let direction = null,
-      distance = 0;
-    if (keyboard.lengthSq() > 0) {
-      direction = keyboard;
-      distance = 10;
-      hero.destination = null;
-      hero.disengage = 0.05;
-    } else if (hero.target) {
-      direction = temp.subVectors(hero.target.pos, hero.pos).clone();
-      distance = direction.length();
-    } else if (hero.destination) {
-      direction = temp.subVectors(hero.destination, hero.pos).clone();
-      distance = direction.length();
-      if (distance < 0.22) {
-        hero.destination = null;
-        destinationMarker.visible = false;
-        direction = null;
-      }
-    }
-    const enemy = hero.target || nearestEnemy(hero.pos, 2.35);
+    const enemy = hero.target || nearestEnemy(hero.pos, 2.8);
     if (
       enemy &&
       hero.pos.distanceTo(enemy.pos) <
-        attackRanges[hero.combo] + enemy.radius - 0.22 &&
+        attackRanges[hero.combo] + enemy.radius - 0.12 &&
       hero.disengage <= 0 &&
+      hero.nextAttackIn <= 0 &&
       hero.mount <= 0 &&
       !(hero.flight > 0)
     ) {
       beginAttack(enemy);
-    } else if (direction && distance > 0.15) {
-      face(direction, Math.min(1, dt * 17));
-      move(
-        hero.pos,
-        direction.normalize(),
-        hero.mount > 0 ? 12 : hero.flight > 0 ? 8.5 : 6.8,
-        dt,
-      );
-      hero.state = "run";
-    }
+    } else navigate();
   }
   if (hero.mount > 0) {
     hero.mount -= dt;
@@ -910,7 +1198,8 @@ function updateHero(dt) {
       horseMesh.position.copy(hero.pos);
       horseMesh.rotation.y = hero.angle;
       horseMesh.children.forEach((p, i) => {
-        if (p.userData.leg) p.rotation.x = Math.sin(globalTime * 21 + i) * 0.55;
+        if (p.userData.leg)
+          p.rotation.x = Math.sin(hero.gaitPhase * 1.25 + i) * 0.55;
       });
     }
     if (hero.mount <= 0) {
@@ -920,25 +1209,81 @@ function updateHero(dt) {
     }
   }
   clampPosition(hero.pos);
+  const moved = hero.pos.distanceTo(previousPosition);
+  const locomoting =
+    hero.state === "run" ||
+    hero.state === "idle" ||
+    (hero.state === "attack" && hero.attackCarry > 0.05);
+  const previousFoot = Math.floor(hero.gaitPhase / Math.PI);
+  if (locomoting)
+    hero.gaitPhase +=
+      (moved * Math.PI * 2) /
+      THREE.MathUtils.lerp(
+        0.85,
+        2.9,
+        THREE.MathUtils.clamp(hero.moveVelocity.length() / maxSpeed, 0, 1),
+      );
+  if (
+    locomoting &&
+    Math.floor(hero.gaitPhase / Math.PI) !== previousFoot &&
+    moved > 0.001
+  )
+    safeAudio("footstep", hero.mount > 0 ? 1.4 : 0.6);
+  hero.actualSpeed = dt > 0 ? moved / dt : 0;
+  const targetBlend = THREE.MathUtils.clamp(
+    hero.moveVelocity.length() / maxSpeed,
+    0,
+    1,
+  );
+  hero.moveBlend = THREE.MathUtils.lerp(
+    hero.moveBlend,
+    targetBlend,
+    1 - Math.exp(-frameDt * 20),
+  );
   hero.rig.group.position.copy(hero.pos);
   hero.rig.group.position.y = hero.mount > 0 ? 1 : 0;
   hero.rig.group.rotation.y = hero.angle;
   const phase = hero.duration ? Math.min(1, hero.elapsed / hero.duration) : 0;
+  const poseState = hero.mount > 0 ? "charge" : hero.state;
+  const switched =
+    hero.poseState !== poseState ||
+    (poseState === "attack" && hero.poseCombo !== hero.combo);
+  if (switched) {
+    hero.transition = {
+      from: hero.poseState,
+      to: poseState,
+      age: 0,
+      duration: 0.08,
+    };
+    hero.poseState = poseState;
+    hero.poseCombo = hero.combo;
+  } else hero.transition.age = Math.min(1, hero.transition.age + dt);
   poseCharacter(hero.rig, {
-    state: hero.mount > 0 ? "charge" : hero.state,
+    state: poseState,
     time: globalTime,
+    dt,
     phase,
     combo: hero.combo,
-    speed: hero.state === "run" ? 1 : 0,
+    speed: targetBlend,
+    moveBlend: hero.moveBlend,
+    gaitPhase: hero.gaitPhase,
+    turnLean: hero.turnLean,
+    attackCarry: hero.attackCarry,
+    hurtDirection: hero.hurtDirection || 0,
+    hurtStrength: hero.hurtStrength || 0,
     skill: hero.skillIndex,
   });
   hero.rig.group.updateMatrixWorld(true);
   const tips = hero.rig.weaponTips();
   const active =
-    (hero.state === "attack" && phase > 0.24 && phase < 0.8) ||
-    (hero.state === "skill" && phase > 0.2 && phase < 0.8);
+    !switched &&
+    dt > 0 &&
+    ((hero.state === "attack" &&
+      phase >= attackWindows[hero.combo][0] &&
+      phase <= attackWindows[hero.combo][1]) ||
+      (hero.state === "skill" && phase > 0.25 && phase < 0.8));
   for (let i = 0; i < 2; i++)
-    fx.sample(trails[i], tips[i], hero.pos, active, dt);
+    fx.sample(trails[i], tips[i], hero.pos, active, frameDt);
 }
 function beginEnemyAttack(e) {
   e.state = "attack";
@@ -988,19 +1333,26 @@ function beginEnemyAttack(e) {
 function updateEnemies(dt) {
   for (let i = enemies.length - 1; i >= 0; i--) {
     const e = enemies[i];
-    e.elapsed += dt;
-    e.cooldown -= dt;
-    e.poise = Math.max(0, (e.poise || 0) - dt);
+    const frozen = Math.min(dt, e.localHitStop || 0);
+    e.localHitStop = Math.max(0, (e.localHitStop || 0) - dt);
+    const tickDt = dt - frozen;
+    e.elapsed += tickDt;
+    e.cooldown -= tickDt;
+    e.poise = Math.max(0, (e.poise || 0) - tickDt);
     e.flash = Math.max(0, e.flash - dt * 7);
     e.rig.setFlash?.(e.flash);
-    e.velocity.multiplyScalar(Math.exp(-dt * 7));
-    e.pos.addScaledVector(e.velocity, dt);
+    e.velocity.multiplyScalar(Math.exp(-tickDt * 7));
+    e.pos.addScaledVector(e.velocity, tickDt);
     if (e.state === "dead") {
       e.rig.group.position.x = e.pos.x;
       e.rig.group.position.z = e.pos.z;
-      e.deathAge += dt;
+      e.deathAge += tickDt;
+      if (e.deathAge >= 0.5 && !e.deathImpactDone) {
+        e.deathImpactDone = true;
+        fx.death?.(e.pos, e.deathDirection, e.type === "boss" ? 1.5 : 0.8);
+      }
       e.bar.visible = false;
-      e.pos.addScaledVector(e.velocity, dt);
+      e.pos.addScaledVector(e.velocity, tickDt);
       if (e.deathAge > 0.9)
         e.rig.group.position.y = -Math.min(2, (e.deathAge - 0.9) * 2);
       if (e.deathAge > 1.85) {
@@ -1027,7 +1379,7 @@ function updateEnemies(dt) {
         phase > 0.58 &&
         phase < 0.85
       ) {
-        move(e.pos, e.dashDirection, 12, dt, e.radius);
+        move(e.pos, e.dashDirection, 12, tickDt, e.radius);
         if (e.pos.distanceTo(hero.pos) < 2.1) damageHero(e.damage, e.pos);
       }
       if (!e.hitDone && phase > 0.58) {
@@ -1102,12 +1454,12 @@ function updateEnemies(dt) {
         Math.atan2(
           Math.sin(Math.atan2(direction.x, direction.z) - e.angle),
           Math.cos(Math.atan2(direction.x, direction.z) - e.angle),
-        ) * Math.min(1, dt * 8);
+        ) * Math.min(1, tickDt * 8);
       if (e.type === "archer" && distance < 5) {
-        move(e.pos, direction.normalize(), -e.speed, dt, e.radius);
+        move(e.pos, direction.normalize(), -e.speed, tickDt, e.radius);
         e.state = "run";
       } else if (distance > e.range) {
-        move(e.pos, direction.normalize(), e.speed, dt, e.radius);
+        move(e.pos, direction.normalize(), e.speed, tickDt, e.radius);
         e.state = "run";
       } else {
         e.state = "idle";
@@ -1145,6 +1497,13 @@ function updateEnemies(dt) {
       combo: e.combo % 4,
       speed: e.state === "run" ? 0.6 : 0,
       skill: e.attackKind,
+      dt: tickDt,
+      gaitPhase: (e.gaitPhase =
+        (e.gaitPhase || 0) +
+        (e.state === "run" ? tickDt * e.speed * Math.PI * 2 : 0)),
+      moveBlend: e.state === "run" ? 0.65 : 0,
+      hurtDirection: e.hurtDirection || 0,
+      hurtStrength: e.hurtStrength || 0,
     });
     e.bar.visible =
       e.state !== "dead" &&
@@ -1473,6 +1832,7 @@ function updateCompanions(dt) {
   }
   for (let i = companions.length - 1; i >= 0; i--) {
     const c = companions[i];
+    const companionPrevious = c.pos.clone();
     c.elapsed += dt;
     c.cooldown -= dt;
     if (c.elapsed > c.duration) {
@@ -1520,6 +1880,11 @@ function updateCompanions(dt) {
       phase: c.state === "attack" ? c.attackTime / 0.43 : 0,
       combo: 0,
       speed: c.state === "run" ? 1 : 0,
+      moveBlend: c.state === "run" ? 1 : 0,
+      gaitPhase: (c.gaitPhase =
+        (c.gaitPhase || 0) +
+        (c.pos.distanceTo(companionPrevious) * Math.PI * 2) / 2.9),
+      dt,
       skill: 0,
     });
   }
@@ -1632,13 +1997,20 @@ window.addEventListener("keydown", (event) => {
   }
   if (mode === "playing") {
     if (key === " ") {
+      const keyboard = keyboardDirection();
       const direction = hero.destination
         ? hero.destination.clone().sub(hero.pos)
-        : new THREE.Vector3(
-            (keys.has("d") ? 1 : 0) - (keys.has("a") ? 1 : 0),
-            0,
-            (keys.has("s") ? 1 : 0) - (keys.has("w") ? 1 : 0),
-          );
+        : keyboard.lengthSq() > 0
+          ? keyboard
+          : hero.target
+            ? hero.target.pos.clone().sub(hero.pos)
+            : hero.moveVelocity.lengthSq() > 0.1
+              ? hero.moveVelocity.clone()
+              : new THREE.Vector3(
+                  Math.sin(hero.angle),
+                  0,
+                  Math.cos(hero.angle),
+                );
       roll(direction);
     }
     if ("12345".includes(key)) castSkill(Number(key) - 1);
@@ -1659,25 +2031,24 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden && mode === "playing") pauseGame();
 });
 window.addEventListener("resize", () => {
-  camera.aspect = innerWidth / innerHeight;
-  camera.fov = innerWidth / innerHeight < 0.8 ? 47 : 39;
-  camera.updateProjectionMatrix();
+  resizeCamera();
   renderer.setPixelRatio(Math.min(devicePixelRatio, 1.7));
   renderer.setSize(innerWidth, innerHeight);
 });
 function updateCamera(dt) {
-  const desired = new THREE.Vector3(
-    THREE.MathUtils.clamp(hero.pos.x, -8, 8),
-    0,
-    THREE.MathUtils.clamp(hero.pos.z, -6, 6),
-  );
-  cameraFocus.lerp(desired, 1 - Math.exp(-dt * 3.2));
-  camera.position.set(cameraFocus.x, 19, cameraFocus.z + 23);
-  const offset = shake * (Math.random() - 0.5);
-  camera.position.x += offset;
-  camera.position.z += shake * (Math.random() - 0.5);
-  camera.lookAt(cameraFocus.x + offset * 0.25, 0, cameraFocus.z - 1.2);
-  shake = Math.max(0, shake - dt * 2);
+  const b = world.bounds;
+  const desired = hero.pos.clone().addScaledVector(cameraBack, -0.8);
+  desired.x = THREE.MathUtils.clamp(desired.x, b.minX + 2, b.maxX - 2);
+  desired.z = THREE.MathUtils.clamp(desired.z, b.minZ + 2, b.maxZ - 2);
+  desired.y = 0.15;
+  cameraFocus.lerp(desired, 1 - Math.exp(-dt * 7));
+  shakeAge += dt;
+  const amplitude = shake * Math.exp(-shakeAge * 19) * Math.sin(shakeAge * 58);
+  const offset = shakeDirection.clone().multiplyScalar(amplitude);
+  camera.position.copy(cameraFocus).add(cameraOffset).add(offset);
+  camera.lookAt(cameraFocus.clone().add(offset));
+  if (shakeAge > 0.3) shake = 0;
+  camera.updateMatrixWorld(true);
 }
 let lastTime = performance.now(),
   uiClock = 0;
@@ -1693,8 +2064,9 @@ function animate(now) {
     dt *= slowScale;
   }
   if (hitStop > 0) {
-    hitStop -= realDt;
-    dt = 0;
+    const frozen = Math.min(dt, hitStop);
+    hitStop = Math.max(0, hitStop - realDt);
+    dt = Math.max(0, dt - frozen);
   }
   if (mode === "playing") {
     gameTime += realDt;
@@ -1703,7 +2075,8 @@ function animate(now) {
     else combo = 0;
     if (dt > 0) {
       // Keep collision and strike windows stable when a slow frame arrives.
-      const steps = Math.ceil(dt / 0.03), step = dt / steps;
+      const steps = Math.ceil(dt / 0.03),
+        step = dt / steps;
       for (let i = 0; i < steps && mode === "playing"; i++) {
         updateHero(step);
         updateEnemies(step);
@@ -1711,7 +2084,6 @@ function animate(now) {
         updateDrops(step);
         updateCompanions(step);
         fx.update(step);
-        if (hitStop > 0) break;
       }
     }
     targetMarker.visible = !!hero.target && hero.target.state !== "dead";
@@ -1746,8 +2118,7 @@ function animate(now) {
   }
   renderer.render(scene, camera);
 }
-camera.fov = innerWidth / innerHeight < 0.8 ? 47 : 39;
-camera.updateProjectionMatrix();
+resizeCamera();
 updateCamera(1);
 rig.group.position.copy(hero.pos);
 rig.group.rotation.y = hero.angle;
