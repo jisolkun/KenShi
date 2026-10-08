@@ -527,18 +527,19 @@ function legTarget(leg,y,z,weight=1) {
 
 function sampleLocomotion(rig,gait,blend,speed,turn,time) {
   const {body,chest,head,legs,arms,pony,cloths,type}=rig;
+  const hero=type==='hero';
   const lean=clamp(turn,-1,1)*blend;
   const pace=clamp(speed,0,1), stride=(type==='brute'?.215:.235)+.085*pace;
   // gaitPhase is a complete left/right cycle. At sprint speed a short ground
   // contact and longer airborne return preserve cadence without sliding feet.
   const cycleDistance=mix(.85,2.9,pace);
   const stance=clamp(stride*2/cycleDistance,.20,.58);
-  body.position.y=.91+Math.sin(time*2.3)*.004*(1-blend)-(.055+.025*pace)*blend-.003*Math.abs(Math.sin(gait*2))*blend;
-  body.rotation.set(.12*blend,Math.sin(gait)*.036*blend,-lean*.09);
-  chest.rotation.x=mix(-.08,.105,blend);
-  chest.rotation.y=-.07*(1-blend)-Math.sin(gait)*.078*blend;
+  body.position.y=(hero?.875:.91)+Math.sin(time*2.3)*.004*(1-blend)-(hero?.035+.01*pace:.055+.025*pace)*blend-.003*Math.abs(Math.sin(gait*2))*blend;
+  body.rotation.set(hero?mix(.075,.12,blend):.12*blend,Math.sin(gait)*.036*blend,-lean*.09);
+  chest.rotation.x=hero?mix(.065,.13,blend):mix(-.08,.105,blend);
+  chest.rotation.y=(hero?0:-.07*(1-blend))-Math.sin(gait)*(hero?.045:.078)*blend;
   chest.rotation.z=lean*.035;
-  head.rotation.x=mix(.045,-.17,blend);
+  head.rotation.x=hero?-body.rotation.x-chest.rotation.x:mix(.045,-.17,blend);
   head.rotation.y=-chest.rotation.y*.6;
   head.rotation.z=lean*.045;
   for(const leg of legs){
@@ -553,18 +554,17 @@ function sampleLocomotion(rig,gait,blend,speed,turn,time) {
     leg.hip.rotation.y=-lean*.08;
     leg.hip.rotation.z=lean*.055+(leg.side===-1?-.018:.018)*blend;
     leg.foot.rotation.y=lean*.065;
+    if(hero)plantIdleFoot(rig,leg,1,.026+z*blend,.075+lift*blend,leg.hip.position.x+leg.side*.010*blend);
     // A slight toe peel only during the returning foot, never on the stance foot.
     if(u>stance)leg.foot.rotation.x+=.12*Math.sin(Math.PI*(u-stance)/(1-stance))*blend;
   }
   for(const arm of arms){
     const swing=Math.sin(gait+(arm.side===-1?Math.PI:0));
     if(type==='hero'){
-      const targetX=(arm.side===-1?.66:.55)+swing*.075;
-      arm.shoulder.rotation.x=mix(arm.shoulder.rotation.x,targetX,blend);
-      arm.shoulder.rotation.y=mix(arm.shoulder.rotation.y,arm.side*-.10,blend);
-      arm.shoulder.rotation.z=mix(arm.shoulder.rotation.z,arm.side*.23,blend);
-      arm.elbow.rotation.x=mix(arm.elbow.rotation.x,arm.side===-1?-.38:-.49,blend);
-      arm.wrist.rotation.x=mix(arm.wrist.rotation.x,.24,blend);
+      // The same relaxed low hands carry from rest into the first running step.
+      arm.shoulder.rotation.set(mix(.24,.34,blend)+swing*.035*blend,arm.side*-.025,arm.side*mix(.105,.13,blend));
+      arm.elbow.rotation.set(mix(-.14,-.17,blend),0,0);
+      arm.wrist.rotation.set(mix(.33,.35,blend),arm.side*.025,arm.side*.14);
     }else{
       arm.shoulder.rotation.x=mix(arm.shoulder.rotation.x,.25+swing*.18,blend);
       if(type!=='archer')arm.elbow.rotation.x=mix(arm.elbow.rotation.x,-.48,blend);
@@ -644,11 +644,11 @@ function sampleHeroAttack(rig,p,combo,gait,carry,turn) {
 
 const DOWN = new THREE.Vector3(0,-1,0);
 const AXIS_X = new THREE.Vector3(1,0,0);
-function plantIdleFoot(rig,leg,weight) {
+function plantIdleFoot(rig,leg,weight,targetZ=.026,targetY=.075,targetX=leg.hip.position.x) {
   const m=rig.motion,a=.41,b=Math.hypot(.395,.016),gamma=Math.atan2(.016,.395);
   // The ankle target is in character space; it stays put while the pelvis shifts.
   m.idleRootQ.copy(rig.body.quaternion).invert();
-  m.idleTarget.set(leg.hip.position.x,.075,.026).sub(rig.body.position).applyQuaternion(m.idleRootQ).sub(leg.hip.position);
+  m.idleTarget.set(targetX,targetY,targetZ).sub(rig.body.position).applyQuaternion(m.idleRootQ).sub(leg.hip.position);
   const d=clamp(m.idleTarget.length(),.2,a+b-.0001);
   const beta=Math.acos(clamp((a*a+d*d-b*b)/(2*a*d),-1,1));
   const knee=Math.PI-Math.acos(clamp((a*a+b*b-d*d)/(2*a*b),-1,1));
@@ -665,6 +665,7 @@ function plantIdleFoot(rig,leg,weight) {
 function sampleIdle(rig,clock,weight,alertness,lookYaw,time) {
   if(weight<.0001)return;
   const {body,chest,head,arms,legs,pony,cloths,type}=rig;
+  const hero=type==='hero';
   const alert=clamp(alertness,0,1), heavy=type==='brute'||type==='boss';
   const tempo=heavy?1.42:1.83;
   const breath=Math.sin(clock*tempo);
@@ -676,9 +677,9 @@ function sampleIdle(rig,clock,weight,alertness,lookYaw,time) {
   body.position.z+=Math.sin(clock*.47+.7)*.004*weight;
   body.position.y+=(breath*.005-.006-Math.sin(time*2.3)*.004)*weight;
   chest.position.y+=breath*.008*weight;
-  chest.rotation.x+=(breath*.026-.018*guard-.026*alert)*weight;
+  chest.rotation.x+=(hero?breath*.012-.005*guard:breath*.026-.018*guard-.026*alert)*weight;
   chest.rotation.z+=balance*.018*weight;
-  chest.rotation.y+=(Math.sin(clock*.57-.7)*.034-.016*guard)*weight;
+  chest.rotation.y+=(Math.sin(clock*.57-.7)*(hero?.012:.034)-(hero?.004:.016)*guard)*weight;
   const scan=Math.sin(clock*.43)*.23+Math.sin(clock*.19+1.5)*.075;
   const look=(clamp(lookYaw??0,-.55,.55)*(.45+.55*alert)+scan*(1-alert*.8))*weight;
   head.rotation.y+=look;
@@ -688,12 +689,12 @@ function sampleIdle(rig,clock,weight,alertness,lookYaw,time) {
   for(const arm of arms){
     const side=arm.side;
     arm.shoulder.position.y+=breath*.004*weight;
-    arm.shoulder.rotation.x+=(breath*.022-(side===1?.085:.028)*guard-.04*alert)*weight;
-    arm.shoulder.rotation.z+=side*(breath*.022+.045*guard)*weight;
-    arm.elbow.rotation.x+=(-.034*breath-.13*guard)*weight;
-    arm.wrist.rotation.x+=(Math.sin(clock*tempo-.55)*.022+.075*guard)*weight;
-    arm.wrist.rotation.y+=side*Math.sin(clock*.67-.4)*.026*weight;
-    arm.wrist.rotation.z+=side*.034*guard*weight;
+    arm.shoulder.rotation.x+=(hero?breath*.009+.010*guard:breath*.022-(side===1?.085:.028)*guard-.04*alert)*weight;
+    arm.shoulder.rotation.z+=side*(hero?breath*.008+.008*guard:breath*.022+.045*guard)*weight;
+    arm.elbow.rotation.x+=(hero?-.010*breath-.020*guard:-.034*breath-.13*guard)*weight;
+    arm.wrist.rotation.x+=(Math.sin(clock*tempo-.55)*(hero?.012:.022)+(hero?.018:.075)*guard)*weight;
+    arm.wrist.rotation.y+=side*Math.sin(clock*.67-.4)*(hero?.009:.026)*weight;
+    arm.wrist.rotation.z+=side*(hero?.009:.034)*guard*weight;
   }
   pony.rotation.x+=(Math.sin(clock*tempo-.9)*.075+.032*guard)*weight;
   pony.rotation.z+=(Math.sin(clock*.57-1.0)*.08)*weight;

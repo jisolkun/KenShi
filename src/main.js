@@ -2332,6 +2332,7 @@ if (new URLSearchParams(location.search).get("debug") === "1") {
         idleAge: hero.idleAge,
         alertness: hero.alertness,
         lookYaw: hero.lookYaw,
+        root: joint(rig.group),
         body: joint(rig.body),
         chest: joint(rig.chest),
         head: joint(rig.head),
@@ -2340,7 +2341,9 @@ if (new URLSearchParams(location.search).get("debug") === "1") {
           shoulder: joint(arm.shoulder),
           elbow: joint(arm.elbow),
           wrist: joint(arm.wrist),
+          worldPos: xyz(arm.wrist.getWorldPosition(new THREE.Vector3())),
         })),
+        weaponTips: rig.weaponTips().map(xyz),
         legs: rig.legs.map((leg) => ({
           side: leg.side,
           foot: joint(leg.foot),
