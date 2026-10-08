@@ -182,6 +182,7 @@ for (const weapon of WEAPONS.slice(0, 5)) {
 }
 
 for (const weapon of WEAPONS.slice(0, 5)) {
+  if (!getReviewedAttack(weapon.id, 0)) continue;
   test(`${weapon.id}: travelling support feet stay fixed in world space`, () => {
     const rig = createCharacter('hero');
     equipWeapon(rig, weapon.id);

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { animateWeaponParts } from './weaponModels.js';
+import { sampleTangReady } from './choreography/tangDao.js';
 import { SKILL_CONTACTS } from './weapons.js';
 import { sampleReviewedAttack } from './choreography/index.js';
 export { getReviewedAttack, sampleReviewedAttack } from './choreography/index.js';
@@ -53,7 +54,9 @@ const down=new THREE.Vector3(0,-1,0);
 function solveArm(rig,arm,point,desired,stable=false) {
  const target=point.clone().sub(arm.shoulder.position);
  const length=target.length(),a=.29,b=.27,d=clamp(length,.035,a+b-.0001),axis=target.clone().normalize();
- const pole=stable?new THREE.Vector3(arm.side,0,0):new THREE.Vector3(arm.side,-.25,.1);
+ // Keep the elbow below the raised shaft through crossed high carries. A
+ // mostly lateral pole becomes antiparallel to that reach and flips the arm.
+ const pole=stable==='tang'?new THREE.Vector3(arm.side*.5,-1,-.15):stable?new THREE.Vector3(arm.side,0,0):new THREE.Vector3(arm.side,-.25,.1);
  pole.addScaledVector(axis,-pole.dot(axis)).normalize();
  const along=(a*a+d*d-b*b)/(2*d),height=Math.sqrt(Math.max(0,a*a-along*along));
  const elbow=axis.clone().multiplyScalar(along).addScaledVector(pole,height);
@@ -89,8 +92,12 @@ export function applyWeaponPose(rig, pose, plantFoot) {
  if(rig.type!=='hero'||!WEAPON_COMBOS[rig.weaponId])return;
  const {state,phase=0,combo=0,skill=0,time=0}=pose,id=rig.weaponId;
  // Reviewed attacks author blade planes, connected grips and ankle targets.
- if(['dual-dao','tang-dao','yanling-dao','miao-dao','ring-dao'].includes(id)&&(state==='attack'||state==='skill')){
+ if(['tang-dao','yanling-dao','miao-dao','ring-dao'].includes(id)&&(state==='attack'||state==='skill')){
   applyReviewedMotion(rig,pose,plantFoot);
+  animateWeaponParts(rig,pose);return;
+ }
+ if(id==='tang-dao'&&['idle','guard','run','walk'].includes(state)){
+  applyReviewedMotion(rig,pose,plantFoot,sampleTangReady(pose.idleClock??time));
   animateWeaponParts(rig,pose);return;
  }
  if(id==='dual-dao'){
@@ -189,24 +196,38 @@ export function applyWeaponPose(rig, pose, plantFoot) {
 
 }
 
-function applyReviewedMotion(rig,pose,plantFoot) {
- const sample=sampleReviewedAttack(rig.weaponId,pose.state==='skill'?pose.skill:pose.combo,pose.phase,pose.state);
+function applyReviewedMotion(rig,pose,plantFoot,readySample=null) {
+ const sample=readySample??sampleReviewedAttack(rig.weaponId,pose.state==='skill'?pose.skill:pose.combo,pose.phase,pose.state);
  const {yaw,load,advance}=sample.stance;
+ if(rig.weaponId==='tang-dao')for(const arm of rig.arms)arm.weapon.rotation.set(0,0,0);
+ if(readySample){
+  // The character already supplies breathing, weight shifts and a distance-
+  // driven running gait. Preserve that full-body motion and connect the two
+  // hands to the low carry; replacing its legs here would freeze locomotion.
+  rig.group.updateMatrixWorld(true);
+  const chestQ=rig.chest.getWorldQuaternion(new THREE.Quaternion());
+  for(let i=0;i<2;i++){
+   const hand=sample.hands[i];
+   solveArm(rig,rig.arms[i],new THREE.Vector3(...hand.grip),chestQ.clone().multiply(new THREE.Quaternion().fromArray(hand.quaternion)),'tang');
+  }
+  rig.reviewedAttackSample=sample;
+  return;
+ }
  // Pelvis starts the turn; the chest follows. Feet remain in the character
  // frame while the hip crosses between the two support legs.
- rig.body.rotation.set(0,yaw*.65,0);
+ rig.body.rotation.set(0,sample.stance.pelvisYaw??yaw*.65,0);
  // The moving Yanling stance needs knee flexion while its authored torso
  // retreats. Keep ankle cadence fixed and lower the pelvis instead of
  // shortening the planted step, which would make that foot slide.
  const movingCrouch=rig.weaponId==='yanling-dao'?.015*clamp(pose.attackCarry??0,0,1):0;
- rig.body.position.set(-yaw*.07,(sample.stance.bodyHeight??.875)-load*.055-movingCrouch,advance);
- rig.chest.rotation.set(-.055-load*.035,yaw*.35,0);
+ rig.body.position.set(sample.stance.shiftX??-yaw*.07,(sample.stance.bodyHeight??.875)-load*.055-movingCrouch,advance);
+ rig.chest.rotation.set(sample.stance.pitch??(-.055-load*.035),sample.stance.chestYaw??yaw*.35,0);
  rig.head.rotation.set(.02,-yaw*.25,0);
  rig.group.updateMatrixWorld(true);
  const chestQ=rig.chest.getWorldQuaternion(new THREE.Quaternion());
  for(let i=0;i<2;i++){
   const h=sample.hands[i];
-  solveArm(rig,rig.arms[i],new THREE.Vector3(...h.grip),chestQ.clone().multiply(new THREE.Quaternion().fromArray(h.quaternion)),true);
+  solveArm(rig,rig.arms[i],new THREE.Vector3(...h.grip),chestQ.clone().multiply(new THREE.Quaternion().fromArray(h.quaternion)),rig.weaponId==='tang-dao'?'tang':true);
  }
  const resolvedFeet=[];
  for(const leg of rig.legs){
@@ -237,7 +258,7 @@ function applyReviewedMotion(rig,pose,plantFoot) {
 // frames of a state change; re-project the blended shaft into both arm chains.
 export function reconcileWeaponGrip(rig) {
  if(rig.type!=='hero'||!rig.offhandGrip)return;
- if(!['miao-dao','ring-dao'].includes(rig.weaponId)||!rig.reviewedAttackSample){supportHand(rig);return;}
+ if(!['tang-dao','miao-dao','ring-dao'].includes(rig.weaponId)||!rig.reviewedAttackSample){supportHand(rig);return;}
  // During a state blend preserve the actual primary wrist and shaft plane.
  // Only move that shaft if its support marker falls outside the left reach.
  rig.group.updateMatrixWorld(true);
@@ -253,7 +274,7 @@ export function reconcileWeaponGrip(rig) {
    // the entire connected shaft, retaining its blended orientation.
    const point=rig.arms[1].wrist.getWorldPosition(new THREE.Vector3());point.y+=.06-floor;
    const primary=rig.chest.worldToLocal(point);
-   solveArm(rig,rig.arms[1],primary,desired.clone(),true);
+   solveArm(rig,rig.arms[1],primary,desired.clone(),rig.weaponId==='tang-dao'?'tang':true);
    rig.group.updateMatrixWorld(true);
   }
  }
@@ -262,8 +283,8 @@ export function reconcileWeaponGrip(rig) {
  if(delta.length()>.549){
   const correction=shoulder.clone().add(delta.setLength(.549)).sub(target);
   const primary=rig.chest.worldToLocal(rig.arms[1].wrist.getWorldPosition(new THREE.Vector3())).add(correction);
-  solveArm(rig,rig.arms[1],primary,desired.clone(),true);
+  solveArm(rig,rig.arms[1],primary,desired.clone(),rig.weaponId==='tang-dao'?'tang':true);
   rig.group.updateMatrixWorld(true);
  }
- solveArm(rig,rig.arms[0],rig.chest.worldToLocal(rig.offhandGrip.getWorldPosition(new THREE.Vector3())),desired,true);
+ solveArm(rig,rig.arms[0],rig.chest.worldToLocal(rig.offhandGrip.getWorldPosition(new THREE.Vector3())),desired,rig.weaponId==='tang-dao'?'tang':true);
 }

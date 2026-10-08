@@ -22,7 +22,23 @@ function raw(spec,tracks,p) {
  p=THREE.MathUtils.clamp(p,0,1);
  const [yaw,load]=interpolate(tracks.torso,p,'values');
  const stance={yaw,load,advance:spec.advance*Math.sin(Math.PI*p),...(spec.bodyHeight?{bodyHeight:spec.bodyHeight}:{})};
- const hands=tracks.tracks.map((track,i)=>{const shoulder=v([i?.29:-.29,.365,0]);const offset=v(interpolate(track,p,'grip')).sub(shoulder);const length=offset.length();if(length>.51)offset.setLength(.548-.038*Math.exp(-(length-.51)/.038));return {grip:offset.add(shoulder).toArray(),axis:v(interpolate(track,p,'axis')).normalize()};});
+ if(tracks.body){
+  const [pelvisYaw,chestYaw,pitch,shiftX,shiftZ,height]=interpolate(tracks.body,p,'values');
+  Object.assign(stance,{pelvisYaw,chestYaw,pitch,shiftX,advance:shiftZ,bodyHeight:height});
+ }
+ if(tracks.feet){
+  stance.feet=tracks.feet(p);
+  const pelvis=new THREE.Quaternion().setFromAxisAngle(v([0,1,0]),stance.pelvisYaw??yaw*.65);
+  for(let i=0;i<2;i++){
+   const hip=v([i?.155:-.155,-.035,0]).applyQuaternion(pelvis);
+   const foot=stance.feet[i],dx=hip.x+(stance.shiftX??-yaw*.07)-foot.x,dz=hip.z+stance.advance-foot.z;
+   const ceiling=foot.y+.035+Math.sqrt(Math.max(.10,.795*.795-dx*dx-dz*dz));
+   stance.bodyHeight=Math.min(stance.bodyHeight??.875,ceiling);
+  }
+ }
+ const transform=authoredChestTransform(stance);
+ const inverse=transform.q.clone().invert();
+ const hands=tracks.tracks.map((track,i)=>{const shoulder=v([i?.29:-.29,.365,0]);const grip=v(interpolate(track,p,'grip'));if(spec.rootFrame)grip.add(v([0,1.025,0])).sub(transform.position).applyQuaternion(inverse);const offset=grip.sub(shoulder);const length=offset.length();if(length>.51)offset.setLength(.548-.038*Math.exp(-(length-.51)/.038));return {grip:offset.add(shoulder).toArray(),axis:(spec.rootFrame&&track[0].angles?(()=>{const [azimuth,rawTilt]=interpolate(track,p,'angles'),tilt=Math.max(-.54,rawTilt);return v([Math.sin(azimuth)*Math.cos(tilt),Math.sin(tilt),Math.cos(azimuth)*Math.cos(tilt)]);})():v(interpolate(track,p,'axis')).normalize()).applyQuaternion(spec.rootFrame?inverse:new THREE.Quaternion())};});
  for(const lane of spec.pointLanes??[]){
   const t=THREE.MathUtils.clamp((Math.abs(p-lane.phase)-lane.inner)/(lane.outer-lane.inner),0,1),weight=1-t*t*(3-2*t),h=hands[lane.hand];
   h.grip[0]=THREE.MathUtils.lerp(h.grip[0],lane.x,weight);
@@ -43,14 +59,14 @@ function raw(spec,tracks,p) {
  }
  return {hands,stance};
 }
-function chestTransform(stance) {
+export function authoredChestTransform(stance) {
  const {yaw,load,advance}=stance;
- const body=new THREE.Quaternion().setFromEuler(new THREE.Euler(0,yaw*.65,0));
- const chest=new THREE.Quaternion().setFromEuler(new THREE.Euler(-.055-load*.035,yaw*.35,0));
- return {q:body.clone().multiply(chest),position:v([0,.15,0]).applyQuaternion(body).add(v([-yaw*.07,(stance.bodyHeight??.875)-load*.055,advance]))};
+ const body=new THREE.Quaternion().setFromEuler(new THREE.Euler(0,stance.pelvisYaw??yaw*.65,0));
+ const chest=new THREE.Quaternion().setFromEuler(new THREE.Euler(stance.pitch??(-.055-load*.035),stance.chestYaw??yaw*.35,0));
+ return {q:body.clone().multiply(chest),position:v([0,.15,0]).applyQuaternion(body).add(v([stance.shiftX??-yaw*.07,(stance.bodyHeight??.875)-load*.055,advance]))};
 }
 function midWorld(r,i,spec) {
- const transform=chestTransform(r.stance);
+ const transform=authoredChestTransform(r.stance);
  return v(r.hands[i].grip).addScaledVector(r.hands[i].axis,spec.midLength??.549).applyQuaternion(transform.q).add(transform.position);
 }
 function build(spec,tracks) {
@@ -67,7 +83,7 @@ function build(spec,tracks) {
   }
  }
  const angleAt=(p,i)=>{
-  const r=raw(spec,tracks,p),before=raw(spec,tracks,p-.0002),after=raw(spec,tracks,p+.0002),transform=chestTransform(r.stance);
+  const r=raw(spec,tracks,p),before=raw(spec,tracks,p-.0002),after=raw(spec,tracks,p+.0002),transform=authoredChestTransform(r.stance);
   const axis=r.hands[i].axis,base=bases[i][Math.round(p*N)];
   const velocity=midWorld(after,i,spec).sub(midWorld(before,i,spec)).applyQuaternion(transform.q.clone().invert());
   velocity.addScaledVector(axis,-velocity.dot(axis));
@@ -76,7 +92,7 @@ function build(spec,tracks) {
  for(let i=0;i<2;i++){
   const anchors=[{p:0,values:[0]}];let previous=0;
   for(const c of spec.contacts.filter(c=>c.hand===i&&c.kind!=='thrust')){
-   for(const p of [c.phase-.045,c.phase+.045]){
+   for(const p of [c.edgeWindow?c.start:c.phase-.045,c.edgeWindow?c.end:c.phase+.045]){
     let angle=angleAt(p,i);while(angle-previous>Math.PI)angle-=Math.PI*2;while(angle-previous<-Math.PI)angle+=Math.PI*2;
     anchors.push({p,values:[angle]});previous=angle;
    }
@@ -87,7 +103,7 @@ function build(spec,tracks) {
   while(final-previous>Math.PI)final-=Math.PI*2;while(final-previous<-Math.PI)final+=Math.PI*2;
   anchors.push({p:1,values:[final]});
   for(let n=0;n<=N;n++){
-   const p=n/N,contact=spec.contacts.find(c=>c.hand===i&&c.kind!=='thrust'&&Math.abs(p-c.phase)<=.045);
+   const p=n/N,contact=spec.contacts.find(c=>c.hand===i&&c.kind!=='thrust'&&p>=(c.edgeWindow?c.start:c.phase-.045)&&p<=(c.edgeWindow?c.end:c.phase+.045));
    let angle=interpolate(anchors,p,'values')[0];
    if(contact){let desired=angleAt(p,i);while(desired-angle>Math.PI)desired-=Math.PI*2;while(desired-angle<-Math.PI)desired+=Math.PI*2;angle=desired;}
    rolls[i].push(angle);

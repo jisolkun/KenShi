@@ -48,7 +48,12 @@ export function equipWeapon(rig,id) {
     const id=def.id;
     switch(id) {
       case 'dual-dao':handle();guard();blade(dao,.82,.9);tip(-.92);break;
-      case 'tang-dao':handle(.28);guard();blade(tangBlade,1.08,1);m(box,'edge',[.009,.87,.008],[.05,-.54,.021]);m(ring,'gold',[.055,.055,.055],[0,.20,0]);tip(-1.18);break;
+      case 'tang-dao':
+        // A modern long-handle straight dao: two grips fit on the actual hilt.
+        m(rod,'dark',[.035,.46,.035],[0,.20,0]);
+        m(rod,'gold',[.048,.035,.048],[0,.435,0]);guard();
+        blade(tangBlade,1.25,1);m(box,'edge',[.009,1.10,.008],[.05,-.655,.021]);
+        m(ring,'gold',[.055,.055,.055],[0,.46,0]);tip(-1.35);break;
       case 'yanling-dao':handle();guard();blade(yanlingBlade,1,1);tip(-1.1);break;
       case 'miao-dao':handle(.47);guard();blade(miaoBlade,1.4,1);tip(-1.5);break;
       case 'ring-dao': {
@@ -92,11 +97,11 @@ export function equipWeapon(rig,id) {
       }
     }
     if(['dual-dao','tang-dao','yanling-dao','miao-dao','ring-dao'].includes(id)) {
-      const lengths={'dual-dao':.92,'tang-dao':1.18,'yanling-dao':1.1,'miao-dao':1.5,'ring-dao':1.28};
+      const lengths={'dual-dao':.92,'tang-dao':1.35,'yanling-dao':1.1,'miao-dao':1.5,'ring-dao':1.28};
       const heel=mark(root,-.12),tip=mark(root,-lengths[id]),edge=mark(root,-lengths[id]*.55,.15),face=mark(root,-lengths[id]*.55,0,.15);
       rig.weaponBladeFrames.push({hand:side,root,heel,tip,edge,face});
     }
-    if(def.grip==='twohand')rig.offhandGrip=mark(root,.25);
+    if(def.grip==='twohand')rig.offhandGrip=mark(root,id==='tang-dao'?.39:.25);
     merge(root,`${id}:${side}`);
   }
   rig.swords=rig.arms.map(a=>a.weapon);

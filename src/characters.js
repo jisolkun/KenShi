@@ -350,7 +350,7 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
   const key=locomotion?'locomotion':`${state}:${state==='attack'?combo:state==='skill'?skill:0}`;
   const restarted=!locomotion && phase<motion.phase-.2;
   if(motion.key!==null && (key!==motion.key||restarted)) {
-    if(rig.weaponId==='ring-dao'){
+    if(['tang-dao','ring-dao'].includes(rig.weaponId)){
       rig.group.updateMatrixWorld(true);
       const groupQ=rig.group.getWorldQuaternion(new THREE.Quaternion());
       motion.shaftFrom={point:rig.group.worldToLocal(rig.arms[1].wrist.getWorldPosition(new THREE.Vector3())),quaternion:groupQ.invert().multiply(rig.arms[1].wrist.getWorldQuaternion(new THREE.Quaternion()))};
@@ -536,7 +536,7 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
   let blend=transition&&!immediate?smooth(motion.elapsed/motion.duration):1;
   if((state==='attack'||state==='skill')&&p>=.32)blend=1;
   rig.reviewedShaftBlend=null;
-  if(blend<1&&rig.weaponId==='ring-dao'&&motion.shaftFrom){
+  if(blend<1&&['tang-dao','ring-dao'].includes(rig.weaponId)&&motion.shaftFrom){
     rig.group.updateMatrixWorld(true);
     const groupQ=rig.group.getWorldQuaternion(new THREE.Quaternion());
     const point=rig.group.worldToLocal(rig.arms[1].wrist.getWorldPosition(new THREE.Vector3()));

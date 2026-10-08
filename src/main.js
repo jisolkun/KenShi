@@ -5,7 +5,7 @@ import { createUI } from "./ui.js";
 import { createAudio } from "./audio.js";
 import { createEffects } from "./effects.js";
 import { requestMobileFullscreen } from "./fullscreen.js";
-import { WEAPONS, getWeapon, DEFAULT_WEAPON_ID, SKILL_CONTACTS } from "./weapons.js";
+import { WEAPONS, getWeapon, DEFAULT_WEAPON_ID, SKILL_CONTACTS, isWeaponUnlocked } from "./weapons.js";
 import { createWeaponEffects } from "./weaponEffects.js";
 import { weaponStrikeContains, bladeSweepContains } from "./weaponCombat.js";
 import { getReviewedAttack, sampleReviewedAttack } from "./choreography/index.js";
@@ -98,7 +98,7 @@ const fx = createEffects(scene, camera);
 const weaponFx = createWeaponEffects(scene, fx);
 let storedWeaponId = DEFAULT_WEAPON_ID;
 try { storedWeaponId = localStorage.getItem("undead-slayer-weapon") || DEFAULT_WEAPON_ID; } catch {}
-let currentWeapon = getWeapon(storedWeaponId);
+let currentWeapon = getWeapon(isWeaponUnlocked(storedWeaponId) ? storedWeaponId : DEFAULT_WEAPON_ID);
 let weaponWarmGeneration = 0;
 const rig = createCharacter("hero");
 rig.setWeapon(currentWeapon.id);
@@ -571,6 +571,7 @@ function clearDynamic() {
   weaponFx.clear();
 }
 function selectWeapon(id = currentWeapon.id, preview = true) {
+  if (!isWeaponUnlocked(id)) return false;
   currentWeapon = getWeapon(id);
   hero.weaponId = currentWeapon.id;
   rig.setWeapon(currentWeapon.id);
@@ -617,6 +618,7 @@ function warmReviewedWeapon(id) {
   if(queue.length)schedule(next);
 }
 function chooseWeapon(id = currentWeapon.id) {
+  if (!isWeaponUnlocked(id)) return false;
   mode = "start";
   keys.clear();
   clearDynamic();
@@ -666,7 +668,7 @@ function startGame(weaponId = currentWeapon.id) {
   lastTap = null;
   pointerStart = null;
   clearDynamic();
-  selectWeapon(weaponId, false);
+  selectWeapon(isWeaponUnlocked(weaponId) ? weaponId : DEFAULT_WEAPON_ID, false);
   damageQueue.length = 0;
   mode = "playing";
   gameTime = 0;

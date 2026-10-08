@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as THREE from 'three';
 import { createCharacter, poseCharacter } from '../src/characters.js';
-import { WEAPONS, DEFAULT_WEAPON_ID, getWeapon, SKILL_CONTACTS } from '../src/weapons.js';
+import { WEAPONS, DEFAULT_WEAPON_ID, getWeapon, SKILL_CONTACTS, isWeaponUnlocked, UNLOCKED_WEAPON_IDS } from '../src/weapons.js';
 import { WEAPON_COMBOS } from '../src/weaponMotion.js';
 import { getReviewedAttack } from '../src/choreography/index.js';
 
@@ -174,4 +174,21 @@ test('new weapon carries breathe, follow gait and let the free hand counterbalan
     poseCharacter(rig, { state: 'idle', time: 20, gaitPhase: 15, dt: 0 });
     assert.equal(signature(rig), before, `${weapon.id}: pause freezes carry`);
   }
+});
+
+
+test('only dual dao and Tang dao are available to choose', () => {
+  assert.deepEqual([...UNLOCKED_WEAPON_IDS], ['dual-dao', 'tang-dao']);
+  assert.equal(WEAPONS.filter(w => isWeaponUnlocked(w.id)).length, 2);
+  assert.equal(isWeaponUnlocked('unknown'), false);
+  assert.equal(isWeaponUnlocked('ring-dao'), false);
+});
+
+test('dual dao uses the original attack timings and bypasses the replacement registry', () => {
+  const weapon = getWeapon('dual-dao');
+  assert.equal(getReviewedAttack('dual-dao'), null);
+  assert.deepEqual(weapon.moves.map(m => m.name), ['燕返', '交锋', '穿花', '双月']);
+  assert.deepEqual(weapon.moves.map(m => m.duration), [.31, .347, .291, .44]);
+  assert.deepEqual(weapon.moves.map(m => m.contact), [.43, .43, .47, .48]);
+  assert.deepEqual(weapon.skillNames, ['燕返', '交锋', '穿花', '双月', '绝式·双月']);
 });

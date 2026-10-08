@@ -1,4 +1,4 @@
-import { WEAPONS, getWeapon, DEFAULT_WEAPON_ID } from './weapons.js';
+import { WEAPONS, getWeapon, DEFAULT_WEAPON_ID, isWeaponUnlocked } from './weapons.js';
 import { isMobileFullscreen, isPhoneBrowser } from './fullscreen.js';
 
 const icon = (content, className = '') => `<svg class="${className}" viewBox="0 0 40 40" fill="none" aria-hidden="true">${content}</svg>`;
@@ -14,6 +14,7 @@ const specialIcons = {
   eagle: icon('<path d="m20 21-6-8L3 7l4 14 9 4 4 10 4-10 9-4 4-14-11 6z" stroke="currentColor" stroke-width="2"/><path d="m16 19 4-5 4 5-4 6z" fill="currentColor"/>'),
   captain: icon('<path d="M12 16V9l8-5 8 5v7l-8 8zM6 35l2-8 8-4 4 6 4-6 8 4 2 8M11 12h18" stroke="currentColor" stroke-width="2"/><path d="M17 15h6v4h-6z" fill="currentColor"/>'),
 };
+const lockIcon = icon('<rect x="9" y="18" width="22" height="17" rx="2" stroke="currentColor" stroke-width="3"/><path d="M14 18v-7a6 6 0 0 1 12 0v7M20 25v4" stroke="currentColor" stroke-width="3"/>', 'weapon-lock-icon');
 
 const weaponSilhouette = weapon => {
   const id = weapon.id;
@@ -54,7 +55,7 @@ const healthRatio = (hp, maximum) => {
 const timeLabel = seconds => `${String(Math.floor((seconds || 0) / 60)).padStart(2, '0')}:${String(Math.floor((seconds || 0) % 60)).padStart(2, '0')}`;
 
 export function createUI(callbacks = {}, initialSelectedWeaponId = DEFAULT_WEAPON_ID) {
-  let selectedWeaponId = getWeapon(initialSelectedWeaponId).id;
+  let selectedWeaponId = isWeaponUnlocked(initialSelectedWeaponId) ? initialSelectedWeaponId : DEFAULT_WEAPON_ID;
   let weaponFilter = '全部';
   const root = document.createElement('div');
   root.className = 'game-interface';
@@ -93,7 +94,7 @@ export function createUI(callbacks = {}, initialSelectedWeaponId = DEFAULT_WEAPO
       <div class="intro-side"><span>风起荒寺</span><i></i><small>百兵出鞘 · 百鬼退散</small></div>
       <div class="intro-footer"><span>低多边形 · 国风动作</span><div><button class="text-button" data-action="sound" aria-label="切换声音">声音 · 开</button><button class="text-button" data-action="help">操作指引</button></div></div>
     </div>
-    <section class="armory-layer is-hidden" aria-label="百兵谱"><header class="armory-header"><div><span>兵器谱 · 二十七式</span><h2>百兵入阵</h2></div><button class="text-button" data-action="armory-back">← 返回</button></header><div class="armory-body"><div class="armory-catalog"><nav class="weapon-filters" aria-label="兵器类别"></nav><div class="weapon-grid"></div></div><div class="weapon-live-preview" aria-label="人物持兵与连招预览"><span class="preview-eyebrow">持兵演武</span><div class="preview-floor-mark" aria-hidden="true"></div><div class="preview-caption"><b class="preview-weapon-name"></b><span>点选兵器 · 演示四式连招</span><button class="text-button" data-action="weapon-preview">↻ 再演一遍</button></div></div><aside class="weapon-detail"></aside></div></section>
+    <section class="armory-layer is-hidden" aria-label="百兵谱"><header class="armory-header"><div><span>兵器谱 · ${WEAPONS.filter(item => isWeaponUnlocked(item.id)).length} 已解锁 / ${WEAPONS.length} 式</span><h2>百兵入阵</h2></div><button class="text-button" data-action="armory-back">← 返回</button></header><div class="armory-body"><div class="armory-catalog"><nav class="weapon-filters" aria-label="兵器类别"></nav><div class="weapon-grid"></div></div><div class="weapon-live-preview" aria-label="人物持兵与连招预览"><span class="preview-eyebrow">持兵演武</span><div class="preview-floor-mark" aria-hidden="true"></div><div class="preview-caption"><b class="preview-weapon-name"></b><span>点选兵器 · 演示四式连招</span><button class="text-button" data-action="weapon-preview">↻ 再演一遍</button></div></div><aside class="weapon-detail"></aside></div></section>
     <button class="mobile-entry-overlay" data-action="mobile-entry" aria-label="点击全屏横屏后继续游戏">
       <span class="mobile-entry-mark" aria-hidden="true">↻</span>
       <b>点击全屏 · 横屏进入</b>
@@ -172,13 +173,13 @@ export function createUI(callbacks = {}, initialSelectedWeaponId = DEFAULT_WEAPO
     event.stopPropagation();
     if (button.dataset.skill !== undefined) { call('skill', Number(button.dataset.skill)); return; }
     if (button.dataset.special) { call('special', button.dataset.special); return; }
-    if (button.dataset.weapon) { setWeapon(button.dataset.weapon); call('weapon', selectedWeaponId); return; }
+    if (button.dataset.weapon) { if (!isWeaponUnlocked(button.dataset.weapon)) return; setWeapon(button.dataset.weapon); call('weapon', selectedWeaponId); return; }
     if (button.dataset.filter) { weaponFilter = button.dataset.filter; renderArmory(); return; }
     const action = button.dataset.action;
-    if (action === 'weapon-preview') { call('weapon', selectedWeaponId); return; }
+    if (action === 'weapon-preview') { if (isWeaponUnlocked(selectedWeaponId)) call('weapon', selectedWeaponId); return; }
     if (action === 'start') { showScreen('armory'); call('weapon', selectedWeaponId); return; }
     if (action === 'armory-back') { showScreen('start'); return; }
-    if (action === 'armory-confirm') { call('start', selectedWeaponId); return; }
+    if (action === 'armory-confirm') { if (isWeaponUnlocked(selectedWeaponId)) call('start', selectedWeaponId); return; }
     if (action === 'choose-weapon') { call('chooseWeapon', selectedWeaponId); showScreen('armory'); return; }
     if (action === 'sound') {
       sound = !sound;
@@ -290,12 +291,18 @@ export function createUI(callbacks = {}, initialSelectedWeaponId = DEFAULT_WEAPO
 
   function renderArmory() {
     const weapon = getWeapon(selectedWeaponId);
+    setText($('.armory-header span'), `兵器谱 · ${WEAPONS.filter(item => isWeaponUnlocked(item.id)).length} 已解锁 / ${WEAPONS.length} 式`);
     setText($('.preview-weapon-name'), weapon.name);
     $('.weapon-filters').innerHTML = ['全部', '刀剑', '长兵', '重兵', '奇门'].map(category => `<button data-filter="${category}" aria-pressed="${weaponFilter === category}" class="${weaponFilter === category ? 'active' : ''}">${category}</button>`).join('');
-    $('.weapon-grid').innerHTML = WEAPONS.filter(item => weaponFilter === '全部' || item.category === weaponFilter).map(item => `<button class="weapon-card ${item.id === selectedWeaponId ? 'selected' : ''}" data-weapon="${item.id}" aria-pressed="${item.id === selectedWeaponId}">${weaponSilhouette(item)}<b>${item.name}</b><small>${item.category}</small><span class="weapon-selected">${item.id === selectedWeaponId ? '已选' : '选择'}</span></button>`).join('');
+    $('.weapon-grid').innerHTML = WEAPONS.filter(item => weaponFilter === '全部' || item.category === weaponFilter).map(item => {
+      const unlocked = isWeaponUnlocked(item.id);
+      const selected = unlocked && item.id === selectedWeaponId;
+      return `<button class="weapon-card ${selected ? 'selected' : ''} ${unlocked ? '' : 'locked'}" data-weapon="${item.id}" aria-pressed="${selected}" aria-disabled="${!unlocked}" ${unlocked ? '' : 'disabled'}>${weaponSilhouette(item)}<b>${item.name}</b><small>${item.category}</small>${unlocked ? `<span class="weapon-selected">${selected ? '已选' : '选择'}</span>` : `<span class="weapon-locked">${lockIcon}<span>未解锁</span></span>`}</button>`;
+    }).join('');
     $('.weapon-detail').innerHTML = `<div class="weapon-detail-heading"><span>所选兵器 / ${weapon.category}</span>${weaponSilhouette(weapon)}<h3>${weapon.name}</h3><b>${weapon.tagline}</b></div><p class="weapon-description">${weapon.description}</p><div class="weapon-stats">${[['speed', '出招速度'], ['power', '打击威力'], ['reach', '攻击距离']].map(([key, label]) => `<div><span>${label}</span><i aria-label="${weapon.stats[key]} / 5">${[1,2,3,4,5].map(n => `<em class="${n <= weapon.stats[key] ? 'filled' : ''}"></em>`).join('')}</i></div>`).join('')}</div><div class="weapon-moves"><span>四式连招 · 近敌自动施展</span><ol>${weapon.moves.map(move => `<li>${typeof move === 'string' ? move : move.name}</li>`).join('')}</ol></div><button class="primary-button" data-action="armory-confirm"><span>携${weapon.name}入阵</span><i>→</i></button><small class="weapon-preview-note">左侧选兵 · 中央观看连招</small>`;
   }
   function setWeapon(id) {
+    if (!isWeaponUnlocked(id)) return;
     const weapon = getWeapon(id);
     selectedWeaponId = weapon.id;
     setText($('.player-name>span'), `${weapon.name} · 破阵`);
