@@ -6,7 +6,7 @@ import { createWeaponEffects } from '../src/weaponEffects.js';
 
 const position=new THREE.Vector3();
 function bounds(mesh){mesh.geometry.computeBoundingBox();return mesh.geometry.boundingBox.getSize(new THREE.Vector3());}
-test('all eight basic attack trails are finite, match contact shape, and retain diverse geometry',()=>{
+test('all twelve basic attack trails are finite, match contact shape, and retain diverse geometry',()=>{
   const scene=new THREE.Scene(),fx=createWeaponEffects(scene),signatures=new Set();
   for(const weapon of WEAPONS)for(let combo=0;combo<4;combo++){
     fx.attack(weapon.id,position,0,combo);

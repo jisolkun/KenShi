@@ -118,6 +118,7 @@ export function createAudio() {
   // Air, metal resonance, body weight and articulation are tuned per weapon.
   const weaponVoices = {
     'dual-dao':[2700,1320,0.8,'double'], 'tang-dao':[2450,1710,1,'cut'],
+    'great-dao':[1280,780,1.8,'heavy-cut'],
   };
   function weaponSlash(id, combo = 0, technique = null) {
     if (!ready() || context.currentTime - lastSlash < 0.06) return;
@@ -127,6 +128,12 @@ export function createAudio() {
     const shape=technique === 'thrust' ? 'thrust' : technique === 'chop' ? 'crush'
       : technique === 'cut' ? 'arc' : getWeapon(id).moves[((combo%4)+4)%4].shape;
     const duration = (0.085 + weight * 0.035)*(shape==='thrust'?0.72:shape==='radial'?1.3:1);
+    if(id==='great-dao') {
+      const heavy=shape==='crush';
+      // A low, accelerating rush carries the blade's mass; the edge remains audible.
+      noise(heavy?0.22:0.17,heavy?0.15:0.11,310,860*pitch,'bandpass',0,0.018);
+      tone(heavy?108:145,heavy?38:55,heavy?0.19:0.14,heavy?0.09:0.055,'triangle',0.006,0.009);
+    }
     if(shape==='crush')tone(110,37,0.14,0.065,'sine',0.015,0.005);
     if(shape==='thrust')noise(0.045,0.09,air*1.3,air*0.8,'highpass',0,0.002);
     noise(duration,0.19+weight*0.04,air*pitch,air*0.32,weight>1.5?'bandpass':'highpass',0,0.006);
@@ -147,6 +154,12 @@ export function createAudio() {
     tone((90+weight*30)*pitch,32,0.09+mass*0.045,0.2+mass*0.075,'sine',0,0.002);
     noise(0.035+mass*0.016,0.19+mass*0.055,kind==='wood'?820:air,220,'lowpass',0,0.002);
     tone(metal*pitch,metal*0.62,0.095,0.05,'triangle',0,0.002);
+    if(id==='great-dao') {
+      const finisher=((combo%4)+4)%4===3||technique==='chop';
+      noise(finisher?0.15:0.09,finisher?0.15:0.08,finisher?620:1000,115,'lowpass',0.005,0.003);
+      tone(finisher?67:87,28,finisher?0.25:0.15,finisher?0.20:0.075,'sine',0.004,0.003);
+      if(finisher)tone(415,175,0.16,0.022,'triangle',0.018,0.004);
+    }
   }
   function roll() {
     noise(0.24, 0.3, 800, 180, 'bandpass');

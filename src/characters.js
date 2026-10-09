@@ -350,10 +350,11 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
   const key=locomotion?'locomotion':`${state}:${state==='attack'?combo:state==='skill'?skill:0}`;
   const restarted=!locomotion && phase<motion.phase-.2;
   if(motion.key!==null && (key!==motion.key||restarted)) {
-    if(['tang-dao','ring-dao'].includes(rig.weaponId)){
+    if(['tang-dao','great-dao'].includes(rig.weaponId)){
       rig.group.updateMatrixWorld(true);
       const groupQ=rig.group.getWorldQuaternion(new THREE.Quaternion());
       motion.shaftFrom={point:rig.group.worldToLocal(rig.arms[1].wrist.getWorldPosition(new THREE.Vector3())),quaternion:groupQ.invert().multiply(rig.arms[1].wrist.getWorldQuaternion(new THREE.Quaternion()))};
+      if(rig.weaponId==='great-dao')motion.feetFrom=rig.legs.map(leg=>rig.group.worldToLocal(leg.foot.getWorldPosition(new THREE.Vector3())));
     }
     rig.bind.forEach(({node},i)=>{motion.from[i].p.copy(node.position);motion.from[i].q.copy(node.quaternion);motion.from[i].s.copy(node.scale);});
     motion.elapsed=0;
@@ -536,7 +537,12 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
   let blend=transition&&!immediate?smooth(motion.elapsed/motion.duration):1;
   if((state==='attack'||state==='skill')&&p>=.32)blend=1;
   rig.reviewedShaftBlend=null;
-  if(blend<1&&['tang-dao','ring-dao'].includes(rig.weaponId)&&motion.shaftFrom){
+  let blendedFeet;
+  if(blend<1&&rig.weaponId==='great-dao'&&motion.feetFrom&&!['roll','dead'].includes(state)){
+    rig.group.updateMatrixWorld(true);
+    blendedFeet=rig.legs.map((leg,i)=>motion.feetFrom[i].clone().lerp(rig.group.worldToLocal(leg.foot.getWorldPosition(new THREE.Vector3())),blend));
+  }
+  if(blend<1&&['tang-dao','great-dao'].includes(rig.weaponId)&&motion.shaftFrom){
     rig.group.updateMatrixWorld(true);
     const groupQ=rig.group.getWorldQuaternion(new THREE.Quaternion());
     const point=rig.group.worldToLocal(rig.arms[1].wrist.getWorldPosition(new THREE.Vector3()));
@@ -550,6 +556,14 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
     node.scale.lerpVectors(motion.from[i].s,node.scale,blend);
   });
   if(blend<1)reconcileWeaponGrip(rig);
+  if(blendedFeet){
+    // Blend ankle targets, then solve the leg chains. Blending the knee and
+    // hip rotations independently can drive a heavy landing below the floor.
+    for(let i=0;i<legs.length;i++){
+      const foot=blendedFeet[i];
+      plantIdleFoot(rig,legs[i],1,foot.z,Math.max(.075,foot.y),foot.x);
+    }
+  }
   for(const part of motion.secondary){
     if(!locomotion&&delta>0){
       part.vx=clamp((part.node.rotation.x-part.x)/delta,-1.4,1.4);

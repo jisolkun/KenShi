@@ -40,7 +40,7 @@ function interpolate(keys,p,field) {
  const a=keys[i],b=keys[i+1],dt=b.p-a.p,t=THREE.MathUtils.clamp((p-a.p)/dt,0,1);
  const av=a[field],bv=b[field];
  const tangent=j=>{
-  if(j===0||j===keys.length-1)return av.map(()=>0);
+  if(j===0||j===keys.length-1||keys[j].stop)return av.map(()=>0);
   const before=keys[j-1],after=keys[j+1];
   return after[field].map((x,k)=>(x-before[field][k])/(after.p-before.p));
  };
@@ -126,7 +126,7 @@ function build(spec,tracks) {
    }
   }
   // Recover the original low blade orientation by the shortest final roll.
-  const last=bases[i][N],target=new THREE.Quaternion().fromArray(spec.initialHands[i].quaternion);
+  const last=bases[i][N],target=new THREE.Quaternion().fromArray((spec.finalHands??spec.initialHands)[i].quaternion);
   const edge=v([1,0,0]).applyQuaternion(target);let final=Math.atan2(edge.dot(v([0,0,1]).applyQuaternion(last)),edge.dot(v([1,0,0]).applyQuaternion(last)));
   while(final-previous>Math.PI)final-=Math.PI*2;while(final-previous<-Math.PI)final+=Math.PI*2;
   anchors.push({p:1,values:[final]});

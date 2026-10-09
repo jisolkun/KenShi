@@ -16,9 +16,9 @@ const assertFinite = (rig, label) => {
 const signature = rig => [rig.body, rig.chest, ...rig.arms.flatMap(a => [a.shoulder, a.elbow, a.wrist])]
   .flatMap(n => [...n.position, ...n.quaternion]).map(n => n.toFixed(5)).join(',');
 
-test('two weapon types expose eight valid basic attack contact windows', () => {
-  assert.equal(WEAPONS.length, 2);
-  assert.equal(new Set(WEAPONS.map(w => w.id)).size, 2);
+test('three weapon types expose twelve valid basic attack contact windows', () => {
+  assert.equal(WEAPONS.length, 3);
+  assert.equal(new Set(WEAPONS.map(w => w.id)).size, 3);
   const shapes = new Set(['arc', 'thrust', 'crush', 'radial', 'chain', 'hook']);
   for (const weapon of WEAPONS) {
     assert.equal(getWeapon(weapon.id), weapon);
@@ -49,7 +49,7 @@ test('each weapon has distinct sampled four-hit choreography and bounded new fin
     assert.equal(new Set(hits).size, 4, `${weapon.id}: four distinct contacts`);
     weaponSignatures.add(hits.join('|'));
   }
-  assert.equal(weaponSignatures.size, 2);
+  assert.equal(weaponSignatures.size, 3);
 });
 
 test('all equipped poses and four basic attacks keep finite body and tip transforms', () => {
@@ -162,9 +162,9 @@ test('new weapon carries breathe, follow gait and let the free hand counterbalan
 });
 
 
-test('only the two basic attack weapon types are available to choose', () => {
-  assert.deepEqual([...UNLOCKED_WEAPON_IDS], ['dual-dao', 'tang-dao']);
-  assert.equal(WEAPONS.filter(w => isWeaponUnlocked(w.id)).length, 2);
+test('the three basic attack weapon types are available to choose', () => {
+  assert.deepEqual([...UNLOCKED_WEAPON_IDS], ['dual-dao', 'tang-dao', 'great-dao']);
+  assert.equal(WEAPONS.filter(w => isWeaponUnlocked(w.id)).length, 3);
   assert.equal(isWeaponUnlocked('unknown'), false);
   assert.equal(isWeaponUnlocked('ring-dao'), false);
 });
@@ -179,7 +179,7 @@ test('dual dao uses the original attack timings and bypasses the replacement reg
 });
 
 test('removed catalogue ids normalize to the default type and active skill registry is empty', () => {
-  assert.deepEqual(WEAPONS.map(weapon => weapon.name), ['双刀', '砍刀']);
+  assert.deepEqual(WEAPONS.map(weapon => weapon.name), ['双刀', '砍刀', '大刀']);
   for (const id of ['yanling-dao', 'miao-dao', 'ring-dao', 'war-hammer', 'unknown']) {
     assert.equal(getWeapon(id), getWeapon(DEFAULT_WEAPON_ID), `${id}: normalize old save`);
     assert.equal(isWeaponUnlocked(id), false, `${id}: unavailable`);

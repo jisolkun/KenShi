@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { animateWeaponParts } from './weaponModels.js';
 import { sampleTangReady, TANG_GRIP } from './choreography/tangDao.js';
+import { sampleGreatReady, GREAT_GRIP } from './choreography/greatDao.js';
 import { constrainPairedGrip } from './choreography/trajectory.js';
 import { sampleReviewedAttack } from './choreography/index.js';
 export { getReviewedAttack, sampleReviewedAttack } from './choreography/index.js';
@@ -11,6 +12,7 @@ export { getReviewedAttack, sampleReviewedAttack } from './choreography/index.js
 export const WEAPON_COMBOS = {
  'dual-dao': [[-.8,.5,.8,-.5,.1,.3,.6],[-1,-.7,-.7,-.6,.2,-.3,-.65],[-1.05,.1,.3,-.4,-.2,.1,.2],[-.9,1,.9,-.3,.3,.5,1]],
  'tang-dao': [[-.9,.7,.7,-.3,-.1,.2,.55],[-1.1,-.5,-.6,-.45,.2,-.2,-.5],[-1.5,0,.1,-.12,.05,0,.08],[-1.05,.1,.12,-.25,.3,.1,.2]],
+ 'great-dao': [[-.9,.7,.7,-.3,-.1,.2,.55],[-1.1,-.5,-.6,-.45,.2,-.2,-.5],[-1.5,0,.1,-.12,.05,0,.08],[-1.05,.1,.12,-.25,.3,.1,.2]],
 };
 const clamp = THREE.MathUtils.clamp;
 const ease = t => { t=clamp(t,0,1); return t*t*(3-2*t); };
@@ -57,10 +59,11 @@ function supportHand(rig) {
 export function applyWeaponPose(rig, pose, plantFoot) {
  if(rig.type!=='hero'||!WEAPON_COMBOS[rig.weaponId])return;
  const {state,time=0}=pose;
- if(rig.weaponId==='tang-dao'&&state==='attack'){
+ if(['tang-dao','great-dao'].includes(rig.weaponId)&&state==='attack'){
   applyReviewedMotion(rig,pose,plantFoot);
- } else if(rig.weaponId==='tang-dao'&&['idle','guard','run','walk'].includes(state)){
-  applyReviewedMotion(rig,pose,plantFoot,sampleTangReady(pose.idleClock??time));
+ } else if(['tang-dao','great-dao'].includes(rig.weaponId)&&['idle','guard','run','walk'].includes(state)){
+  const ready=rig.weaponId==='great-dao'?sampleGreatReady:sampleTangReady;
+  applyReviewedMotion(rig,pose,plantFoot,ready(pose.idleClock??time));
  }
  animateWeaponParts(rig,pose);
 }
@@ -68,12 +71,13 @@ export function applyWeaponPose(rig, pose, plantFoot) {
 function applyReviewedMotion(rig,pose,plantFoot,readySample=null) {
  const sample=readySample??sampleReviewedAttack(rig.weaponId,pose.combo,pose.phase,pose.state);
  const {yaw,load,advance}=sample.stance;
+ const grip=rig.weaponId==='great-dao'?GREAT_GRIP:TANG_GRIP;
  const armMode='tang';
  for(const arm of rig.arms){
   arm.weapon.rotation.set(0,0,0);
   // Protract the shoulder girdle for the authored grip, so the bent
   // forearms pass in front of the breastplates instead of through them.
-  arm.shoulder.position.z=TANG_GRIP.shoulderForward;
+  arm.shoulder.position.z=grip.shoulderForward;
  }
  if(readySample){
   // The character already supplies breathing, weight shifts and a distance-
@@ -112,7 +116,7 @@ function applyReviewedMotion(rig,pose,plantFoot,readySample=null) {
   const u=(((pose.gaitPhase??0)/(Math.PI*2)+(leg.side===-1?.5:0))%1+1)%1;
   const swing=clamp((u-stance)/(1-stance),0,1);
   const stride=u<stance?.19*(1-2*u/stance):THREE.MathUtils.lerp(-.19,.19,ease(swing));
-  const compact=rig.weaponId==='tang-dao',authored=sample.stance.feet?.[leg.side===-1?0:1];
+  const compact=true,authored=sample.stance.feet?.[leg.side===-1?0:1];
   const z=THREE.MathUtils.lerp(authored?.z??(leg.side===-1?(compact?.10:.16):(compact?-.07:-.12)),.026+stride,carry);
   const y=THREE.MathUtils.lerp(authored?.y??.075,.075+Math.sin(Math.PI*swing)*.10,carry);
   const x=authored?.x??leg.side*(compact?.16:.19);
@@ -129,20 +133,21 @@ function applyReviewedMotion(rig,pose,plantFoot,readySample=null) {
 // the blended shaft into both arm chains during a state change.
 export function reconcileWeaponGrip(rig) {
  if(rig.type!=='hero'||!rig.offhandGrip)return;
- if(rig.weaponId!=='tang-dao'||!rig.reviewedAttackSample){supportHand(rig);return;}
+ if(!['tang-dao','great-dao'].includes(rig.weaponId)||!rig.reviewedAttackSample){supportHand(rig);return;}
+ const grip=rig.weaponId==='great-dao'?GREAT_GRIP:TANG_GRIP;
  // During a state blend preserve the actual primary wrist and shaft plane.
  // Only move that shaft if its support marker falls outside the left reach.
  rig.group.updateMatrixWorld(true);
  const desired=rig.reviewedShaftBlend?.quaternion.clone()??rig.arms[1].wrist.getWorldQuaternion(new THREE.Quaternion());
  if(rig.reviewedShaftBlend){
   const primary=rig.chest.worldToLocal(rig.reviewedShaftBlend.point.clone());
-  if(rig.weaponId==='tang-dao'){
+  if(grip.handClearance){
    // A blended shaft can put the support fist back through the chest even
    // when both endpoint poses are clear. Apply the same volume/reach guard.
    const localQ=rig.chest.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(desired);
-   constrainPairedGrip(primary,down.clone().applyQuaternion(localQ),TANG_GRIP);
+   constrainPairedGrip(primary,down.clone().applyQuaternion(localQ),grip);
   }
-  solveArm(rig,rig.arms[1],primary,desired.clone(),rig.weaponId==='tang-dao'?'tang':true);
+  solveArm(rig,rig.arms[1],primary,desired.clone(),'tang');
   rig.group.updateMatrixWorld(true);
  }
  const target=rig.chest.worldToLocal(rig.offhandGrip.getWorldPosition(new THREE.Vector3()));
@@ -150,8 +155,8 @@ export function reconcileWeaponGrip(rig) {
  if(delta.length()>.549){
   const correction=shoulder.clone().add(delta.setLength(.549)).sub(target);
   const primary=rig.chest.worldToLocal(rig.arms[1].wrist.getWorldPosition(new THREE.Vector3())).add(correction);
-  solveArm(rig,rig.arms[1],primary,desired.clone(),rig.weaponId==='tang-dao'?'tang':true);
+  solveArm(rig,rig.arms[1],primary,desired.clone(),'tang');
   rig.group.updateMatrixWorld(true);
  }
- solveArm(rig,rig.arms[0],rig.chest.worldToLocal(rig.offhandGrip.getWorldPosition(new THREE.Vector3())),desired,rig.weaponId==='tang-dao'?'tang':true);
+ solveArm(rig,rig.arms[0],rig.chest.worldToLocal(rig.offhandGrip.getWorldPosition(new THREE.Vector3())),desired,'tang');
 }

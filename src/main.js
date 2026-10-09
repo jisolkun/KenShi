@@ -9,6 +9,8 @@ import { WEAPONS, getWeapon, DEFAULT_WEAPON_ID, isWeaponUnlocked } from "./weapo
 import { createWeaponEffects } from "./weaponEffects.js";
 import { weaponStrikeContains, bladeSweepContains } from "./weaponCombat.js";
 import { getReviewedAttack, sampleReviewedAttack } from "./choreography/index.js";
+import { isCombatTarget, attackDistances, chooseAttackTarget, attackCanTrack,
+  attackRecoveryPhase, attackChainPhase, segmentClear, planObstaclePath, projectWalkablePoint } from "./heroAI.js";
 import "./style.css";
 
 const app = document.querySelector("#app") || document.body;
@@ -143,6 +145,9 @@ const hero = {
   maxHp: 120,
   stamina: 100,
   target: null,
+  attackTarget: null,
+  navigation: null,
+  attackEndRendered: false,
   destination: null,
   disengage: 0,
   rollDirection: new THREE.Vector3(),
@@ -275,6 +280,7 @@ function locomotion(
   distance = Infinity,
   maxSpeed = 5.8,
   stoppingDistance = 0,
+  turn = true,
 ) {
   const remaining = Math.max(0, distance - stoppingDistance);
   const desired = direction?.clone().normalize() || new THREE.Vector3();
@@ -290,7 +296,7 @@ function locomotion(
     hero.moveVelocity.copy(displacement).multiplyScalar(dt > 0 ? 1 / dt : 0);
   }
   hero.pos.add(displacement);
-  if (direction && direction.lengthSq() > 0.1) {
+  if (turn && direction && direction.lengthSq() > 0.1) {
     const desiredAngle = Math.atan2(direction.x, direction.z);
     const delta = Math.atan2(
       Math.sin(desiredAngle - hero.angle),
@@ -304,11 +310,42 @@ function locomotion(
     face(direction, 1 - Math.exp(-dt * 24));
   } else hero.turnLean *= Math.exp(-dt * 12);
 }
+function routedMovement(destination, stoppingDistance = 0, command = "ground") {
+  const delta = destination.clone().sub(hero.pos);
+  const distance = delta.length();
+  const direction = delta.clone().normalize();
+  const direct = { direction, distance, stoppingDistance };
+  if (distance <= stoppingDistance) return direct;
+  const endpoint = destination.clone().addScaledVector(direction, -stoppingDistance);
+  clampPosition(endpoint);
+  const endpointDelta = endpoint.clone().sub(hero.pos);
+  const obstacles = world.obstacles || [];
+  if (segmentClear(hero.pos, endpoint, obstacles, .5)) {
+    hero.navigation = null;
+    return { direction: endpointDelta.clone().normalize(), distance: endpointDelta.length(), stoppingDistance: 0 };
+  }
+  let navigation = hero.navigation;
+  if (!navigation || navigation.command !== command ||
+    navigation.endpoint.distanceTo(endpoint) > .35 ||
+    (!navigation.path.length && globalTime >= navigation.retryAt) ||
+    (navigation.path.length && !segmentClear(hero.pos, navigation.path[0], obstacles, .5))) {
+    navigation = hero.navigation = { command, endpoint: endpoint.clone(),
+      path: planObstaclePath(hero.pos, endpoint, obstacles, .5, world.bounds), retryAt: globalTime + .35 };
+  }
+  while (navigation.path.length > 1 &&
+    Math.hypot(navigation.path[0].x - hero.pos.x, navigation.path[0].z - hero.pos.z) < .1 &&
+    segmentClear(hero.pos, navigation.path[1], obstacles, .5)) navigation.path.shift();
+  const waypoint = navigation.path[0];
+  if (!waypoint) return null;
+  const detour = new THREE.Vector3(waypoint.x - hero.pos.x, 0, waypoint.z - hero.pos.z);
+  return { direction: detour.clone().normalize(), distance: detour.length(), stoppingDistance: 0 };
+}
 function movementGoal() {
   const keyboard = keyboardDirection();
   if (keyboard.lengthSq() > 0) {
     hero.destination = null;
     hero.target = null;
+    hero.navigation = null;
     destinationMarker.visible = false;
     targetMarker.visible = false;
     return { direction: keyboard, distance: Infinity, stoppingDistance: 0 };
@@ -323,19 +360,13 @@ function movementGoal() {
       destinationMarker.visible = false;
       return null;
     }
-    return { direction: delta.normalize(), distance, stoppingDistance: 0 };
+    return routedMovement(hero.destination);
   }
-  if (hero.target && hero.target.state !== "dead") {
-    const delta = hero.target.pos.clone().sub(hero.pos);
-    const distance = delta.length();
-    return {
-      direction: delta.normalize(),
-      distance,
-      stoppingDistance: Math.max(
-        0.7,
-        getReviewedAttack(currentWeapon.id,hero.combo)?attackRanges[hero.combo]*.8+hero.target.radius*.35:attackRanges[hero.combo] + hero.target.radius - 0.38,
-      ),
-    };
+  if (isCombatTarget(hero.target, enemies)) {
+    const range = attackDistances(currentWeapon.moves[hero.combo], hero.target.radius,
+      !!getReviewedAttack(currentWeapon.id, hero.combo));
+    const stoppingDistance = segmentClear(hero.pos, hero.target.pos, world.obstacles) ? range.stop : 0;
+    return routedMovement(hero.target.pos, stoppingDistance, `target:${hero.target.id}`);
   }
   return null;
 }
@@ -343,23 +374,9 @@ function locomotionState() {
   hero.state = hero.moveVelocity.length() > 0.12 ? "run" : "idle";
 }
 function clampPosition(pos, radius = 0.5) {
-  const b = world.bounds;
-  pos.x = THREE.MathUtils.clamp(pos.x, b.minX + radius, b.maxX - radius);
-  pos.z = THREE.MathUtils.clamp(pos.z, b.minZ + radius, b.maxZ - radius);
-  for (const o of world.obstacles || []) {
-    const dx = pos.x - o.x,
-      dz = pos.z - o.z,
-      d = Math.hypot(dx, dz),
-      r = o.radius + radius;
-    if (d < r) {
-      if (d < 0.001) {
-        pos.x += r;
-      } else {
-        pos.x = o.x + (dx / d) * r;
-        pos.z = o.z + (dz / d) * r;
-      }
-    }
-  }
+  const projected = projectWalkablePoint(pos, world.obstacles, radius, world.bounds);
+  pos.x = projected.x;
+  pos.z = projected.z;
   pos.y = 0;
 }
 function move(position, direction, speed, dt, radius = 0.5) {
@@ -471,6 +488,9 @@ function stateSnapshot() {
       combo: hero.combo,
       speed: hero.moveVelocity.length(),
       velocity: { x: hero.moveVelocity.x, z: hero.moveVelocity.z },
+      angle: hero.angle,
+      target: hero.target?.id ?? null,
+      attackTarget: hero.attackTarget?.id ?? null,
       gait: hero.gaitPhase,
       transition: { ...hero.transition },
     },
@@ -560,7 +580,7 @@ function selectWeapon(id = currentWeapon.id, preview = true) {
   hero.previewContact = -1;
   fx.clear();
   weaponFx.clear();
-  const width = currentWeapon.stats.power >= 4 ? 1.1 : 0.7;
+  const width = currentWeapon.id === "great-dao" ? 1.35 : currentWeapon.stats.power >= 4 ? 1.1 : 0.7;
   for (const trail of trails) {
     trail.color = new THREE.Color(currentWeapon.effectColor);
     trail.coreColor = new THREE.Color(currentWeapon.effectAccent);
@@ -598,6 +618,8 @@ function chooseWeapon(id = currentWeapon.id) {
   hero.elapsed = 0;
   hero.duration = 0;
   hero.target = null;
+  hero.attackTarget = null;
+  hero.navigation = null;
   hero.destination = null;
   hero.velocity.set(0, 0, 0);
   hero.moveVelocity.set(0, 0, 0);
@@ -664,6 +686,8 @@ function startGame(weaponId = currentWeapon.id) {
   hero.invulnerable = 1.3;
   hero.flash = 0;
   hero.target = null;
+  hero.attackTarget = null;
+  hero.navigation = null;
   hero.destination = null;
   hero.disengage = 0;
   hero.velocity.set(0, 0, 0);
@@ -866,13 +890,21 @@ function beginAttack(enemy) {
   hero.strokeContacts.clear();
   hero.trailSeries++;
   hero.globalImpactDone = false;
+  hero.attackEndRendered = false;
   hero.attackCarry = hero.destination
     ? Math.min(1, hero.moveVelocity.length() / 5.8)
     : 0;
   if(getReviewedAttack(currentWeapon.id,hero.combo))hero.attackCarry=Math.min(1,hero.moveVelocity.length()/5.8);
   hero.attackTarget = enemy;
-  if (!hero.destination) hero.target = enemy;
+  if (isCombatTarget(enemy, enemies)) face(enemy.pos.clone().sub(hero.pos));
   destinationMarker.visible = !!hero.destination;
+}
+function heroAttackCandidate(previousTarget = hero.attackTarget) {
+  return chooseAttackTarget({ position: hero.pos, enemies, manualTarget: hero.target,
+    previousTarget, move: currentWeapon.moves[hero.combo],
+    reviewed: !!getReviewedAttack(currentWeapon.id, hero.combo),
+    moving: !!hero.destination || keyboardDirection().lengthSq() > 0,
+    disengage: hero.disengage, cooldown: hero.nextAttackIn, obstacles: world.obstacles });
 }
 function hurtEnemy(
   e,
@@ -913,12 +945,13 @@ function hurtEnemy(
   combo++;
   comboTimeout = 3;
   if (playerContact || e.pos.distanceTo(hero.pos) < 6)
-    kickCamera(hitDirection, (critical ? 0.075 : 0.035) * (playerContact ? 0.7 + currentWeapon.stats.power * 0.12 : 1));
+    kickCamera(hitDirection, (critical ? 0.075 : 0.035) * (playerContact ? 0.7 + currentWeapon.stats.power * 0.12 : 1) *
+      (playerContact && currentWeapon.id === "great-dao" && hero.combo === 3 ? 1.2 : 1));
   const isPlayerContact = playerContact && hero.state === "attack";
   if (isPlayerContact && !hero.impactDone) {
     hero.impactDone = true;
     const contactStop = currentWeapon.moves[hero.combo].hitstop;
-    hero.localHitStop = Math.min(0.08, contactStop * (critical ? 1.2 : 1));
+    hero.localHitStop = Math.min(currentWeapon.id === "great-dao" ? .11 : .08, contactStop * (critical ? 1.2 : 1));
   }
   if (
     playerContact &&
@@ -927,7 +960,7 @@ function hurtEnemy(
     !hero.globalImpactDone
   ) {
     hero.globalImpactDone = true;
-    hitStop = Math.max(hitStop, 0.025);
+    hitStop = Math.max(hitStop, currentWeapon.id === "great-dao" ? .035 : .025);
   }
   if (playerContact) safeAudio("weaponHit", currentWeapon.id, critical ? 1.5 : 0.75, hero.combo);
   else safeAudio("hit", critical ? 1.5 : 0.75, hero.combo);
@@ -945,7 +978,7 @@ function hurtEnemy(
       slowTime = 0.24;
       slowScale = 0.5;
     }
-    if (hero.target === e) hero.target = null;
+    if (hero.target === e) { hero.target = null; hero.navigation = null; }
     return true;
   }
   if (e.type === "boss") {
@@ -1080,13 +1113,15 @@ function commandTap(position, enemy = null) {
     ? position.clone()
     : new THREE.Vector3(position.x, 0, position.z);
   clampPosition(p);
-  hero.target = enemy && enemy.state !== "dead" ? enemy : null;
+  hero.target = isCombatTarget(enemy, enemies) ? enemy : null;
   hero.destination = hero.target ? null : p;
+  hero.navigation = null;
   hero.disengage = hero.target ? 0 : 0.12;
   if (
     hero.state === "attack" &&
     hero.hitDone &&
-    hero.elapsed / hero.duration >= 0.66
+    hero.elapsed / hero.duration >= attackRecoveryPhase(currentWeapon.moves[hero.combo],
+      getReviewedAttack(currentWeapon.id, hero.combo))
   ) {
     hero.combo = (hero.combo + 1) % 4;
     hero.comboTimer = 0;
@@ -1129,6 +1164,8 @@ function roll(direction) {
   hero.destination = null;
   hero.disengage = 0.65;
   hero.target = null;
+  hero.attackTarget = null;
+  hero.navigation = null;
   targetMarker.visible = false;
   hero.combo = 0;
   destinationMarker.visible = false;
@@ -1152,7 +1189,12 @@ function updateHero(frameDt) {
   if (hero.comboTimer > 1.8 && hero.state !== "attack") hero.combo = 0;
   hero.velocity.multiplyScalar(Math.exp(-dt * 10));
   hero.pos.addScaledVector(hero.velocity, dt);
-  if (hero.target?.state === "dead") hero.target = null;
+  if (hero.target && !isCombatTarget(hero.target, enemies)) {
+    hero.target = null;
+    hero.navigation = null;
+    targetMarker.visible = false;
+  }
+  if (hero.attackTarget && !isCombatTarget(hero.attackTarget, enemies)) hero.attackTarget = null;
   const maxSpeed = 5.8 * (0.88 + currentWeapon.stats.speed * 0.024);
   function navigate() {
     const goal = movementGoal();
@@ -1181,16 +1223,27 @@ function updateHero(frameDt) {
   } else if (hero.state === "attack") {
     const phase = hero.elapsed / hero.duration;
     const move = currentWeapon.moves[hero.combo];
-    const travelling = !!hero.destination || keyboardDirection().lengthSq() > 0;
+    const action = getReviewedAttack(currentWeapon.id, hero.combo);
+    const canTrack = attackCanTrack(phase, move, action);
+    const leaving = !!hero.destination || keyboardDirection().lengthSq() > 0;
+    const passing = isCombatTarget(hero.target, enemies) && hero.attackTarget !== hero.target &&
+      hero.pos.distanceTo(hero.target.pos) > attackDistances(move, hero.target.radius, !!action).stop;
+    const travelling = leaving || passing;
+    if (!hero.attackTarget && phase < move.active[0]) hero.attackTarget = heroAttackCandidate(null);
+    if (!travelling && canTrack && isCombatTarget(hero.attackTarget, enemies))
+      face(hero.attackTarget.pos.clone().sub(hero.pos), 1 - Math.exp(-dt * 24));
     if (travelling) {
       const goal = movementGoal();
-      const carry = phase < 0.35 ? 0.75 : phase < 0.66 ? 0.43 : 1;
+      const carry = currentWeapon.id === "great-dao"
+        ? phase < .3 ? .38 : phase < attackRecoveryPhase(move, action) ? .22 : .85
+        : phase < 0.35 ? 0.75 : phase < 0.66 ? 0.43 : 1;
       locomotion(
         dt,
         goal?.direction,
         goal?.distance ?? Infinity,
         maxSpeed * carry,
-        0,
+        goal?.stoppingDistance || 0,
+        canTrack,
       );
       hero.attackCarry = THREE.MathUtils.clamp(
         hero.moveVelocity.length() / maxSpeed,
@@ -1198,49 +1251,44 @@ function updateHero(frameDt) {
         1,
       );
     } else if (
-      hero.attackTarget &&
-      hero.attackTarget.state !== "dead" &&
+      isCombatTarget(hero.attackTarget, enemies) &&
       phase < move.contact + 0.12
     ) {
-      if(getReviewedAttack(currentWeapon.id,hero.combo)){
+      if(action){
         locomotion(dt,null);
         hero.attackCarry=THREE.MathUtils.clamp(hero.moveVelocity.length()/maxSpeed,0,1);
       } else {
-      const direction = hero.attackTarget.pos.clone().sub(hero.pos),
-        distance = direction.length();
-      locomotion(
-        dt,
-        direction.normalize(),
-        distance,
-        THREE.MathUtils.clamp(move.lunge / (move.duration * move.contact), 1.2, 4.8),
-        Math.max(0.65, move.reach * 0.66 + hero.attackTarget.radius * 0.35),
-      );
-      hero.attackCarry = 0;
+        const direction = hero.attackTarget.pos.clone().sub(hero.pos),
+          distance = direction.length();
+        locomotion(
+          dt,
+          direction.normalize(),
+          distance,
+          THREE.MathUtils.clamp(move.lunge / (move.duration * move.contact), 1.2, 4.8),
+          attackDistances(move, hero.attackTarget.radius).stop,
+          canTrack,
+        );
+        hero.attackCarry = 0;
       }
     } else locomotion(dt, null);
     const window = attackWindows[hero.combo];
     if (
       dt > 0 &&
-      !getReviewedAttack(currentWeapon.id,hero.combo) && phase >= attackContacts[hero.combo] &&
+      !action && phase >= attackContacts[hero.combo] &&
       previousPhase < window[1]
     )
       attackHit(Math.min(phase, window[1]));
-    if (travelling && hero.hitDone && phase >= (getReviewedAttack(currentWeapon.id,hero.combo)?Math.max(.66,window[1]+.08):.66)) {
+    if (leaving && hero.hitDone && phase >= attackRecoveryPhase(move, action)) {
       hero.combo = (hero.combo + 1) % 4;
       hero.comboTimer = 0;
       hero.nextAttackIn = 0.12;
       locomotionState();
-    } else if (phase >= (hero.combo === 3 ? 0.96 : 0.9)) {
+    } else if (phase >= attackChainPhase(currentWeapon.id, hero.combo) &&
+      (currentWeapon.id !== "great-dao" || hero.attackEndRendered)) {
       hero.combo = (hero.combo + 1) % 4;
       hero.comboTimer = 0;
-      const next =
-        hero.target || nearestEnemy(hero.pos, attackRanges[hero.combo] + 1);
-      if (
-        next &&
-        hero.pos.distanceTo(next.pos) <
-          (getReviewedAttack(currentWeapon.id,hero.combo)?attackRanges[hero.combo]*.8+next.radius*.35+.1:attackRanges[hero.combo] + next.radius + 0.35)
-      )
-        beginAttack(next);
+      const next = heroAttackCandidate();
+      if (next) beginAttack(next);
       else navigate();
     }
   } else if (hero.state === "hurt" || hero.state === "dead") {
@@ -1249,16 +1297,9 @@ function updateHero(frameDt) {
     if (hero.state === "dead" && hero.elapsed >= hero.duration)
       finishGame(false);
   } else {
-    const enemy = hero.target || nearestEnemy(hero.pos, attackRanges[hero.combo] + 0.8);
-    if (
-      enemy &&
-      hero.pos.distanceTo(enemy.pos) <
-        (getReviewedAttack(currentWeapon.id,hero.combo)?attackRanges[hero.combo]*.8+enemy.radius*.35+.1:attackRanges[hero.combo] + enemy.radius - 0.12) &&
-      hero.disengage <= 0 &&
-      hero.nextAttackIn <= 0
-    ) {
-      beginAttack(enemy);
-    } else navigate();
+    const enemy = heroAttackCandidate();
+    if (enemy) beginAttack(enemy);
+    else navigate();
   }
   clampPosition(hero.pos);
   const reviewedMotion = getReviewedAttack(currentWeapon.id,
@@ -2031,6 +2072,8 @@ function animate(now) {
     uiClock = 0;
   }
   renderer.render(scene, camera);
+  if (mode === "playing" && hero.state === "attack" && hero.elapsed >= hero.duration)
+    hero.attackEndRendered = true;
 }
 resizeCamera();
 updateCamera(1);

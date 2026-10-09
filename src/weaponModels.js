@@ -8,12 +8,17 @@ const cached = (key, create) => { if (!cache.has(key)) cache.set(key, create());
 const box = cached('box', () => new THREE.BoxGeometry(1,1,1));
 const rod = cached('rod', () => new THREE.CylinderGeometry(1,1,1,6));
 const ring = cached('ring', () => new THREE.TorusGeometry(1,.17,4,12));
-function polygon(key, points) {
-  return cached(key, () => { const s=new THREE.Shape(); points.forEach(([x,y],i)=>i?s.lineTo(x,y):s.moveTo(x,y)); s.closePath(); return new THREE.ExtrudeGeometry(s,{depth:.035,bevelEnabled:false,steps:1,curveSegments:1}); });
+function polygon(key, points, depth=.035) {
+  return cached(key, () => { const s=new THREE.Shape(); points.forEach(([x,y],i)=>i?s.lineTo(x,y):s.moveTo(x,y)); s.closePath(); return new THREE.ExtrudeGeometry(s,{depth,bevelEnabled:false,steps:1,curveSegments:1}); });
 }
 // Straight spine on -X, sharpened edge on +X, with an oblique dao point.
 const tangBlade=polygon('tang-single-edge',[[-.065,0],[.055,0],[.055,-.88],[-.035,-1],[-.065,-.94]]);
 const dao = polygon('dao', [[-.07,0],[.09,0],[.14,-.58],[.08,-.88],[-.04,-1],[-.07,-.72]]);
+// The wide forward belly and thick spine give the great dao visible mass.
+// Its one terminal point is on the blade frame's centerline: mount -.1 + tip -1.38.
+const greatDao = polygon('great-dao', [[-.10,0],[.12,0],[.20,-.32],[.28,-.88],[.23,-1.13],[0,-1.38],[-.16,-1.14],[-.17,-.72],[-.12,-.20]], .085);
+const greatDaoEdge = polygon('great-dao-edge', [[.08,-.04],[.12,-.04],[.20,-.32],[.28,-.88],[.23,-1.13],[0,-1.38],[.18,-1.10],[.22,-.85],[.15,-.33]], .009);
+const greatDaoSpine = polygon('great-dao-spine', [[-.10,-.015],[-.065,-.015],[-.075,-.21],[-.115,-.73],[-.11,-1.09],[-.16,-1.14],[-.17,-.72],[-.12,-.20]], .10);
 function add(root,geo,mat,size=[1,1,1],pos=[0,0,0],rot=[0,0,0]) { const m=new THREE.Mesh(geo,mat);m.scale.set(...size);m.position.set(...pos);m.rotation.set(...rot);m.castShadow=true;root.add(m);return m; }
 function mark(root,y,x=0,z=0) { const n=new THREE.Object3D();n.position.set(x,y,z);root.add(n);return n; }
 function merge(root,key) {
@@ -43,13 +48,27 @@ export function equipWeapon(rig,id) {
         m(rod,'gold',[.048,.035,.048],[0,.435,0]);guard();
         blade(tangBlade,1.25,1);m(box,'edge',[.009,1.10,.008],[.05,-.655,.021]);
         m(ring,'gold',[.055,.055,.055],[0,.46,0]);tip(-1.35);break;
+      case 'great-dao':
+        // Both wrists sit on this continuous hilt, behind a broad copper guard.
+        m(rod,'dark',[.042,.45,.042],[0,.165,0]);
+        for(const y of [.015,.10,.19,.28])m(rod,'gold',[.046,.013,.046],[0,y,0]);
+        m(rod,'gold',[.058,.055,.058],[0,.405,0]);
+        m(box,'gold',[.36,.055,.105],[0,-.075,0]);
+        m(box,'dark',[.15,.075,.10],[0,-.08,0]);
+        m(greatDao,'metal',[1,1,1],[0,-.1,-.0425]);
+        m(greatDaoSpine,'dark',[1,1,1],[0,-.1,-.05]);
+        m(greatDaoEdge,'edge',[1,1,1],[0,-.1,.043]);
+        m(greatDaoEdge,'edge',[1,1,1],[0,-.1,-.052]);
+        // Short, inset fittings stay well behind the physical terminal point.
+        m(box,'gold',[.05,.18,.096],[-.015,-.26,0]);
+        tip(-1.48);break;
     }
-    if(['dual-dao','tang-dao'].includes(id)) {
-      const lengths={'dual-dao':.92,'tang-dao':1.35};
+    if(['dual-dao','tang-dao','great-dao'].includes(id)) {
+      const lengths={'dual-dao':.92,'tang-dao':1.35,'great-dao':1.48};
       const heel=mark(root,-.12),tip=mark(root,-lengths[id],0),edge=mark(root,-lengths[id]*.55,.15),face=mark(root,-lengths[id]*.55,0,.15);
       rig.weaponBladeFrames.push({hand:side,root,heel,tip,edge,face});
     }
-    if(def.grip==='twohand')rig.offhandGrip=mark(root,.209);
+    if(def.grip==='twohand')rig.offhandGrip=mark(root,id==='great-dao'?.249:.209);
     merge(root,`${id}:${side}`);
   }
   rig.swords=rig.arms.map(a=>a.weapon);
@@ -64,5 +83,5 @@ export function equipWeapon(rig,id) {
   return def;
 }
 
-// Both retained weapon types have rigid blades and hilts.
+// Retained weapon types have rigid blades and hilts.
 export function animateWeaponParts() {}

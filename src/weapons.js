@@ -1,7 +1,7 @@
-// Two weapon types share their authored motion and combat timings.
+// Weapon definitions share their authored motion and combat timings.
 import { getReviewedAttack } from './choreography/index.js';
 export const DEFAULT_WEAPON_ID = 'dual-dao';
-export const UNLOCKED_WEAPON_IDS = new Set(['dual-dao', 'tang-dao']);
+export const UNLOCKED_WEAPON_IDS = new Set(['dual-dao', 'tang-dao', 'great-dao']);
 export function isWeaponUnlocked(id) { return UNLOCKED_WEAPON_IDS.has(id); }
 export const WEAPON_TYPES = [
   {
@@ -173,12 +173,26 @@ export const WEAPON_TYPES = [
         "hitstop": 0.052
       }
     ]
+  },
+  {
+    id: 'great-dao', name: '大刀', category: '重兵', grip: 'twohand',
+    tagline: '腰带重刃，踏地破阵',
+    description: '双手挥舞宽厚大刀，踏步转腰接连横扫、斜劈与回身大扫，最后以踏地重劈击退敌阵。蓄势沉稳，出刀迅猛，收势保留刀身惯性。',
+    effectColor: 0xffad55, effectAccent: 0xffe6aa,
+    stats: { speed: 2, power: 5, reach: 5 },
+    moves: [
+      {name:'踏步横扫',damage:32,knockback:.78,hitstop:.055,lunge:.42,recoverAt:.85},
+      {name:'反向斜劈',damage:39,knockback:.96,hitstop:.061,lunge:.45,recoverAt:.86},
+      {name:'回身大扫',damage:46,knockback:1.18,hitstop:.069,lunge:.48,recoverAt:.88},
+      {name:'踏地重劈',damage:70,knockback:1.90,hitstop:.095,lunge:.55,recoverAt:.94},
+    ],
   }
 ];
 export const WEAPONS = WEAPON_TYPES;
 const reviewedMoveNames = {
  'dual-dao':['右斜劈','左接斩','反手撩切','错锋双斩'],
  'tang-dao':['踏步斜斩','转胯横斩','提膝上撩','过顶落劈'],
+ 'great-dao':['踏步横扫','反向斜劈','回身大扫','踏地重劈'],
 };
 const reviewedDescriptions = {
  'tang-dao':'双手长柄直刃，踏步转胯带动斜斩、宽横斩、上撩与过顶落劈，以大幅刀路扫开前方敌阵。',

@@ -24,9 +24,9 @@ function surfaceSamples(geometry) {
   samplesByGeometry.set(geometry, samples);
   return samples;
 }
-function fixture() {
+function fixture(weaponId) {
   const rig = createCharacter('hero');
-  rig.setWeapon('tang-dao');
+  rig.setWeapon(weaponId);
   const obstacles = [...rig.ribcage.children, ...rig.head.children].filter(node => node.isMesh);
   for (const mesh of obstacles) {
     mesh.material = mesh.material.clone();
@@ -63,22 +63,22 @@ function pose(f, args) {
   poseCharacter(f.rig, {dt: 1 / 60, ...args});
   checkClearance(f, `${args.state} ${args.combo ?? 0}, phase ${(args.phase ?? 0).toFixed(4)}, time ${args.time.toFixed(3)}`);
 }
-for (const state of ['idle', 'run']) {
-  test(`Tang both palm and forearm volumes clear torso/head throughout ${state}`, () => {
-    const f = fixture();
+for (const weaponId of ['tang-dao', 'great-dao']) for (const state of ['idle', 'run']) {
+  test(`${weaponId} both palm and forearm volumes clear torso/head throughout ${state}`, () => {
+    const f = fixture(weaponId);
     // Cover a full breathing cycle and several running gait cycles.
     for (let frame = 0; frame <= 240; frame += 2) pose(f, {state, time: frame / 60, speed: state === 'run' ? 1 : 0,
       moveBlend: state === 'run' ? 1 : 0, gaitPhase: frame / 60 * Math.PI * 4, immediate: true, transition: false});
   });
 }
-for (const state of ['attack']) for (let action = 0; action < 4; action++) {
-  test(`Tang ${state} ${action + 1}: fine sampling exposes no hand trajectory seams`, () => {
+for (const weaponId of ['tang-dao', 'great-dao']) for (const state of ['attack']) for (let action = 0; action < 4; action++) {
+  test(`${weaponId} ${state} ${action + 1}: fine sampling exposes no hand trajectory seams`, () => {
     // Normal frame sampling missed a 3.7cm projection jump during a high
     // carry. Cover the whole path finely enough to distinguish fast motion
     // from a positional discontinuity, including between contact windows.
     let previous;
     for (let frame = 0; frame <= 1920; frame++) {
-      const phase = frame / 1920, sample = sampleReviewedAttack('tang-dao', action, phase, state);
+      const phase = frame / 1920, sample = sampleReviewedAttack(weaponId, action, phase, state);
       if (previous) sample.hands.forEach((hand, side) => {
         const distance = new THREE.Vector3(...hand.grip).distanceTo(new THREE.Vector3(...previous.hands[side].grip));
         assert.ok(distance < .01, `hand ${side} jumps ${(distance * 100).toFixed(2)}cm at phase ${phase}`);
@@ -86,17 +86,17 @@ for (const state of ['attack']) for (let action = 0; action < 4; action++) {
       previous = sample;
     }
   });
-  test(`Tang ${state} ${action + 1}: both rendered hands/forearms clear torso/head`, () => {
-    const f = fixture(), spec = getReviewedAttack('tang-dao', action, state);
+  test(`${weaponId} ${state} ${action + 1}: both rendered hands/forearms clear torso/head`, () => {
+    const f = fixture(weaponId), spec = getReviewedAttack(weaponId, action, state);
     const phases = new Set([0, 1, ...spec.contacts.flatMap(c => [c.start, c.phase, c.end])]);
     for (let frame = 0; frame <= Math.ceil(spec.duration * 60); frame++) phases.add(Math.min(1, frame / (spec.duration * 60)));
     for (const phase of [...phases].sort((a, b) => a - b)) pose(f, {state, combo: action, phase,
       time: phase * spec.duration, immediate: true, transition: false});
   });
-  test(`Tang ${state} ${action + 1}: entry and exit blends keep both hands/forearms clear`, () => {
-    const spec = getReviewedAttack('tang-dao', action, state);
+  test(`${weaponId} ${state} ${action + 1}: entry and exit blends keep both hands/forearms clear`, () => {
+    const spec = getReviewedAttack(weaponId, action, state);
     for (const locomotion of ['idle', 'run']) {
-      const f = fixture();
+      const f = fixture(weaponId);
       let time = 0;
       const locomotionArgs = {state: locomotion, speed: locomotion === 'run' ? 1 : 0, moveBlend: locomotion === 'run' ? 1 : 0};
       pose(f, {...locomotionArgs, time, immediate: true});

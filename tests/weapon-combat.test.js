@@ -7,8 +7,8 @@ const moves = WEAPONS.flatMap(weapon => weapon.moves.map((move, index) => ({ wea
 const point = (distance, angle) => [Math.sin(angle) * distance, Math.cos(angle) * distance];
 const strike = (move, distance, targetAngle, facing = 0, radius = 0) => contains(move, ...point(distance, targetAngle), facing, radius);
 
-test('all eight basic attacks hit forward inside their authored reach', () => {
-  assert.equal(moves.length, 8);
+test('all twelve basic attacks hit forward inside their authored reach', () => {
+  assert.equal(moves.length, 12);
   for (const {weapon, move, index} of moves) {
     assert.equal(strike(move, move.reach * .8, 0), true, `${weapon.id}/${index}`);
   }
