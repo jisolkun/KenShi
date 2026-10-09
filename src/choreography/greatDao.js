@@ -34,8 +34,8 @@ const techniques = [
   // through the whole arc. This keeps the edge path broad without detaching
   // the hands from a reachable, two-handed hilt.
   { name:'踏步横扫', kind:'cut', duration:.56, contact:.64, window:[.48,.84], wind:.43, brake:.93,
-    chamber:hand([.20,.31,.38],[.98,.075,.18]), cross:hand([.015,.24,.48],[0,.025,1]),
-    exit:hand([-.22,.18,.39],[-.985,-.08,.15]), turn:[1.12,-1.16], step:0, reach:2.15 },
+    chamber:hand([.20,.36,.38],[.93,.24,-.15]), cross:hand([.015,.27,.48],[0,.08,.997]),
+    exit:hand([-.22,.16,.39],[-.93,-.23,.26]), turn:[1.12,-1.16], step:0, reach:2.15 },
   { name:'反向斜劈', kind:'cut', duration:.52, contact:.64, window:[.48,.85], wind:.43, brake:.93,
     chamber:hand([-.20,.58,.38],[-.84,.51,.18]), cross:hand([.015,.30,.48],[.04,.055,.998]),
     exit:hand([.22,.13,.39],[.94,-.29,.17]), turn:[-1.14,1.18], step:1, reach:2.18 },
