@@ -18,7 +18,7 @@ Chromium生产构建浏览器实战使用普通AI、伤害和渲染，只由调�
 
 界面检查确认三个武器可实际点击选择、选择保存、双刀／砍刀仍会自动造成伤害，版本标识为 `v0.4.0 · 重刃破阵`。独立浏览器实际演武查看蓄势、释放、侧向收刀及重劈高低位；第三式结束与第四式起始的脚位、腰胸和刀尖连续，末式刀尖从约3.04米降至0.13米。844×390下三张类型卡、详情、确认按钮及版本标识均在视口内，无页面溢出或JavaScript运行时错误。软件WebGL和可控时钟验证不代表实体手机帧率，也不证明原版逐帧一致。
 
-`npm run build -- --base=/KenShi/` 通过。游戏脚本 `index-CwZ_JyhQ.js`（701072字节），SHA256为 `29506e0c5338daeeb9419ea34fac4cdc900785ee1cd3bc87fc109350e0951c18`；样式 `index-CLsJ0jA2.css`（33970字节），SHA256为 `9473890e78f90f7f6a7095982090e04f7b0ebf73848f1f246e12747adfb91b3a`。保留既有单包体积提示。本轮发布提交与线上资源核对完成后另行记录。
+`npm run build -- --base=/KenShi/` 通过。游戏脚本 `index-CwZ_JyhQ.js`（701072字节），SHA256为 `29506e0c5338daeeb9419ea34fac4cdc900785ee1cd3bc87fc109350e0951c18`；样式 `index-CLsJ0jA2.css`（33970字节），SHA256为 `9473890e78f90f7f6a7095982090e04f7b0ebf73848f1f246e12747adfb91b3a`。保留既有单包体积提示。发布来源为 `Undead-Slayer2` 的功能提交 `0bd9921eb81decbd716ecbde305f7711602a273f`。[Pages运行37960576115](https://github.com/jisolkun/KenShi/actions/runs/37960576115) 的构建及部署均成功。保留TLS证书验证实际下载 [线上站点](https://jisolkun.github.io/KenShi/) 及全部构建资源；HTML、脚本、样式、manifest、三个图标与favicon共8个文件均返回200且与本地构建逐字节一致。线上传输核对与本地浏览器执行分别完成。
 
 ---
 
