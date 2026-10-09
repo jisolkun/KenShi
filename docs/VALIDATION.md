@@ -12,7 +12,9 @@
 
 已查看生产演武的横扫、反向斜劈、回身大扫、末式高位蓄势与低位收刀画面。844×390横屏下三张类型卡可滚动选择，目录、详情和确认按钮位于视口内，布局流程无JavaScript运行时错误。浏览器使用可控制的动画帧时钟，敌人AI及伤害逻辑保持运行；该验证不等同于实体设备性能测试或原版逐帧还原。
 
-`npm run build -- --base=/KenShi/` 通过。游戏脚本 `index-DTZUZat_.js` 的SHA256为 `8b0591aebff820e617111990c152dbeb7f7486e4805dd6afdc2a5fb7944f4c05`，样式 `index-D8sSRsA-.css` 的SHA256为 `6f49cc0a7b782b7d128a68f96d877d9c0734ea46fb0fcc8420b2c6adcdd0bfce`。构建保留原有单包体积提示；Pages发布核对将在部署完成后记录。
+`npm run build -- --base=/KenShi/` 通过。游戏脚本 `index-DTZUZat_.js` 的SHA256为 `8b0591aebff820e617111990c152dbeb7f7486e4805dd6afdc2a5fb7944f4c05`，样式 `index-D8sSRsA-.css` 的SHA256为 `6f49cc0a7b782b7d128a68f96d877d9c0734ea46fb0fcc8420b2c6adcdd0bfce`。构建保留原有单包体积提示。
+
+发布来源为 `Undead-Slayer2` 的功能提交 `7a3d94835849d80b83738a373b8372eb68b8bfc2`。[Pages运行37926588158](https://github.com/jisolkun/KenShi/actions/runs/37926588158) 的构建及部署均成功。通过保留TLS证书验证的HTTPS实际下载 [线上站点](https://jisolkun.github.io/KenShi/) 及其引用资源，游戏脚本（681234字节）、样式（33563字节）、manifest、180px图标和favicon均与本地生产构建逐字节一致。线上资源核对与本地浏览器执行分别完成，不把传输核对当作实体手机实测。
 
 ---
 

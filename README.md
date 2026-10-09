@@ -71,6 +71,7 @@ node --test tests/*.test.js
 | `src/weaponCombat.js` / `src/weaponEffects.js` | 普攻命中判定与刀光效果 |
 | `src/characters.js` | 角色骨架、步态、接地与类型切换 |
 | `src/main.js` | 类型演示、战斗状态、普攻命中、敌人与关卡循环 |
+| `src/heroAI.js` | 稳定选敌、沿途挥砍、指令优先与障碍绕行 |
 | `src/ui.js` / `src/style.css` | 标题、类型选择、战斗界面与响应式布局 |
 | `src/fullscreen.js` | 手机启动全屏与横屏请求 |
 
