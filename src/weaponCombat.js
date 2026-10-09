@@ -45,3 +45,9 @@ export function bladeSweepContains(frame,previous,target,radius,width=.08) {
   }
   return false;
 }
+
+// A point-first attack only sweeps the physical tip. The already extended
+// shaft must not turn a narrow stab into a wide cutting hit.
+export function bladeThrustContains(frame,previous,target,radius,width=.04) {
+  return segmentDistance(target,previous?.tip??frame.tip,frame.tip)<=radius+width;
+}

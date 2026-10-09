@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { animateWeaponParts } from './weaponModels.js';
 import { sampleTangReady, TANG_GRIP } from './choreography/tangDao.js';
-import { constrainPairedGrip } from './choreography/trajectory.js';
+import { sampleYanlingReady, YANLING_GRIP } from './choreography/yanlingDao.js';
+import { constrainPairedGrip, constrainSingleGrip } from './choreography/trajectory.js';
 import { SKILL_CONTACTS } from './weapons.js';
 import { sampleReviewedAttack } from './choreography/index.js';
 export { getReviewedAttack, sampleReviewedAttack } from './choreography/index.js';
@@ -57,7 +58,7 @@ function solveArm(rig,arm,point,desired,stable=false) {
  const length=target.length(),a=.29,b=.27,d=clamp(length,.035,a+b-.0001),axis=target.clone().normalize();
  // Bend in front of the armour, with enough lateral separation to avoid
  // the pole becoming parallel to a forward reach and flipping the elbow.
- const pole=stable==='tang'?new THREE.Vector3(arm.side*.65,-.20,.8):stable?new THREE.Vector3(arm.side,0,0):new THREE.Vector3(arm.side,-.25,.1);
+ const pole=stable==='tang'||stable==='yanling'?new THREE.Vector3(arm.side*.65,-.20,.8):stable?new THREE.Vector3(arm.side,0,0):new THREE.Vector3(arm.side,-.25,.1);
  pole.addScaledVector(axis,-pole.dot(axis)).normalize();
  const along=(a*a+d*d-b*b)/(2*d),height=Math.sqrt(Math.max(0,a*a-along*along));
  const elbow=axis.clone().multiplyScalar(along).addScaledVector(pole,height);
@@ -99,6 +100,10 @@ export function applyWeaponPose(rig, pose, plantFoot) {
  }
  if(id==='tang-dao'&&['idle','guard','run','walk'].includes(state)){
   applyReviewedMotion(rig,pose,plantFoot,sampleTangReady(pose.idleClock??time));
+  animateWeaponParts(rig,pose);return;
+ }
+ if(id==='yanling-dao'&&['idle','guard','run','walk'].includes(state)){
+  applyReviewedMotion(rig,pose,plantFoot,sampleYanlingReady(pose.idleClock??time,pose));
   animateWeaponParts(rig,pose);return;
  }
  if(id==='dual-dao'){
@@ -200,11 +205,12 @@ export function applyWeaponPose(rig, pose, plantFoot) {
 function applyReviewedMotion(rig,pose,plantFoot,readySample=null) {
  const sample=readySample??sampleReviewedAttack(rig.weaponId,pose.state==='skill'?pose.skill:pose.combo,pose.phase,pose.state);
  const {yaw,load,advance}=sample.stance;
- if(rig.weaponId==='tang-dao')for(const arm of rig.arms){
+ const armMode=rig.weaponId==='tang-dao'?'tang':rig.weaponId==='yanling-dao'?'yanling':true;
+ if(rig.weaponId==='tang-dao'||rig.weaponId==='yanling-dao')for(const arm of rig.arms){
   arm.weapon.rotation.set(0,0,0);
-  // Protract the shoulder girdle for the two-handed reach, so the bent
+  // Protract the shoulder girdle for the authored grip, so the bent
   // forearms pass in front of the breastplates instead of through them.
-  arm.shoulder.position.z=TANG_GRIP.shoulderForward;
+  arm.shoulder.position.z=(armMode==='tang'?TANG_GRIP:YANLING_GRIP).shoulderForward;
  }
  if(readySample){
   // The character already supplies breathing, weight shifts and a distance-
@@ -214,7 +220,7 @@ function applyReviewedMotion(rig,pose,plantFoot,readySample=null) {
   const chestQ=rig.chest.getWorldQuaternion(new THREE.Quaternion());
   for(let i=0;i<2;i++){
    const hand=sample.hands[i];
-   solveArm(rig,rig.arms[i],new THREE.Vector3(...hand.grip),chestQ.clone().multiply(new THREE.Quaternion().fromArray(hand.quaternion)),'tang');
+   solveArm(rig,rig.arms[i],new THREE.Vector3(...hand.grip),chestQ.clone().multiply(new THREE.Quaternion().fromArray(hand.quaternion)),armMode);
   }
   rig.reviewedAttackSample=sample;
   return;
@@ -233,7 +239,7 @@ function applyReviewedMotion(rig,pose,plantFoot,readySample=null) {
  const chestQ=rig.chest.getWorldQuaternion(new THREE.Quaternion());
  for(let i=0;i<2;i++){
   const h=sample.hands[i];
-  solveArm(rig,rig.arms[i],new THREE.Vector3(...h.grip),chestQ.clone().multiply(new THREE.Quaternion().fromArray(h.quaternion)),rig.weaponId==='tang-dao'?'tang':true);
+  solveArm(rig,rig.arms[i],new THREE.Vector3(...h.grip),chestQ.clone().multiply(new THREE.Quaternion().fromArray(h.quaternion)),armMode);
  }
  const resolvedFeet=[];
  for(const leg of rig.legs){
@@ -260,9 +266,21 @@ function applyReviewedMotion(rig,pose,plantFoot,readySample=null) {
  rig.reviewedAttackSample=sample;
 }
 
-// Quaternion blending may separate the two wrist targets for the first few
-// frames of a state change; re-project the blended shaft into both arm chains.
+// Keep blended palms clear of armour. For two-handed grips also re-project
+// the blended shaft into both arm chains during a state change.
 export function reconcileWeaponGrip(rig) {
+ if(rig.type==='hero'&&rig.weaponId==='yanling-dao'&&rig.reviewedAttackSample){
+  rig.group.updateMatrixWorld(true);
+  const inverse=rig.chest.getWorldQuaternion(new THREE.Quaternion()).invert();
+  for(const arm of rig.arms){
+   const desired=arm.wrist.getWorldQuaternion(new THREE.Quaternion());
+   const point=rig.chest.worldToLocal(arm.wrist.getWorldPosition(new THREE.Vector3()));
+   const axis=down.clone().applyQuaternion(inverse.clone().multiply(desired));
+   constrainSingleGrip(point,axis,arm.side,YANLING_GRIP);
+   solveArm(rig,arm,point,desired,'yanling');
+  }
+  return;
+ }
  if(rig.type!=='hero'||!rig.offhandGrip)return;
  if(!['tang-dao','miao-dao','ring-dao'].includes(rig.weaponId)||!rig.reviewedAttackSample){supportHand(rig);return;}
  // During a state blend preserve the actual primary wrist and shaft plane.

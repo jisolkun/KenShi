@@ -160,13 +160,20 @@ export function createAudio() {
       noise(0.1,0.095,5100,2200,'highpass',0.025,0.015);
     }
   }
-  function weaponHit(id, strength = 1, combo = 0) {
+  function weaponHit(id, strength = 1, combo = 0, technique = null) {
     if (!ready()) return;
     const [air,metal,weight,kind] = weaponVoices[id] || weaponVoices['tang-dao'];
     const force=Math.min(2,Math.max(0.45,typeof strength==='number'?strength:1));
     if(context.currentTime-lastHit<0.035 && force<=lastHitWeight*1.3)return;
     lastHit=context.currentTime;lastHitWeight=force;
     const pitch=combo%2?0.94:1.06, mass=Math.min(2.2,weight*force);
+    if(id==='yanling-dao' && ['thrust','cut','chop'].includes(technique)) {
+      const point=technique==='thrust', chop=technique==='chop';
+      tone((point?145:chop?125:165)*pitch,45,point?0.075:0.11,0.16+mass*0.045,'sine',0,0.002);
+      noise(point?0.025:chop?0.065:0.045,0.15+mass*0.04,point?4200:chop?1900:3100,point?1700:380,point?'bandpass':'highpass',0,0.002);
+      tone(metal*(point?1.35:chop?0.78:1)*pitch,metal*(point?0.9:0.5),point?0.043:chop?0.08:0.065,point?0.065:0.04,'triangle',0,0.002);
+      return;
+    }
     tone((90+weight*30)*pitch,32,0.09+mass*0.045,0.2+mass*0.075,'sine',0,0.002);
     noise(0.035+mass*0.016,0.19+mass*0.055,kind==='wood'?820:air,220,'lowpass',0,0.002);
     if(kind==='wood') {

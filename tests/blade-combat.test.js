@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import {bladeSweepContains} from '../src/weaponCombat.js';
+import {bladeSweepContains, bladeThrustContains} from '../src/weaponCombat.js';
 const v=(x,z)=>new THREE.Vector3(x,1,z);
 const frame=(a,b)=>({heel:v(...a),tip:v(...b)});
 test('physical blade hit is a narrow segment and never an invisible rear circle',()=>{
@@ -32,4 +32,17 @@ test('swept blade hit detection rotates with the actual weapon instead of a fixe
   assert.equal(bladeSweepContains(a,b,hit,.1),true);
   assert.equal(bladeSweepContains(a,b,miss,.1),false);
  }
+});
+test('a point attack hits with its tip without damage along an extended shaft',()=>{
+ const blade=frame([0,.25],[0,1.6]);
+ assert.equal(bladeThrustContains(blade,null,{x:0,z:1.6},.1),true);
+ assert.equal(bladeThrustContains(blade,null,{x:0,z:.75},.1),false);
+ assert.equal(bladeSweepContains(blade,null,{x:0,z:.75},.1),true);
+ assert.equal(bladeThrustContains(blade,null,{x:.5,z:1.6},.1),false);
+});
+test('fast point entries sweep a narrow forward line and respect enemy height',()=>{
+ const before=frame([0,.3],[0,.9]),after=frame([0,.6],[0,1.7]);
+ assert.equal(bladeThrustContains(after,before,{x:0,z:1.3},.12),true);
+ assert.equal(bladeThrustContains(after,before,{x:.5,z:1.3},.12),false);
+ assert.equal(bladeThrustContains(after,before,{x:0,z:1.3,minY:2,maxY:3},.12),false);
 });

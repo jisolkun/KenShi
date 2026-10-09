@@ -16,7 +16,8 @@ function polygon(key, points) {
 const straight = polygon('straight', [[-.06,0],[.06,0],[.06,-.85],[0,-1],[-.06,-.85]]);
 // Straight spine on -X, sharpened edge on +X, with an oblique dao point.
 const tangBlade=polygon('tang-single-edge',[[-.065,0],[.055,0],[.055,-.88],[-.035,-1],[-.065,-.94]]);
-const yanlingBlade=polygon('yanling-curved-point',[[-.055,0],[.055,0],[.065,-.65],[.10,-.83],[0,-1],[-.04,-.82],[-.055,-.52]]);
+const yanlingBlade=polygon('yanling-curved-point-v2',[[-.055,0],[.055,0],[.062,-.67],[.105,-.88],[.12,-1],[.025,-.91],[-.033,-.80],[-.055,-.62]]);
+const yanlingEdge=polygon('yanling-edge-v2',[[.050,0],[.055,0],[.062,-.67],[.105,-.88],[.12,-1],[.112,-.976],[.099,-.88],[.056,-.67]]);
 const miaoBlade=polygon('miao-long-edge',[[-.052,0],[.054,0],[.06,-.75],[.078,-.91],[0,-1],[-.043,-.90],[-.052,-.68]]);
 const ringBlade=polygon('ring-heavy-edge',[[-.07,0],[.105,0],[.18,-.45],[.20,-.70],[.08,-.92],[0,-1],[-.08,-.82],[-.07,-.50]]);
 const dao = polygon('dao', [[-.07,0],[.09,0],[.14,-.58],[.08,-.88],[-.04,-1],[-.07,-.72]]);
@@ -54,7 +55,14 @@ export function equipWeapon(rig,id) {
         m(rod,'gold',[.048,.035,.048],[0,.435,0]);guard();
         blade(tangBlade,1.25,1);m(box,'edge',[.009,1.10,.008],[.05,-.655,.021]);
         m(ring,'gold',[.055,.055,.055],[0,.46,0]);tip(-1.35);break;
-      case 'yanling-dao':handle();guard();blade(yanlingBlade,1,1);tip(-1.1);break;
+      case 'yanling-dao':
+        handle();
+        // A short straight grip and shallow oval guard mark the single saber.
+        m(rod,'gold',[.11,.032,.075],[0,-.09,0]);
+        m(rod,'dark',[.091,.035,.058],[0,-.09,0]);
+        for(let j=0;j<3;j++)m(rod,'gold',[.038,.009,.038],[0,.012+j*.04,0]);
+        blade(yanlingBlade,1,1);m(yanlingEdge,'edge',[1,1,.1],[0,-.1,.019]);
+        tip(-1.1,.12);break;
       case 'miao-dao':handle(.47);guard();blade(miaoBlade,1.4,1);tip(-1.5);break;
       case 'ring-dao': {
         handle(.48);guard();blade(ringBlade,1.18,1.7);
@@ -98,7 +106,7 @@ export function equipWeapon(rig,id) {
     }
     if(['dual-dao','tang-dao','yanling-dao','miao-dao','ring-dao'].includes(id)) {
       const lengths={'dual-dao':.92,'tang-dao':1.35,'yanling-dao':1.1,'miao-dao':1.5,'ring-dao':1.28};
-      const heel=mark(root,-.12),tip=mark(root,-lengths[id]),edge=mark(root,-lengths[id]*.55,.15),face=mark(root,-lengths[id]*.55,0,.15);
+      const heel=mark(root,-.12),tip=mark(root,-lengths[id],id==='yanling-dao'?.12:0),edge=mark(root,-lengths[id]*.55,.15),face=mark(root,-lengths[id]*.55,0,.15);
       rig.weaponBladeFrames.push({hand:side,root,heel,tip,edge,face});
     }
     if(def.grip==='twohand')rig.offhandGrip=mark(root,id==='tang-dao'?.209:.25);

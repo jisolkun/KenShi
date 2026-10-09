@@ -9,6 +9,15 @@ const icons = [
   icon('<path d="M20 4v32M6 12l28 16M6 28l28-16M15 7l5 5 5-5M15 33l5-5 5 5M7 18l7-2-2-7M28 31l-2-7 7-2M7 22l7 2-2 7M28 9l-2 7 7 2" stroke="currentColor" stroke-width="2"/>'),
   icon('<path d="m8 24 13-15 2-6 3 7-3 4-10 13zM19 32l13-15 2-6 3 7-3 4-10 13zM3 32l7-3-4-5z" fill="currentColor"/>'),
 ];
+// Single-saber techniques: narrow point, opposing cuts, rise/fall, intercept,
+// and retreat/reverse. Inherit the HUD's gold currentColor and 40-unit viewBox.
+const yanlingSkillIcons = [
+  '<path d="M20 34V10l-3 4 3-10 3 10-3-4M16 27h8M13 32v-5M27 32v-5" stroke="currentColor" stroke-width="2" stroke-linejoin="bevel"/>',
+  '<path d="m18 10-9 5-4 9m0-6v6h6M22 30l9-5 4-9m0 6v-6h-6M11 28l17-16M11 23l5 5M24 12l5 5" stroke="currentColor" stroke-width="2" stroke-linejoin="bevel"/>',
+  '<path d="m6 30 14-21m-7 2 7-2v7M25 10l9 21m-6-3 6 3 1-7M11 32l12-18M18 28l11-16" stroke="currentColor" stroke-width="2" stroke-linejoin="bevel"/>',
+  '<path d="m8 7 20 20m-6-1 6 1-1-6M33 32H7l5-4m-5 4 5 4M9 20l9-9M10 21l18 1" stroke="currentColor" stroke-width="2" stroke-linejoin="bevel"/>',
+  '<path d="M18 33H6l4-4m-4 4 4 3M9 22l8-11 13-4m-5-2 5 2-2 5M13 26l20-13M14 21l5 8M25 15l5 7" stroke="currentColor" stroke-width="2" stroke-linejoin="bevel"/>',
+];
 const specialIcons = {
   horse: icon('<path d="m9 31 1-12 6-7-1-7 9 6 9 2-1 8-7-3-2 13M15 8l6 8M13 28h13" stroke="currentColor" stroke-width="2"/><circle cx="27" cy="15" r="1" fill="currentColor"/>'),
   eagle: icon('<path d="m20 21-6-8L3 7l4 14 9 4 4 10 4-10 9-4 4-14-11 6z" stroke="currentColor" stroke-width="2"/><path d="m16 19 4-5 4 5-4 6z" fill="currentColor"/>'),
@@ -117,7 +126,7 @@ export function createUI(callbacks = {}, initialSelectedWeaponId = DEFAULT_WEAPO
     waves: $$('.stage-steps i'), kills: $('.kill-count'), time: $('.battle-time'),
     combo: $('.combo-panel'), comboCount: $('.combo-panel strong'),
     boss: $('.boss-panel'), bossFill: $('.boss-track i'),
-    skills: $$('.skill-button').map(button => ({button, cost: button.querySelector('.skill-cost'), text: button.querySelector('.cooldown-text'), mask: button.querySelector('.cooldown-mask')})),
+    skills: $$('.skill-button').map(button => ({button, svg: button.querySelector('svg'), defaultIcon: button.querySelector('svg').innerHTML, yanlingIcon: false, cost: button.querySelector('.skill-cost'), text: button.querySelector('.cooldown-text'), mask: button.querySelector('.cooldown-mask')})),
     specials: $$('.special-button').map(button => ({button, label: button.querySelector('small')})),
   };
   const styleValues = new WeakMap();
@@ -306,7 +315,16 @@ export function createUI(callbacks = {}, initialSelectedWeaponId = DEFAULT_WEAPO
     const weapon = getWeapon(id);
     selectedWeaponId = weapon.id;
     setText($('.player-name>span'), `${weapon.name} · 破阵`);
-    hud.skills.forEach(({button}, i) => { setText(button.querySelector('.skill-name'), weapon.skillNames[i]); button.setAttribute('aria-label', weapon.skillNames[i]); });
+    hud.skills.forEach((entry, i) => {
+      const {button, svg} = entry;
+      setText(button.querySelector('.skill-name'), weapon.skillNames[i]);
+      button.setAttribute('aria-label', weapon.skillNames[i]);
+      const yanlingIcon = weapon.id === 'yanling-dao';
+      if (entry.yanlingIcon !== yanlingIcon) {
+        svg.innerHTML = yanlingIcon ? yanlingSkillIcons[i] : entry.defaultIcon;
+        entry.yanlingIcon = yanlingIcon;
+      }
+    });
     setText($('.intro-side small'), `${weapon.name}出鞘 · 百鬼退散`);
     try { localStorage.setItem('undead-slayer-weapon', selectedWeaponId); } catch {}
     if (mode === 'armory') renderArmory();

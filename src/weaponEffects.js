@@ -59,11 +59,12 @@ export function createWeaponEffects(scene, baseEffects) {
   function geometry(key,paths,width) {if(!geometries.has(key))geometries.set(key,ribbon(paths,width));return geometries.get(key);}
   function material(color,opacity) {return new THREE.MeshBasicMaterial({color,opacity,transparent:true,depthWrite:false,side:THREE.DoubleSide,toneMapped:false});}
   function release(o) {scene.remove(o.group);if(!spare.has(o.key))spare.set(o.key,[]);const pool=spare.get(o.key);if(pool.length<4)pool.push(o);else{o.group.traverse(n=>{if(n.isMesh)n.material.dispose();});all.delete(o);}}
-  function emit(id,pos,angle,combo,mode='attack',power=1) {
+  function emit(id,pos,angle,combo,mode='attack',power=1,kind=null) {
     if(destroyed)return;
-    const weapon=getWeapon(id), move=weapon.moves[((combo%4)+4)%4], key=`${id}:${mode}:${((combo%4)+4)%4}`;
+    const contactKind=id==='yanling-dao' && mode==='impact' && ['thrust','cut','chop'].includes(kind)?kind:null;
+    const weapon=getWeapon(id), move=weapon.moves[((combo%4)+4)%4], key=`${id}:${mode}:${((combo%4)+4)%4}${contactKind?`:${contactKind}`:''}`;
     const authored=cuts[id]||cuts['tang-dao'];
-    const reach=move.reach,shapeKind=move.shape;
+    const reach=move.reach,shapeKind=contactKind==='chop'?'crush':contactKind==='cut'?'arc':contactKind||move.shape;
     const paths=authored.map((path,layer)=>{
       if(shapeKind==='thrust'){const offset=weapon.grip==='dual'?(layer%2?-1:1)*Math.min(0.2,move.width*0.4):0;return path.map((v,i)=>[offset+v[0]*0.045,v[1]*0.1,0.25+(i/(path.length-1))*reach]);}
       if(shapeKind==='crush')return Array.from({length:15},(_,i)=>{const t=i/14;return [(layer-(authored.length-1)/2)*0.16+Math.sin(t*Math.PI)*0.07,1-t*1.95,0.35+reach*t*0.85];});
@@ -78,12 +79,17 @@ export function createWeaponEffects(scene, baseEffects) {
     if(!o) {
       const group=new THREE.Group();let shape=paths;
       if(mode==='impact') {
-        if(shapeKind==='crush'||shapeKind==='radial'||heavy.has(id)){const facets={guandao:5,'pu-dao':4,'wolf-club':9,'war-hammer':8,'battle-yue':6,'dual-jian-maces':7}[id]||5+authored.length;shape=Array.from({length:facets},(_,i)=>{const a=i/facets*Math.PI*2,reach=id==='wolf-club'?0.35+(i%3)*0.16:id==='war-hammer'?0.68:0.48+(i%2)*0.25;return line([Math.sin(a)*0.1,0,Math.cos(a)*0.1],[Math.sin(a)*reach,id==='dual-jian-maces'?(i%2)*0.25:0.05,Math.cos(a)*reach]);});if(id==='war-hammer')shape.push(arc(0.48,0,Math.PI*2,0,0,0,8));}
+        if(contactKind) {
+          // Contact fragments only: the actual blade supplies the cutting trail.
+          shape=contactKind==='thrust'?[line([0,0,-0.24],[0,0,0.34]),line([-0.035,0.025,-0.05],[-0.025,0.025,0.13]),line([0.035,-0.025,0.02],[0.025,-0.025,0.19])]
+            :contactKind==='chop'?[line([-0.22,0.27,-0.025],[0.14,-0.17,0.025]),line([0.13,-0.04,0.015],[0.2,-0.15,0.03]),line([-0.15,0.17,-0.015],[-0.22,0.24,-0.03])]
+            :[line([-0.33,0.04,-0.025],[0.29,-0.035,0.025]),line([0.11,0.07,0.025],[0.23,0.095,0.045]),line([-0.13,-0.07,-0.025],[-0.24,-0.09,-0.045])];
+        } else if(shapeKind==='crush'||shapeKind==='radial'||heavy.has(id)){const facets={guandao:5,'pu-dao':4,'wolf-club':9,'war-hammer':8,'battle-yue':6,'dual-jian-maces':7}[id]||5+authored.length;shape=Array.from({length:facets},(_,i)=>{const a=i/facets*Math.PI*2,reach=id==='wolf-club'?0.35+(i%3)*0.16:id==='war-hammer'?0.68:0.48+(i%2)*0.25;return line([Math.sin(a)*0.1,0,Math.cos(a)*0.1],[Math.sin(a)*reach,id==='dual-jian-maces'?(i%2)*0.25:0.05,Math.cos(a)*reach]);});if(id==='war-hammer')shape.push(arc(0.48,0,Math.PI*2,0,0,0,8));}
         else if(chains.has(id))shape=[arc(0.35,-2.7,2.7),arc(0.55,-1.4,1.4)];
         else if(shapeKind==='thrust'){shape=[line([0,0,-0.45],[0,0,0.5]),line([-0.14,0,-0.14],[0.14,0,0.14])];if(id==='qiang')shape.push(arc(0.24,0,Math.PI*2,0,0,0,12));else if(id==='shemao')shape.push(wave(0.65,0.14,4));else if(id==='emei-piercers')shape.push(line([-0.23,0,-0.2],[-0.23,0,0.3]),line([0.23,0,-0.2],[0.23,0,0.3]));else if(id==='judge-brush')shape.push(arc(0.28,-2.5,1.1));else shape.push(line([-0.3,0,0],[0.3,0,0]));}
         else shape=paths.map(p=>p.map(v=>[v[0]*0.24,v[1]*0.3,(v[2]-1.1)*0.25]));
       }
-      const width=mode==='impact'?0.045:shapeKind==='thrust'?0.018:heavy.has(id)?0.095:0.052;
+      const width=contactKind?(contactKind==='thrust'?0.012:0.018):mode==='impact'?0.045:shapeKind==='thrust'?0.018:heavy.has(id)?0.095:0.052;
       group.add(new THREE.Mesh(geometry(`${key}:veil`,shape,width),material(0xffffff,0.3)),new THREE.Mesh(geometry(`${key}:edge`,shape,width*0.18),material(0xffffff,0.65)));
       if(chains.has(id)||id==='ring-dao') {
         const chain=shape[0];const gems=new THREE.Group();
@@ -93,8 +99,8 @@ export function createWeaponEffects(scene, baseEffects) {
       o={key,group,age:0,life:0,angle:0,spin:0,scale:1,mode};all.add(o);
     }
     if(live.length>=MAX_LIVE)release(live.shift());
-    o.age=0;o.life=mode==='impact'?0.14:heavy.has(id)?0.22:0.16;o.angle=angle;o.spin=(combo%2?-1:1)*(shapeKind==='thrust'||shapeKind==='crush'?0:mode==='impact'?0.12:0.32);o.scale=power;
-    o.group.position.copy(pos);o.group.position.y+=mode==='impact'?0.22:1.02;if(mode==='impact'&&shapeKind==='crush')o.group.position.y=0.07;
+    o.age=0;o.life=contactKind?(contactKind==='thrust'?0.085:contactKind==='chop'?0.13:0.105):mode==='impact'?0.14:heavy.has(id)?0.22:0.16;o.angle=angle;o.spin=(combo%2?-1:1)*(shapeKind==='thrust'||shapeKind==='crush'?0:mode==='impact'?0.12:0.32);o.scale=power;
+    o.group.position.copy(pos);o.group.position.y+=mode==='impact'?0.22:1.02;if(mode==='impact'&&shapeKind==='crush'&&!contactKind)o.group.position.y=0.07;
     o.group.rotation.set(0,angle,mode==='impact'||shapeKind==='thrust'||shapeKind==='crush'?0:[0.12,-0.12,0.35,-0.3][combo%4]);o.group.scale.set(power*(combo%2?-1:1),power,power);o.mirror=combo%2?-1:1;
     o.group.children[0].material.color.setHex(weapon?.effectColor??0xc9ae7b);o.group.children[1].material.color.setHex(weapon?.effectAccent??0xffe4ac);
     o.group.children[0].material.opacity=mode==='impact'?0.46:0.24;o.group.children[1].material.opacity=0.6;
@@ -102,8 +108,8 @@ export function createWeaponEffects(scene, baseEffects) {
     scene.add(o.group);live.push(o);
   }
   function attack(id,pos,angle,combo=0) {emit(id,pos,angle,combo);}
-  function impact(id,pos,angle,combo=0,critical=false) {
-    emit(id,pos,angle,combo,'impact',critical?1.35:1);
+  function impact(id,pos,angle,combo=0,critical=false,kind=null) {
+    emit(id,pos,angle,combo,'impact',critical?1.35:1,kind);
     direction.set(Math.sin(angle),0,Math.cos(angle));
     baseEffects?.impact(pos,direction,heavy.has(id)?1.4:0.75,critical);
   }

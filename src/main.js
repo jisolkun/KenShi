@@ -7,7 +7,7 @@ import { createEffects } from "./effects.js";
 import { requestMobileFullscreen } from "./fullscreen.js";
 import { WEAPONS, getWeapon, DEFAULT_WEAPON_ID, SKILL_CONTACTS, isWeaponUnlocked } from "./weapons.js";
 import { createWeaponEffects } from "./weaponEffects.js";
-import { weaponStrikeContains, bladeSweepContains } from "./weaponCombat.js";
+import { weaponStrikeContains, bladeSweepContains, bladeThrustContains } from "./weaponCombat.js";
 import { getReviewedAttack, sampleReviewedAttack } from "./choreography/index.js";
 import "./style.css";
 
@@ -922,6 +922,7 @@ function hurtEnemy(
   critical = false,
   skill = false,
   playerContact = false,
+  contactKind = null,
 ) {
   if (e.state === "dead" || e.state === "spawn") return false;
   e.hp = Math.max(0, e.hp - damage);
@@ -940,7 +941,7 @@ function hurtEnemy(
   e.velocity.addScaledVector(temp, force * (e.type === "boss" ? 0.4 : 1));
   showDamage(e, damage, critical ? "critical" : skill ? "skill" : "normal");
   if (playerContact) {
-    weaponFx.impact(currentWeapon.id, e.pos.clone().add(new THREE.Vector3(0, 1.05, 0)), hero.angle, hero.combo, critical);
+    weaponFx.impact(currentWeapon.id, e.pos.clone().add(new THREE.Vector3(0, 1.05, 0)), hero.angle, hero.combo, critical, contactKind);
   } else if (fx.impact)
     fx.impact(
       e.pos
@@ -959,7 +960,7 @@ function hurtEnemy(
   const isPlayerContact =
     playerContact &&
     ((hero.state === "attack" && !skill) ||
-      (hero.state === "skill" && skill && hero.skillIndex !== 4));
+      (hero.state === "skill" && skill && (hero.skillIndex !== 4 || currentWeapon.id === 'yanling-dao')));
   if (isPlayerContact && !hero.impactDone) {
     hero.impactDone = true;
     const contactStop = currentWeapon.moves[hero.combo].hitstop;
@@ -975,7 +976,7 @@ function hurtEnemy(
     hero.globalImpactDone = true;
     hitStop = Math.max(hitStop, 0.025);
   }
-  if (playerContact) safeAudio("weaponHit", currentWeapon.id, critical ? 1.5 : 0.75, hero.combo);
+  if (playerContact) safeAudio("weaponHit", currentWeapon.id, critical ? 1.5 : 0.75, hero.combo, contactKind);
   else safeAudio("hit", critical ? 1.5 : 0.75, hero.combo);
   if (e.hp <= 0) {
     e.state = "dead";
@@ -1048,6 +1049,7 @@ function reviewedStrike(phase,frames) {
     hero.hitDone=true;
     if(!hero.strokeContacts.has(stroke)){
       hero.strokeContacts.add(stroke);
+      if(currentWeapon.id==='yanling-dao')hero.impactDone=false;
       safeAudio('weaponSlash',currentWeapon.id,skill?hero.skillIndex:hero.combo,contact.kind??'cut');
     }
     const prior=previous&&previous.state===hero.state&&previous.combo===(skill?hero.skillIndex:hero.combo)&&previous.phase>=contact.window[0]
@@ -1056,12 +1058,13 @@ function reviewedStrike(phase,frames) {
       const key=`${stroke}:${e.id}`;
       if(e.state==='dead'||e.state==='spawn'||hero.attackHits.has(key))continue;
       const target={x:e.pos.x,z:e.pos.z,minY:.18,maxY:e.type==='boss'?3.2:e.type==='brute'?2.4:1.85};
-      if(!bladeSweepContains(frame,prior,target,e.radius,action.width*.5))continue;
+      const contains=contact.kind==='thrust'?bladeThrustContains:bladeSweepContains;
+      if(!contains(frame,prior,target,e.radius,action.width*.5))continue;
       hero.attackHits.add(key);
       const move=currentWeapon.moves[hero.combo];
       const critical=skill||hero.combo===3;
       const totalDamage=skill?[75,100,115,95,150][hero.skillIndex]:move.damage;
-      hurtEnemy(e,Math.round(totalDamage/action.contacts.length*(critical?1.25:1)),hero.pos,move.knockback*(skill?5:3.5),critical,skill,true);
+      hurtEnemy(e,Math.round(totalDamage/action.contacts.length*(critical?1.25:1)),hero.pos,move.knockback*(skill?5:3.5),critical,skill,true,currentWeapon.id==='yanling-dao'?contact.kind:null);
     }
   });
   hero.reviewedPrevious={state:hero.state,combo:skill?hero.skillIndex:hero.combo,phase,frames};
@@ -1072,13 +1075,17 @@ function sampleHeroTrails(frames,tips,phase,dt,active) {
   for(let i=0;i<trails.length;i++){
     const trail=trails[i];
     const blade=action&&frames.find(b=>b.hand===i);
-    const cutting=action?!!blade&&action.contacts.some(c=>c.hand===i&&phase>=c.window[0]&&phase<=c.window[1]):active&&!!tips[i];
+    const contact=action?.contacts.find(c=>c.hand===i&&phase>=c.window[0]&&phase<=c.window[1]);
+    const cutting=action?!!blade&&!!contact:active&&!!tips[i];
+    // Stabs leave a thin wake behind the real point; a full heel-to-tip
+    // ribbon would make the narrow entry look like a sweeping cut.
+    const trailHeel=b=>contact?.kind==='thrust'?b.tip.clone().lerp(b.heel,.06):b.heel;
     // A short active interval can cover one displayed frame. Seed from the
     // preceding real blade pose so its path still forms a visible ribbon.
     if(blade&&cutting&&dt>0&&!trail.wasActive&&trail.previousBlade?.source===source&&phase-trail.previousBlade.phase<.1){
-      fx.sample(trail,trail.previousBlade.tip,trail.previousBlade.heel,true,0);
+      fx.sample(trail,trail.previousBlade.tip,trailHeel(trail.previousBlade),true,0);
     }
-    fx.sample(trail,blade?blade.tip:tips[i],blade?blade.heel:hero.pos,dt>0&&cutting,dt);
+    fx.sample(trail,blade?blade.tip:tips[i],blade?trailHeel(blade):hero.pos,dt>0&&cutting,dt);
     trail.previousBlade=blade?{tip:blade.tip,heel:blade.heel,phase,source}:null;
   }
 }

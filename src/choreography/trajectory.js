@@ -23,6 +23,18 @@ export function constrainPairedGrip(primary,axis,spec){
  }
  return primary;
 }
+export function constrainSingleGrip(primary,axis,side,spec){
+ const shoulder=v([side*.29,.365,spec.shoulderForward??0]),reach=spec.armReach??.525;
+ // A single saber needs its own reachable palm volume. Keep the empty hand
+ // independent; it balances the cut rather than sharing a shaft with it.
+ const front=(spec.palmFront??palmFront)-axis.z*.029;
+ for(let n=0;n<32;n++){
+  const offset=primary.clone().sub(shoulder);
+  if(offset.length()>reach)primary.copy(shoulder).add(offset.setLength(reach));
+  primary.z=Math.max(primary.z,front);
+ }
+ return primary;
+}
 function interpolate(keys,p,field) {
  let i=0;while(i<keys.length-2&&p>keys[i+1].p)i++;
  const a=keys[i],b=keys[i+1],dt=b.p-a.p,t=THREE.MathUtils.clamp((p-a.p)/dt,0,1);
@@ -62,6 +74,9 @@ function raw(spec,tracks,p) {
   h.grip[1]=THREE.MathUtils.lerp(h.grip[1],lane.y,weight);
   h.axis.lerp(v(lane.axis),weight).normalize();
  }
+ if(spec.singleHandClearance)hands.forEach((h,i)=>{
+  h.grip=constrainSingleGrip(v(h.grip),h.axis,i?1:-1,spec).toArray();
+ });
  if(spec.supportDistance){
   // Constrain the shaft's primary grip to the intersection of both arm
   // spheres. Derive the support only after this projection; independent
@@ -130,7 +145,8 @@ export function sampleAuthoredTracks(spec,tracks,phase) {
  const hands=r.hands.map((h,i)=>{
   const angle=THREE.MathUtils.lerp(cache.rolls[i][index],cache.rolls[i][index+1],fraction);
   const q=cache.bases[i][index].clone().slerp(cache.bases[i][index+1],fraction).multiply(new THREE.Quaternion().setFromAxisAngle(v([0,1,0]),-angle));
-  return {grip:h.grip,quaternion:q.toArray(),tip:v(h.grip).addScaledVector(h.axis,spec.tipLength??.949).toArray()};
+  const tip=v(h.grip).add(spec.tipOffset?v(spec.tipOffset).applyQuaternion(q):h.axis.clone().multiplyScalar(spec.tipLength??.949));
+  return {grip:h.grip,quaternion:q.toArray(),tip:tip.toArray()};
  });
  if(spec.supportDistance){
   // Use the final interpolated shaft quaternion, including its roll, so

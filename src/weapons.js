@@ -1,7 +1,7 @@
 // Weapon definitions are data only; motion and rendering consume the same timings.
 import { getReviewedAttack } from './choreography/index.js';
 export const DEFAULT_WEAPON_ID = 'dual-dao';
-export const UNLOCKED_WEAPON_IDS = new Set(['dual-dao', 'tang-dao']);
+export const UNLOCKED_WEAPON_IDS = new Set(['dual-dao', 'tang-dao', 'yanling-dao']);
 export function isWeaponUnlocked(id) { return UNLOCKED_WEAPON_IDS.has(id); }
 export const SKILL_CONTACTS = [0.3, 0.38, 0.72, 0.4, 0.4];
 export const WEAPONS = [
@@ -36,21 +36,21 @@ export const WEAPONS = [
 const reviewedMoveNames={
   'dual-dao':['右斜劈','左接斩','反手撩切','错锋双斩'],
   'tang-dao':['踏步斜斩','转胯横斩','提膝上撩','过顶落劈'],
-  'yanling-dao':['横抹','撩锋','斜落','抽步反切'],
+  'yanling-dao':['横抹','低撩','斜落','撤步反切'],
   'miao-dao':['踏步劈刀','转胯横切','蹬步撩刀','中线长刺'],
   'ring-dao':['蓄肩横斩','举刀重劈','压刃斜削','沉身斜劈'],
 };
 const reviewedSkillNames={
   'dual-dao':['双锋进斩','轮锋连切','落锋撩返','错刃剪击','绝式·四门连斩'],
   'tang-dao':['斜阳连斩','横江返锋','撩月落锋','踏阵破浪','绝式·三斩开阵'],
-  'yanling-dao':['横抹撩锋','斜落返抹','撩锋落雁','抽步反撩','绝式·三翎连切'],
+  'yanling-dao':['迎门点刺','外开内抹','低挑追落','斜截横切','绝式·撤身反切'],
   'miao-dao':['踏劈进刺','横江返斩','撩月落锋','长刺横截','绝式·三门长锋'],
   'ring-dao':['蓄肩落岳','举刀返斩','压刃沉锋','沉斩横截','绝式·三叠开山'],
 };
 const reviewedDescriptions={
   'dual-dao':'左右短刀交替斜劈与撩切，错锋双斩逐刀接续，空闲刀保持低位护持。',
   'tang-dao':'双手长柄直刃，踏步转胯带动斜斩、宽横斩、上撩与过顶落劈，以大幅刀路扫开前方敌阵。',
-  'yanling-dao':'轻曲刀尖配合腰高横抹、低位撩切和侧上斜落，抬脚撤步后转胯反切。',
+  'yanling-dao':'右手单刀，短踏横抹、低撩与斜落相接；左手随刀收展，以点刺入隙、撤步反切换向。',
   'miao-dao':'双手握住长柄，以踏步落劈、转胯宽横切、蹬步撩刀和中线长刺发挥长刃距离。',
   'ring-dao':'双手厚背阔刃，肩蓄横斩、举刀重劈与低位压刃相接；沉身斜劈后长程制动，九环滞后摆动。',
 };

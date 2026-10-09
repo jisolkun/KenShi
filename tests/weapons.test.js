@@ -177,9 +177,9 @@ test('new weapon carries breathe, follow gait and let the free hand counterbalan
 });
 
 
-test('only dual dao and Tang dao are available to choose', () => {
-  assert.deepEqual([...UNLOCKED_WEAPON_IDS], ['dual-dao', 'tang-dao']);
-  assert.equal(WEAPONS.filter(w => isWeaponUnlocked(w.id)).length, 2);
+test('only the three reviewed and unlocked weapons are available to choose', () => {
+  assert.deepEqual([...UNLOCKED_WEAPON_IDS], ['dual-dao', 'tang-dao', 'yanling-dao']);
+  assert.equal(WEAPONS.filter(w => isWeaponUnlocked(w.id)).length, 3);
   assert.equal(isWeaponUnlocked('unknown'), false);
   assert.equal(isWeaponUnlocked('ring-dao'), false);
 });
