@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { equipWeapon } from './weaponModels.js';
 import { DEFAULT_WEAPON_ID } from './weapons.js';
-import { applyWeaponPose, reconcileWeaponGrip } from './weaponMotion.js';
+import { applyWeaponPose, reconcileWeaponGrip, reconcileAttackFootwork } from './weaponMotion.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // All body parts share geometry; each character owns its palette for hit flashes.
@@ -332,7 +332,7 @@ function sample(p, keys) {
 }
 
 export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,skill=0,dt,
-  gaitPhase,moveBlend,turnLean=0,attackCarry=0,hurtDirection=1,hurtStrength=1,transition=true,immediate=false,
+  gaitPhase,moveBlend,turnLean=0,attackCarry=0,attackStep=null,hurtDirection=1,hurtStrength=1,transition=true,immediate=false,
   alertness=.35,idleAge,lookYaw} = {}) {
   if(dt===0&&!immediate&&transition!==false&&rig.motion)return;
   const {body,chest,head,arms,legs,pony,cloths,type} = rig;
@@ -349,16 +349,22 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
   const locomotion=state==='idle'||state==='run';
   const key=locomotion?'locomotion':`${state}:${state==='attack'?combo:state==='skill'?skill:0}`;
   const restarted=!locomotion && phase<motion.phase-.2;
-  if(motion.key!==null && (key!==motion.key||restarted)) {
+  const stepping=rig.weaponId==='great-dao'&&state==='attack'&&attackStep;
+  const footworkChanged=rig.weaponId==='great-dao'&&Boolean(motion.stepActive)!==Boolean(stepping);
+  if(motion.key!==null && (key!==motion.key||restarted||footworkChanged)) {
     if(['tang-dao','great-dao'].includes(rig.weaponId)){
       rig.group.updateMatrixWorld(true);
       const groupQ=rig.group.getWorldQuaternion(new THREE.Quaternion());
       motion.shaftFrom={point:rig.group.worldToLocal(rig.arms[1].wrist.getWorldPosition(new THREE.Vector3())),quaternion:groupQ.invert().multiply(rig.arms[1].wrist.getWorldQuaternion(new THREE.Quaternion()))};
-      if(rig.weaponId==='great-dao')motion.feetFrom=rig.legs.map(leg=>rig.group.worldToLocal(leg.foot.getWorldPosition(new THREE.Vector3())));
+      if(rig.weaponId==='great-dao')motion.feetFrom=rig.legs.map((leg,index)=>rig.group.worldToLocal(
+        footworkChanged&&!stepping&&rig.attackFootTargets?rig.attackFootTargets[index].point.clone():leg.foot.getWorldPosition(new THREE.Vector3())));
+      if(footworkChanged&&!stepping&&rig.attackFootTargets)motion.footRotationsFrom=rig.attackFootTargets.map(foot=>foot.rotation.clone());
     }
     rig.bind.forEach(({node},i)=>{motion.from[i].p.copy(node.position);motion.from[i].q.copy(node.quaternion);motion.from[i].s.copy(node.scale);});
     motion.elapsed=0;
     motion.duration=state==='hurt'?.04:state==='roll'?.06:.08;
+    motion.footworkBlend=footworkChanged&&key===motion.key&&!restarted;
+    if(motion.footworkBlend)motion.duration=.10;
   } else motion.elapsed+=delta;
   motion.gait+=locomotion?delta*clamp(speed,0,1)*12:0;
   motion.move=mix(motion.move,state==='run'?1:0,1-Math.exp(-delta/.075));
@@ -530,17 +536,23 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
     pony.rotation.x=.2+.4*energy;pony.rotation.z=-.35*energy;
     for(const c of cloths){c.rotation.x=-.15-.65*energy;c.rotation.z=.35*energy;}
   }
-  applyWeaponPose(rig,{state,time,phase:p,combo,skill,speed,dt,gaitPhase:gait,moveBlend:movement,attackCarry,idleClock:motion.idleClock,idleAge:motion.idleAge},plantIdleFoot);
+  rig.attackFootTargets=null;
+  applyWeaponPose(rig,{state,time,phase:p,combo,skill,speed,dt,gaitPhase:gait,moveBlend:movement,attackCarry,attackStep:stepping,idleClock:motion.idleClock,idleAge:motion.idleAge},plantIdleFoot);
   // Blend only the opening of a changed action. Contacts and complete spin arcs
   // are sampled absolutely; quaternion interpolation never wraps a full turn.
   if(locomotion)settleSecondary(motion,delta);
   let blend=transition&&!immediate?smooth(motion.elapsed/motion.duration):1;
   if((state==='attack'||state==='skill')&&p>=.32)blend=1;
+  // Changing the way the feet follow the root must not re-time an attack's
+  // already moving blade. Blend its contacts separately from the action.
+  if(motion.footworkBlend)blend=1;
+  const footBlend=motion.footworkBlend?smooth(motion.elapsed/motion.duration):blend;
+  if(motion.elapsed>=motion.duration)motion.footworkBlend=false;
   rig.reviewedShaftBlend=null;
   let blendedFeet;
-  if(blend<1&&rig.weaponId==='great-dao'&&motion.feetFrom&&!['roll','dead'].includes(state)){
+  if(footBlend<1&&rig.weaponId==='great-dao'&&motion.feetFrom&&!stepping&&!['roll','dead'].includes(state)){
     rig.group.updateMatrixWorld(true);
-    blendedFeet=rig.legs.map((leg,i)=>motion.feetFrom[i].clone().lerp(rig.group.worldToLocal(leg.foot.getWorldPosition(new THREE.Vector3())),blend));
+    blendedFeet=rig.legs.map((leg,i)=>motion.feetFrom[i].clone().lerp(rig.group.worldToLocal(leg.foot.getWorldPosition(new THREE.Vector3())),footBlend));
   }
   if(blend<1&&['tang-dao','great-dao'].includes(rig.weaponId)&&motion.shaftFrom){
     rig.group.updateMatrixWorld(true);
@@ -563,7 +575,15 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
       const foot=blendedFeet[i];
       plantIdleFoot(rig,legs[i],1,foot.z,Math.max(.075,foot.y),foot.x);
     }
+    if(motion.footworkBlend){
+      rig.group.updateMatrixWorld(true);
+      const heading=rig.group.getWorldQuaternion(new THREE.Quaternion());
+      rig.attackFootTargets=blendedFeet.map((foot,index)=>({point:rig.group.localToWorld(foot.clone()),
+        rotation:motion.footRotationsFrom[index].clone().slerp(heading,footBlend)}));
+      reconcileAttackFootwork(rig,plantIdleFoot);
+    }
   }
+  if(stepping)reconcileAttackFootwork(rig,plantIdleFoot);
   for(const part of motion.secondary){
     if(!locomotion&&delta>0){
       part.vx=clamp((part.node.rotation.x-part.x)/delta,-1.4,1.4);
@@ -571,7 +591,7 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
     }
     part.x=part.node.rotation.x;part.z=part.node.rotation.z;
   }
-  motion.key=key;motion.phase=p;motion.lastTime=time;
+  motion.key=key;motion.phase=p;motion.lastTime=time;motion.stepActive=Boolean(stepping);
   // World matrices are updated once by the renderer or weaponTips, not per joint.
 }
 

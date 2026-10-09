@@ -4,6 +4,7 @@ import { sampleTangReady, TANG_GRIP } from './choreography/tangDao.js';
 import { sampleGreatReady, GREAT_GRIP } from './choreography/greatDao.js';
 import { constrainPairedGrip } from './choreography/trajectory.js';
 import { sampleReviewedAttack } from './choreography/index.js';
+import { greatDaoStepProgress, resolveGreatDaoStep } from './greatDaoMovement.js';
 export { getReviewedAttack, sampleReviewedAttack } from './choreography/index.js';
 
 // Each row describes a deliberately authored contact: shoulder pitch/yaw/roll,
@@ -92,11 +93,13 @@ function applyReviewedMotion(rig,pose,plantFoot,readySample=null) {
   rig.reviewedAttackSample=sample;
   return;
  }
- // Pelvis starts the turn; the chest follows. Feet remain in the character
- // frame while the hip crosses between the two support legs.
+ // Pelvis starts the turn; the chest follows. Automatic great-dao steps use
+ // world contacts, while authored/travelling gait keeps its character frame.
  const pelvisYaw=sample.stance.pelvisYaw??yaw*.65;
  const carry=clamp(pose.attackCarry??0,0,1);
- const resolvedFeet=rig.legs.map((leg,index)=>{
+ const stepping=rig.weaponId==='great-dao'&&pose.attackStep;
+ const stepFeet=stepping?sampleAttackFeet(rig,pose):null;
+ const resolvedFeet=stepFeet??rig.legs.map((leg,index)=>{
   const speed=pose.speed>0?clamp(pose.speed,0,1):carry;
   const cycleDistance=THREE.MathUtils.lerp(.85,2.9,speed);
   const stance=Math.max(1e-6,2*.19*carry/cycleDistance);
@@ -108,7 +111,7 @@ function applyReviewedMotion(rig,pose,plantFoot,readySample=null) {
    y:THREE.MathUtils.lerp(authored?.y??.075,.075+Math.sin(Math.PI*swing)*.10,carry),
    z:THREE.MathUtils.lerp(authored?.z??(index?-.07:.10),.026+stride,carry)};
  });
- if(rig.weaponId==='great-dao'&&carry>0){
+ if(rig.weaponId==='great-dao'&&(carry>0||stepping)){
   // Travelling gait and authored action phase are independent. Lower the
   // loaded pelvis enough for the *blended* foot targets, including its tilt.
   const q=new THREE.Quaternion().setFromEuler(new THREE.Euler(sample.stance.bodyPitch??0,pelvisYaw,sample.stance.bodyRoll??0));
@@ -141,6 +144,90 @@ function applyReviewedMotion(rig,pose,plantFoot,readySample=null) {
  rig.reviewedAttackSample=sample;
 }
 
+// A step is authored in world space. The rear foot pushes against the floor,
+// the long front step catches the moving body, then the rear foot follows.
+// The attack's actual root travel sets the stride: a blocked root does not
+// send a foot through an obstacle or spend the rest of the planned distance.
+function sampleAttackFeet(rig,pose) {
+ const step=pose.attackStep;
+ let context=rig.motion.attackFootwork;
+ if(context?.step!==step){
+  const heading=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),step.angle??rig.group.rotation.y);
+  const inverse=heading.clone().invert(),origin=new THREE.Vector3(step.start.x,rig.group.position.y,step.start.z);
+  const starts=rig.legs.map((leg,index)=>{
+   const source=step.footStarts?.[index]??leg.foot.getWorldPosition(new THREE.Vector3());
+   return new THREE.Vector3(source.x,source.y,source.z);
+  });
+  const rotations=rig.legs.map((leg,index)=>{
+   const q=step.footRotations?.[index];
+   return q?new THREE.Quaternion(q.x,q.y,q.z,q.w):leg.foot.getWorldQuaternion(new THREE.Quaternion());
+  });
+  let lead=((pose.combo%2)+2)%2;
+  if((step.startPhase??pose.phase)>.01&&Math.abs(starts[0].y-starts[1].y)>.025)lead=starts[0].y>starts[1].y?0:1;
+  context=rig.motion.attackFootwork={step,starts,rotations,lead,
+   localStarts:starts.map(point=>point.clone().sub(origin).applyQuaternion(inverse)),
+   startPhase:step.startPhase??pose.phase,anchors:[null,null],anchorRotations:[null,null],previous:starts.map(point=>point.clone())};
+ }
+ const p=clamp((pose.phase-context.startPhase)/Math.max(1e-6,1-context.startPhase),0,1);
+ const root=rig.group.getWorldPosition(new THREE.Vector3()),heading=rig.group.getWorldQuaternion(new THREE.Quaternion());
+ const planned=Math.hypot(step.forward??0,step.lateral??0)*Math.max(0,greatDaoStepProgress(pose.phase)-greatDaoStepProgress(context.startPhase));
+ const travelled=Math.hypot(root.x-step.start.x,root.z-step.start.z);
+ const stride=planned>1e-8?clamp(travelled/planned,0,1):0;
+ const remaining=1-greatDaoStepProgress(context.startPhase);
+ const feet=rig.legs.map((leg,index)=>{
+  const lead=index===context.lead,start=lead ? .06 : .32,end=lead ? .30 : .76;
+  const u=clamp((p-start)/(end-start),0,1),progress=ease(u);
+  let point=context.anchors[index]?.clone(),rotation=context.anchorRotations[index]?.clone();
+  if(!point){
+   const offset=context.localStarts[index].clone();
+   offset.x=THREE.MathUtils.lerp(offset.x,leg.side*.23,stride);
+   offset.z=THREE.MathUtils.lerp(offset.z,(lead ? .40 : -.10)*remaining,stride);
+   offset.y=.075-root.y;
+   const landing=offset.applyQuaternion(heading).add(root);
+   point=context.starts[index].clone().lerp(landing,progress);
+   point.y=THREE.MathUtils.lerp(context.starts[index].y,.075,progress)+Math.sin(Math.PI*u)*(lead ? .105 : .085)*stride;
+   const previous=context.previous[index];
+   const clipped=resolveGreatDaoStep(previous,{x:point.x-previous.x,z:point.z-previous.z},
+    {obstacles:step.obstacles??[],bounds:step.bounds,clearance:.22});
+   point.x=clipped.x;point.z=clipped.z;
+   rotation=context.rotations[index].clone().slerp(heading,progress);
+   if(u>=1){
+    point.y=.075;
+    context.anchors[index]=point.clone();context.anchorRotations[index]=rotation.clone();
+   }
+  }
+  context.previous[index].copy(point);
+  return {point,rotation};
+ });
+ rig.attackFootTargets=feet;
+ return feet.map(({point})=>{
+  const local=rig.group.worldToLocal(point.clone());
+  return {x:local.x,y:local.y,z:local.z};
+ });
+}
+
+// Independent joint blending does not preserve a world-space contact. Solve
+// the ankle targets once more after the body's state blend and keep each
+// planted shoe's world orientation while the root turns above it.
+export function reconcileAttackFootwork(rig,plantFoot) {
+ if(!rig.attackFootTargets)return;
+ rig.group.updateMatrixWorld(true);
+ const targets=rig.attackFootTargets.map(({point})=>rig.group.worldToLocal(point.clone()));
+ for(let index=0;index<targets.length;index++){
+  const hip=rig.legs[index].hip.position.clone().applyQuaternion(rig.body.quaternion).add(rig.body.position);
+  const foot=targets[index],horizontal=(hip.x-foot.x)**2+(hip.z-foot.z)**2;
+  const ceiling=foot.y-(hip.y-rig.body.position.y)+Math.sqrt(Math.max(.025,.795*.795-horizontal));
+  rig.body.position.y=Math.min(rig.body.position.y,ceiling);
+ }
+ for(let index=0;index<targets.length;index++){
+  const foot=targets[index],leg=rig.legs[index];
+  plantFoot(rig,leg,1,foot.z,foot.y,foot.x);
+  rig.group.updateMatrixWorld(true);
+  leg.foot.quaternion.copy(leg.knee.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(rig.attackFootTargets[index].rotation));
+ }
+ reconcileWeaponGrip(rig);
+}
+
 // Keep blended palms clear of armour. For two-handed grips also re-project
 // the blended shaft into both arm chains during a state change.
 export function reconcileWeaponGrip(rig) {
@@ -151,8 +238,8 @@ export function reconcileWeaponGrip(rig) {
  // Only move that shaft if its support marker falls outside the left reach.
  rig.group.updateMatrixWorld(true);
  const desired=rig.reviewedShaftBlend?.quaternion.clone()??rig.arms[1].wrist.getWorldQuaternion(new THREE.Quaternion());
- if(rig.reviewedShaftBlend){
-  const primary=rig.chest.worldToLocal(rig.reviewedShaftBlend.point.clone());
+ if(rig.reviewedShaftBlend||rig.attackFootTargets){
+  const primary=rig.chest.worldToLocal(rig.reviewedShaftBlend?.point.clone()??rig.arms[1].wrist.getWorldPosition(new THREE.Vector3()));
   if(grip.handClearance){
    // A blended shaft can put the support fist back through the chest even
    // when both endpoint poses are clear. Apply the same volume/reach guard.

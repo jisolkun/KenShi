@@ -3,6 +3,7 @@ import test from 'node:test';
 import * as THREE from 'three';
 import {createCharacter, poseCharacter} from '../src/characters.js';
 import {getReviewedAttack, sampleReviewedAttack} from '../src/choreography/index.js';
+import {GREAT_DAO_STEPS, greatDaoStepDelta} from '../src/greatDaoMovement.js';
 
 // Test rendered palms and the entire elbow/forearm, rather than grip points or
 // blade clearance. A visible hand can still disappear inside opaque armour.
@@ -62,6 +63,23 @@ function checkClearance(f, context) {
 function pose(f, args) {
   poseCharacter(f.rig, {dt: 1 / 60, ...args});
   checkClearance(f, `${args.state} ${args.combo ?? 0}, phase ${(args.phase ?? 0).toFixed(4)}, time ${args.time.toFixed(3)}`);
+}
+for(let action=0;action<4;action++){
+  test(`great-dao attack ${action+1}: moving world-root footwork keeps real palms and forearms clear`,()=>{
+    const f=fixture('great-dao'),rig=f.rig,spec=getReviewedAttack('great-dao',action);
+    pose(f,{state:'idle',time:0,speed:0,immediate:true,transition:false});
+    const attackStep={start:{x:0,z:0},angle:0,startPhase:0,...GREAT_DAO_STEPS[action],
+      footStarts:rig.legs.map(leg=>leg.foot.getWorldPosition(new THREE.Vector3())),
+      footRotations:rig.legs.map(leg=>leg.foot.getWorldQuaternion(new THREE.Quaternion()))};
+    let previous=0;
+    for(let frame=0;frame<=Math.ceil(spec.duration*120);frame++){
+      const phase=Math.min(1,frame/(spec.duration*120)),stride=greatDaoStepDelta(action,previous,phase);
+      rig.group.position.x+=stride.lateral;rig.group.position.z+=stride.forward;
+      pose(f,{state:'attack',combo:action,phase,time:frame/120,dt:1/120,attackStep,
+        attackCarry:.7,speed:.7,immediate:true,transition:false});
+      previous=phase;
+    }
+  });
 }
 for (const weaponId of ['tang-dao', 'great-dao']) for (const state of ['idle', 'run']) {
   test(`${weaponId} both palm and forearm volumes clear torso/head throughout ${state}`, () => {

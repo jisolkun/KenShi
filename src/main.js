@@ -8,6 +8,7 @@ import { requestMobileFullscreen } from "./fullscreen.js";
 import { WEAPONS, getWeapon, DEFAULT_WEAPON_ID, isWeaponUnlocked } from "./weapons.js";
 import { createWeaponEffects } from "./weaponEffects.js";
 import { weaponStrikeContains, bladeSweepContains, clipBladeSweep } from "./weaponCombat.js";
+import { GREAT_DAO_STEPS, greatDaoStepDelta, greatDaoTargetGap, resolveGreatDaoStep } from "./greatDaoMovement.js";
 import { getReviewedAttack, sampleReviewedAttack } from "./choreography/index.js";
 import { isCombatTarget, attackDistances, chooseAttackTarget, attackCanTrack,
   attackRecoveryPhase, attackChainPhase, segmentClear, planObstaclePath, projectWalkablePoint } from "./heroAI.js";
@@ -117,6 +118,8 @@ const hero = {
   moveBlend: 0,
   turnLean: 0,
   attackCarry: 0,
+  attackStep: null,
+  attackStepPhase: 0,
   localHitStop: 0,
   attackHits: new Set(),
   strokeContacts: new Set(),
@@ -576,6 +579,20 @@ function selectWeapon(id = currentWeapon.id, preview = true) {
   hero.combo = 0;
   hero.attackHits.clear();
   hero.previewAge = preview && mode === "start" ? 0 : Infinity;
+  hero.attackStep = null;
+  hero.attackStepPhase = 0;
+  hero.previewStepIndex = -1;
+  rig.attackFootTargets = null;
+  if (rig.motion) rig.motion.attackFootwork = null;
+  if (preview && mode === 'start') {
+    hero.pos.set(0, 0, 4);
+    hero.moveVelocity.set(0, 0, 0);
+    hero.gaitPhase = 0;
+    rig.group.position.copy(hero.pos);
+    cameraFocus.set(hero.pos.x, 1.05, hero.pos.z);
+    shake = 0;
+    updateCamera(0);
+  }
   hero.reviewedPrevious = null;
   hero.strokeContacts.clear();
   hero.trailSeries++;
@@ -902,7 +919,42 @@ function beginAttack(enemy) {
   if(getReviewedAttack(currentWeapon.id,hero.combo))hero.attackCarry=Math.min(1,hero.moveVelocity.length()/5.8);
   hero.attackTarget = enemy;
   if (isCombatTarget(enemy, enemies)) face(enemy.pos.clone().sub(hero.pos));
+  hero.attackStep = currentWeapon.id === 'great-dao' ? createGreatDaoStep(hero.combo) : null;
+  hero.attackStepPhase = 0;
   destinationMarker.visible = !!hero.destination;
+}
+function createGreatDaoStep(comboIndex, startPhase = 0) {
+  rig.group.updateMatrixWorld(true);
+  return {
+    start: { x: hero.pos.x, z: hero.pos.z },
+    angle: hero.angle,
+    startPhase,
+    ...GREAT_DAO_STEPS[comboIndex],
+    footStarts: rig.legs.map(leg => leg.foot.getWorldPosition(new THREE.Vector3())),
+    footRotations: rig.legs.map(leg => leg.foot.getWorldQuaternion(new THREE.Quaternion())),
+    obstacles: world.obstacles,
+    bounds: world.bounds,
+  };
+}
+function advanceGreatDaoStep(comboIndex, previousPhase, phase, dt, preview = false) {
+  if (dt <= 0) return;
+  const stride = greatDaoStepDelta(comboIndex, previousPhase, phase);
+  const direction = new THREE.Vector3(Math.sin(hero.angle), 0, Math.cos(hero.angle));
+  const right = new THREE.Vector3(direction.z, 0, -direction.x);
+  const target = !preview && isCombatTarget(hero.attackTarget, enemies) ? hero.attackTarget : null;
+  if (target) stride.forward = Math.min(stride.forward,
+    Math.max(0, hero.pos.distanceTo(target.pos) - greatDaoTargetGap(target.radius)));
+  const displacement = direction.multiplyScalar(stride.forward).addScaledVector(right, stride.lateral);
+  const start = hero.pos.clone();
+  const resolved = resolveGreatDaoStep(start, displacement, {
+    obstacles: world.obstacles, bounds: world.bounds,
+    targets: preview ? [] : enemies.filter(e => isCombatTarget(e, enemies)).map(e => ({
+      x: e.pos.x, z: e.pos.z, radius: e.radius,
+    })),
+  });
+  hero.pos.set(resolved.x, 0, resolved.z);
+  hero.moveVelocity.copy(hero.pos).sub(start).multiplyScalar(1 / dt);
+  hero.turnLean *= Math.exp(-dt * 12);
 }
 function heroAttackCandidate(previousTarget = hero.attackTarget) {
   return chooseAttackTarget({ position: hero.pos, enemies, manualTarget: hero.target,
@@ -1263,6 +1315,8 @@ function updateHero(frameDt) {
     if (!travelling && canTrack && isCombatTarget(hero.attackTarget, enemies))
       face(hero.attackTarget.pos.clone().sub(hero.pos), 1 - Math.exp(-dt * 24));
     if (travelling) {
+      hero.attackStep = null;
+      hero.attackStepPhase = Math.min(1, phase);
       const goal = movementGoal();
       const carry = currentWeapon.id === "great-dao"
         ? phase < .3 ? .38 : phase < attackRecoveryPhase(move, action) ? .22 : .85
@@ -1280,6 +1334,10 @@ function updateHero(frameDt) {
         0,
         1,
       );
+    } else if (currentWeapon.id === 'great-dao') {
+      if (!hero.attackStep) hero.attackStep = createGreatDaoStep(hero.combo, hero.attackStepPhase);
+      advanceGreatDaoStep(hero.combo, hero.attackStepPhase, phase, dt);
+      hero.attackStepPhase = Math.min(1, phase);
     } else if (
       isCombatTarget(hero.attackTarget, enemies) &&
       phase < move.contact + 0.12
@@ -1332,6 +1390,7 @@ function updateHero(frameDt) {
     else navigate();
   }
   clampPosition(hero.pos);
+  if (hero.state !== 'attack') hero.attackStep = null;
   const reviewedMotion = getReviewedAttack(currentWeapon.id,
     hero.combo, hero.state);
   if (reviewedMotion) hero.attackCarry = THREE.MathUtils.clamp(hero.moveVelocity.length() / maxSpeed, 0, 1);
@@ -1399,6 +1458,7 @@ function updateHero(frameDt) {
     gaitPhase: hero.gaitPhase,
     turnLean: hero.turnLean,
     attackCarry: hero.attackCarry,
+    attackStep: hero.attackStep,
     hurtDirection: hero.hurtDirection || 0,
     hurtStrength: hero.hurtStrength || 0,
   });
@@ -1939,7 +1999,8 @@ function updateCamera(dt) {
   desired.y = preview ? 1.05 : 0.15;
   camera.zoom = THREE.MathUtils.lerp(camera.zoom, preview ? 2.4 : 1, 1 - Math.exp(-dt * 8));
   camera.updateProjectionMatrix();
-  cameraFocus.lerp(desired, 1 - Math.exp(-dt * 7));
+  const followRate = !preview && currentWeapon.id === 'great-dao' && hero.state === 'attack' ? 3.8 : 7;
+  cameraFocus.lerp(desired, 1 - Math.exp(-dt * followRate));
   shakeAge += dt;
   const amplitude = shake * Math.exp(-shakeAge * 19) * Math.sin(shakeAge * 58);
   const offset = shakeDirection.clone().multiplyScalar(amplitude);
@@ -1968,6 +2029,18 @@ function updatePresentation(dt) {
       remaining -= move.duration + (currentWeapon.id === 'great-dao' ? 0 : 0.1);
     }
   }
+  if (currentWeapon.id === 'great-dao' && mode === 'start' && state === 'attack') {
+    if (hero.previewStepIndex !== comboIndex) {
+      hero.previewStepIndex = comboIndex;
+      hero.attackStep = createGreatDaoStep(comboIndex);
+      hero.attackStepPhase = 0;
+    }
+    advanceGreatDaoStep(comboIndex, hero.attackStepPhase, phase, dt, true);
+    hero.attackStepPhase = phase;
+  } else {
+    hero.attackStep = null;
+    hero.moveVelocity.set(0, 0, 0);
+  }
   hero.state = state;
   hero.combo = comboIndex;
   hero.moveBlend = THREE.MathUtils.lerp(
@@ -1992,6 +2065,7 @@ function updatePresentation(dt) {
     speed: 0,
     moveBlend: hero.moveBlend,
     gaitPhase: hero.gaitPhase,
+    attackStep: hero.attackStep,
     idleAge: hero.idleAge,
     alertness,
     lookYaw: 0,

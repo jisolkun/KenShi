@@ -14,11 +14,26 @@ function polygon(key, points, depth=.035) {
 // Straight spine on -X, sharpened edge on +X, with an oblique dao point.
 const tangBlade=polygon('tang-single-edge',[[-.065,0],[.055,0],[.055,-.88],[-.035,-1],[-.065,-.94]]);
 const dao = polygon('dao', [[-.07,0],[.09,0],[.14,-.58],[.08,-.88],[-.04,-1],[-.07,-.72]]);
-// The wide forward belly and thick spine give the great dao visible mass.
-// Its one terminal point is on the blade frame's centerline: mount -.1 + tip -1.38.
-const greatDao = polygon('great-dao', [[-.10,0],[.12,0],[.20,-.32],[.28,-.88],[.23,-1.13],[0,-1.38],[-.16,-1.14],[-.17,-.72],[-.12,-.20]], .085);
-const greatDaoEdge = polygon('great-dao-edge', [[.08,-.04],[.12,-.04],[.20,-.32],[.28,-.88],[.23,-1.13],[0,-1.38],[.18,-1.10],[.22,-.85],[.15,-.33]], .009);
-const greatDaoSpine = polygon('great-dao-spine', [[-.10,-.015],[-.065,-.015],[-.075,-.21],[-.115,-.73],[-.11,-1.09],[-.16,-1.14],[-.17,-.72],[-.12,-.20]], .10);
+// A continuous back and a forward cutting belly lead into an oblique dao point.
+// The narrow edge stays inside the steel silhouette; mount -.1 + tip -1.38
+// keeps the reviewed physical tip exactly on its original centerline.
+const greatDao = polygon('great-dao-forged', [[-.085,0],[.09,0],[.12,-.26],[.18,-.66],[.22,-.99],[.205,-1.14],[.13,-1.28],[0,-1.38],[-.064,-1.225],[-.087,-1.04],[-.102,-.63],[-.095,-.23]], .07);
+const greatDaoEdge = polygon('great-dao-forged-edge', [[.067,-.025],[.0928,-.025],[.12,-.26],[.18,-.66],[.22,-.99],[.205,-1.14],[.13,-1.28],[0,-1.38],[.104,-1.277],[.18,-1.137],[.195,-.994],[.155,-.663],[.096,-.264]], .006);
+const greatDaoSpine = polygon('great-dao-forged-spine', [[-.085,-.02],[-.060,-.02],[-.067,-.23],[-.074,-.62],[-.059,-1.04],[-.039,-1.20],[0,-1.38],[-.064,-1.225],[-.087,-1.04],[-.102,-.63],[-.095,-.23]], .085);
+const greatDaoFuller = polygon('great-dao-forged-fuller', [[-.043,-.20],[.010,-.20],[.040,-.82],[.017,-1.08],[-.001,-1.11],[-.002,-.82]], .003);
+const greatDaoGuard = polygon('great-dao-forged-guard', [[-.16,-.021],[-.118,.018],[-.045,.024],[.045,.024],[.118,.018],[.16,-.021],[.145,-.032],[.082,-.012],[-.082,-.012],[-.145,-.032]], .08);
+function ensureGreatDaoMaterials(palette) {
+  // Separate materials participate in the rig's hit flash and lifetime while
+  // leaving the retained blades, armour and shared palette colours intact.
+  const finishes={
+    greatSteel:[0x526e80,.42,.74], greatSpine:[0x283f4d,.55,.65],
+    greatEdge:[0xc7d7db,.26,.82], greatLeather:[0x19232a,.94,.02],
+    greatCopper:[0xa57b48,.50,.68],
+  };
+  for(const [name,[color,roughness,metalness]]of Object.entries(finishes))if(!palette[name]) {
+    const material=palette.metal.clone();material.name=`great-dao:${name}`;material.color.setHex(color);material.roughness=roughness;material.metalness=metalness;palette[name]=material;
+  }
+}
 function add(root,geo,mat,size=[1,1,1],pos=[0,0,0],rot=[0,0,0]) { const m=new THREE.Mesh(geo,mat);m.scale.set(...size);m.position.set(...pos);m.rotation.set(...rot);m.castShadow=true;root.add(m);return m; }
 function mark(root,y,x=0,z=0) { const n=new THREE.Object3D();n.position.set(x,y,z);root.add(n);return n; }
 function merge(root,key) {
@@ -29,6 +44,7 @@ function merge(root,key) {
 export function equipWeapon(rig,id) {
   const def=getWeapon(id); const palette=rig.materials;
   if(!palette)throw new Error('Weapon models require rig.materials');
+  if(def.id==='great-dao')ensureGreatDaoMaterials(palette);
   rig.weaponId=def.id;rig.weaponDefinition=def;rig.weaponTipNodes=[];rig.weaponArticulation=[];rig.offhandGrip=null;rig.weaponBladeFrames=[];rig.reviewedAttackSample=null;
   for(let side=0;side<2;side++) {
     const arm=rig.arms[side];if(!arm.weapon){arm.weapon=new THREE.Group();arm.wrist.add(arm.weapon);}
@@ -49,18 +65,21 @@ export function equipWeapon(rig,id) {
         blade(tangBlade,1.25,1);m(box,'edge',[.009,1.10,.008],[.05,-.655,.021]);
         m(ring,'gold',[.055,.055,.055],[0,.46,0]);tip(-1.35);break;
       case 'great-dao':
-        // Both wrists sit on this continuous hilt, behind a broad copper guard.
-        m(rod,'dark',[.042,.45,.042],[0,.165,0]);
-        for(const y of [.015,.10,.19,.28])m(rod,'gold',[.046,.013,.046],[0,y,0]);
-        m(rod,'gold',[.058,.055,.058],[0,.405,0]);
-        m(box,'gold',[.36,.055,.105],[0,-.075,0]);
-        m(box,'dark',[.15,.075,.10],[0,-.08,0]);
-        m(greatDao,'metal',[1,1,1],[0,-.1,-.0425]);
-        m(greatDaoSpine,'dark',[1,1,1],[0,-.1,-.05]);
-        m(greatDaoEdge,'edge',[1,1,1],[0,-.1,.043]);
-        m(greatDaoEdge,'edge',[1,1,1],[0,-.1,-.052]);
-        // Short, inset fittings stay well behind the physical terminal point.
-        m(box,'gold',[.05,.18,.096],[-.015,-.26,0]);
+        // A long wrapped grip reads separately from the forged blade, with
+        // small copper fittings instead of bright bands along the whole hilt.
+        m(rod,'greatLeather',[.038,.45,.038],[0,.165,0]);
+        for(let i=0;i<10;i++)m(rod,'greatLeather',[.040,.009,.040],[0,-.01+i*.036,0],[0,Math.PI/6,0]);
+        m(rod,'greatSpine',[.048,.040,.048],[0,.406,0]);
+        m(rod,'greatCopper',[.045,.018,.045],[0,.383,0]);
+        m(rod,'greatSpine',[.039,.034,.039],[0,-.042,0]);
+        m(greatDaoGuard,'greatCopper',[1,1,1],[0,-.075,-.04]);
+        m(greatDao,'greatSteel',[1,1,1],[0,-.1,-.035]);
+        m(greatDaoSpine,'greatSpine',[1,1,1],[0,-.1,-.0425]);
+        m(greatDaoFuller,'greatSpine',[1,1,1],[0,-.1,.0355]);
+        m(greatDaoFuller,'greatSpine',[1,1,1],[0,-.1,-.0385]);
+        m(greatDaoEdge,'greatEdge',[1,1,1],[0,-.1,.0355]);
+        m(greatDaoEdge,'greatEdge',[1,1,1],[0,-.1,-.0415]);
+        m(box,'greatCopper',[.176,.044,.077],[0,-.125,0]);
         tip(-1.48);break;
     }
     if(['dual-dao','tang-dao','great-dao'].includes(id)) {
