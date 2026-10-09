@@ -61,7 +61,7 @@ function checkClearance(f, context) {
 }
 function pose(f, args) {
   poseCharacter(f.rig, {dt: 1 / 60, ...args});
-  checkClearance(f, `${args.state} ${args.combo ?? args.skill ?? 0}, phase ${(args.phase ?? 0).toFixed(4)}, time ${args.time.toFixed(3)}`);
+  checkClearance(f, `${args.state} ${args.combo ?? 0}, phase ${(args.phase ?? 0).toFixed(4)}, time ${args.time.toFixed(3)}`);
 }
 for (const state of ['idle', 'run']) {
   test(`Tang both palm and forearm volumes clear torso/head throughout ${state}`, () => {
@@ -71,7 +71,7 @@ for (const state of ['idle', 'run']) {
       moveBlend: state === 'run' ? 1 : 0, gaitPhase: frame / 60 * Math.PI * 4, immediate: true, transition: false});
   });
 }
-for (const state of ['attack', 'skill']) for (let action = 0; action < (state === 'attack' ? 4 : 5); action++) {
+for (const state of ['attack']) for (let action = 0; action < 4; action++) {
   test(`Tang ${state} ${action + 1}: fine sampling exposes no hand trajectory seams`, () => {
     // Normal frame sampling missed a 3.7cm projection jump during a high
     // carry. Cover the whole path finely enough to distinguish fast motion
@@ -90,7 +90,7 @@ for (const state of ['attack', 'skill']) for (let action = 0; action < (state ==
     const f = fixture(), spec = getReviewedAttack('tang-dao', action, state);
     const phases = new Set([0, 1, ...spec.contacts.flatMap(c => [c.start, c.phase, c.end])]);
     for (let frame = 0; frame <= Math.ceil(spec.duration * 60); frame++) phases.add(Math.min(1, frame / (spec.duration * 60)));
-    for (const phase of [...phases].sort((a, b) => a - b)) pose(f, {state, combo: action, skill: action, phase,
+    for (const phase of [...phases].sort((a, b) => a - b)) pose(f, {state, combo: action, phase,
       time: phase * spec.duration, immediate: true, transition: false});
   });
   test(`Tang ${state} ${action + 1}: entry and exit blends keep both hands/forearms clear`, () => {
@@ -105,7 +105,7 @@ for (const state of ['attack', 'skill']) for (let action = 0; action < (state ==
       for (const exitPhase of [.5, 1]) {
         for (let frame = 0; frame <= Math.ceil(spec.duration * exitPhase * 60); frame++) {
           time += 1 / 60;
-          pose(f, {state, combo: action, skill: action, phase: Math.min(exitPhase, frame / (spec.duration * 60)), time});
+          pose(f, {state, combo: action, phase: Math.min(exitPhase, frame / (spec.duration * 60)), time});
         }
         for (let frame = 0; frame < 12; frame++) {
           time += 1 / 60;

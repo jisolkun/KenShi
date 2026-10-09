@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as THREE from 'three';
 import { createCharacter, poseCharacter } from '../src/characters.js';
-import { WEAPONS, DEFAULT_WEAPON_ID, getWeapon, SKILL_CONTACTS, isWeaponUnlocked, UNLOCKED_WEAPON_IDS } from '../src/weapons.js';
+import { WEAPONS, DEFAULT_WEAPON_ID, getWeapon, isWeaponUnlocked, UNLOCKED_WEAPON_IDS } from '../src/weapons.js';
 import { WEAPON_COMBOS } from '../src/weaponMotion.js';
 import { getReviewedAttack } from '../src/choreography/index.js';
 
@@ -16,14 +16,14 @@ const assertFinite = (rig, label) => {
 const signature = rig => [rig.body, rig.chest, ...rig.arms.flatMap(a => [a.shoulder, a.elbow, a.wrist])]
   .flatMap(n => [...n.position, ...n.quaternion]).map(n => n.toFixed(5)).join(',');
 
-test('27 unique catalog entries expose 108 valid contact windows and supported shapes', () => {
-  assert.equal(WEAPONS.length, 27);
-  assert.equal(new Set(WEAPONS.map(w => w.id)).size, 27);
+test('two weapon types expose eight valid basic attack contact windows', () => {
+  assert.equal(WEAPONS.length, 2);
+  assert.equal(new Set(WEAPONS.map(w => w.id)).size, 2);
   const shapes = new Set(['arc', 'thrust', 'crush', 'radial', 'chain', 'hook']);
   for (const weapon of WEAPONS) {
     assert.equal(getWeapon(weapon.id), weapon);
     assert.equal(weapon.moves.length, 4);
-    assert.equal(weapon.skillNames.length, 5);
+    assert.ok(!weapon.skillNames?.length, `${weapon.id}: no active skills`);
     assert.equal(WEAPON_COMBOS[weapon.id].length, 4);
     for (const move of weapon.moves) {
       assert.ok(move.duration > 0);
@@ -49,18 +49,18 @@ test('each weapon has distinct sampled four-hit choreography and bounded new fin
     assert.equal(new Set(hits).size, 4, `${weapon.id}: four distinct contacts`);
     weaponSignatures.add(hits.join('|'));
   }
-  assert.equal(weaponSignatures.size, 27);
+  assert.equal(weaponSignatures.size, 2);
 });
 
-test('all equipped poses, four attacks and five skills keep finite body and tip transforms', () => {
+test('all equipped poses and four basic attacks keep finite body and tip transforms', () => {
   for (const weapon of WEAPONS) {
     const rig = createCharacter();
     rig.setWeapon(weapon.id);
-    for (const state of ['idle', 'guard', 'run', 'hurt', 'dodge', 'attack', 'skill']) {
-      const count = state === 'skill' ? 5 : state === 'attack' ? 4 : 1;
+    for (const state of ['idle', 'guard', 'run', 'hurt', 'dodge', 'attack']) {
+      const count = state === 'attack' ? 4 : 1;
       for (let action = 0; action < count; action++) {
         for (let step = 0; step <= 10; step++) {
-          poseCharacter(rig, { state, combo: action, skill: action, phase: step / 10, time: step / 10, immediate: true });
+          poseCharacter(rig, { state, combo: action, phase: step / 10, time: step / 10, immediate: true });
           assertFinite(rig, `${weapon.id}/${state}/${action}/${step}`);
         }
       }
@@ -127,21 +127,6 @@ test('equip switches preserve wrist roots, replace tip nodes and reset motion sa
 });
 
 
-test('skill pose peaks align with the shared skill hit and effect contacts', () => {
-  assert.deepEqual(SKILL_CONTACTS, [.3, .38, .72, .4, .4]);
-  for (const weapon of WEAPONS.filter(w => w.id !== DEFAULT_WEAPON_ID && !getReviewedAttack(w.id))) {
-    const rig = createCharacter();
-    rig.setWeapon(weapon.id);
-    for (let skill = 0; skill < 5; skill++) {
-      const expectedTwist = WEAPON_COMBOS[weapon.id][skill >= 4 ? 3 : skill][6] * (skill >= 4 ? 1.25 : 1);
-      for (const combo of [0, 2, 3]) {
-        poseCharacter(rig, { state: 'skill', skill, combo, phase: SKILL_CONTACTS[skill], time: .5, immediate: true });
-        assert.ok(Math.abs(rig.chest.rotation.y - expectedTwist) < 1e-10, `${weapon.id}/skill${skill}/combo${combo}: peak contact`);
-      }
-    }
-  }
-});
-
 test('new weapon carries breathe, follow gait and let the free hand counterbalance its leg', () => {
   const range = values => Math.max(...values) - Math.min(...values);
   for (const weapon of WEAPONS.filter(w => w.id !== DEFAULT_WEAPON_ID)) {
@@ -177,9 +162,9 @@ test('new weapon carries breathe, follow gait and let the free hand counterbalan
 });
 
 
-test('only the three reviewed and unlocked weapons are available to choose', () => {
-  assert.deepEqual([...UNLOCKED_WEAPON_IDS], ['dual-dao', 'tang-dao', 'yanling-dao']);
-  assert.equal(WEAPONS.filter(w => isWeaponUnlocked(w.id)).length, 3);
+test('only the two basic attack weapon types are available to choose', () => {
+  assert.deepEqual([...UNLOCKED_WEAPON_IDS], ['dual-dao', 'tang-dao']);
+  assert.equal(WEAPONS.filter(w => isWeaponUnlocked(w.id)).length, 2);
   assert.equal(isWeaponUnlocked('unknown'), false);
   assert.equal(isWeaponUnlocked('ring-dao'), false);
 });
@@ -190,5 +175,19 @@ test('dual dao uses the original attack timings and bypasses the replacement reg
   assert.deepEqual(weapon.moves.map(m => m.name), ['燕返', '交锋', '穿花', '双月']);
   assert.deepEqual(weapon.moves.map(m => m.duration), [.31, .347, .291, .44]);
   assert.deepEqual(weapon.moves.map(m => m.contact), [.43, .43, .47, .48]);
-  assert.deepEqual(weapon.skillNames, ['燕返', '交锋', '穿花', '双月', '绝式·双月']);
+  assert.ok(!weapon.skillNames?.length);
+});
+
+test('removed catalogue ids normalize to the default type and active skill registry is empty', () => {
+  assert.deepEqual(WEAPONS.map(weapon => weapon.name), ['双刀', '砍刀']);
+  for (const id of ['yanling-dao', 'miao-dao', 'ring-dao', 'war-hammer', 'unknown']) {
+    assert.equal(getWeapon(id), getWeapon(DEFAULT_WEAPON_ID), `${id}: normalize old save`);
+    assert.equal(isWeaponUnlocked(id), false, `${id}: unavailable`);
+    assert.equal(getReviewedAttack(id, 0), null, `${id}: removed runtime action`);
+  }
+  for (const weapon of WEAPONS) {
+    for (let index = 0; index < 5; index++) {
+      assert.equal(getReviewedAttack(weapon.id, index, 'skill'), null, `${weapon.id}: no runtime skill ${index}`);
+    }
+  }
 });

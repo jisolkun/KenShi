@@ -5,9 +5,9 @@ import { createUI } from "./ui.js";
 import { createAudio } from "./audio.js";
 import { createEffects } from "./effects.js";
 import { requestMobileFullscreen } from "./fullscreen.js";
-import { WEAPONS, getWeapon, DEFAULT_WEAPON_ID, SKILL_CONTACTS, isWeaponUnlocked } from "./weapons.js";
+import { WEAPONS, getWeapon, DEFAULT_WEAPON_ID, isWeaponUnlocked } from "./weapons.js";
 import { createWeaponEffects } from "./weaponEffects.js";
-import { weaponStrikeContains, bladeSweepContains, bladeThrustContains } from "./weaponCombat.js";
+import { weaponStrikeContains, bladeSweepContains } from "./weaponCombat.js";
 import { getReviewedAttack, sampleReviewedAttack } from "./choreography/index.js";
 import "./style.css";
 
@@ -142,25 +142,13 @@ const hero = {
   hp: 120,
   maxHp: 120,
   stamina: 100,
-  souls: 100,
   target: null,
   destination: null,
   disengage: 0,
-  skillIndex: 0,
-  skillHits: new Set(),
   rollDirection: new THREE.Vector3(),
-  dashDirection: new THREE.Vector3(),
   ghostTimer: 0,
-  mount: 0,
 };
-const skills = [
-  { cost: 20, cooldown: 0, maxCooldown: 4 },
-  { cost: 28, cooldown: 0, maxCooldown: 6 },
-  { cost: 35, cooldown: 0, maxCooldown: 8 },
-  { cost: 30, cooldown: 0, maxCooldown: 8 },
-  { cost: 40, cooldown: 0, maxCooldown: 9 },
-];
-const metrics = { taps: 0, rolls: 0, skills: 0, specials: 0 };
+const metrics = { taps: 0, rolls: 0 };
 let mode = "start",
   gameTime = 0,
   globalTime = 0,
@@ -181,9 +169,7 @@ let mode = "start",
   arrowTime = 0;
 let enemies = [],
   projectiles = [],
-  drops = [],
-  companions = [];
-const specials = { horse: true, eagle: true, captain: true };
+  drops = [];
 let attackDurations = currentWeapon.moves.map(move => move.duration);
 let attackWindows = currentWeapon.moves.map(move => move.active);
 let attackContacts = currentWeapon.moves.map(move => move.contact);
@@ -209,8 +195,6 @@ const ui = createUI({
   pause: pauseGame,
   resume: resumeGame,
   retry: startGame,
-  skill: castSkill,
-  special: useSpecial,
   sound(enabled) {
     sound = enabled;
     audio.setEnabled?.(enabled);
@@ -458,8 +442,6 @@ function stateSnapshot() {
     maxHp: hero.maxHp,
     stamina: hero.stamina,
     maxStamina: 100,
-    souls: hero.souls,
-    maxSouls: 100,
     wave,
     progress: kills / total,
     kills,
@@ -468,14 +450,12 @@ function stateSnapshot() {
     time: gameTime,
     bossHp: boss?.hp || 0,
     bossMaxHp: boss?.maxHp || 0,
-    skills: skills.map((s) => ({ ...s })),
-    specials: { ...specials },
     sound,
     mode,
     phase: mode,
     clocks: { simulation: globalTime, presentation: presentationTime },
     hits,
-    resources: { souls: hero.souls, stamina: hero.stamina },
+    resources: { stamina: hero.stamina },
     inputs: { ...metrics },
     render: {
       drawCalls: renderer.info.render.calls,
@@ -554,19 +534,9 @@ function clearDynamic() {
   }
   for (const p of projectiles) disposeGroup(p.mesh, false);
   for (const d of drops) disposeGroup(d.mesh, false);
-  for (const c of companions) disposeGroup(c.rig?.group || c.mesh, false);
   enemies = [];
   projectiles = [];
   drops = [];
-  companions = [];
-  if (horseMesh) {
-    disposeGroup(horseMesh);
-    horseMesh = null;
-  }
-  if (eagleMesh) {
-    disposeGroup(eagleMesh);
-    eagleMesh = null;
-  }
   fx.clear();
   weaponFx.clear();
 }
@@ -590,8 +560,7 @@ function selectWeapon(id = currentWeapon.id, preview = true) {
   hero.previewContact = -1;
   fx.clear();
   weaponFx.clear();
-  const width = currentWeapon.grip === "flexible" ? 0.55
-    : currentWeapon.stats.power >= 4 ? 1.1 : 0.7;
+  const width = currentWeapon.stats.power >= 4 ? 1.1 : 0.7;
   for (const trail of trails) {
     trail.color = new THREE.Color(currentWeapon.effectColor);
     trail.coreColor = new THREE.Color(currentWeapon.effectAccent);
@@ -604,9 +573,9 @@ function selectWeapon(id = currentWeapon.id, preview = true) {
 function warmReviewedWeapon(id) {
   const generation=++weaponWarmGeneration;
   const queue=[];
-  for(const state of ['attack','skill'])for(let i=0;i<(state==='skill'?5:4);i++){
-    const action=getReviewedAttack(id,i,state);
-    if(action)queue.push({state,i,phase:action.contact});
+  for(let i=0;i<4;i++){
+    const action=getReviewedAttack(id,i);
+    if(action)queue.push({state:'attack',i,phase:action.contact});
   }
   const schedule=callback=>window.requestIdleCallback?window.requestIdleCallback(callback,{timeout:500}):setTimeout(callback,30);
   const next=()=>{
@@ -628,8 +597,6 @@ function chooseWeapon(id = currentWeapon.id) {
   hero.state = "idle";
   hero.elapsed = 0;
   hero.duration = 0;
-  hero.mount = 0;
-  hero.flight = 0;
   hero.target = null;
   hero.destination = null;
   hero.velocity.set(0, 0, 0);
@@ -694,13 +661,10 @@ function startGame(weaponId = currentWeapon.id) {
   hero.comboTimer = 0;
   hero.hp = 120;
   hero.stamina = 100;
-  hero.souls = 100;
   hero.invulnerable = 1.3;
   hero.flash = 0;
   hero.target = null;
   hero.destination = null;
-  hero.mount = 0;
-  hero.flight = 0;
   hero.disengage = 0;
   hero.velocity.set(0, 0, 0);
   hero.moveVelocity.set(0, 0, 0);
@@ -713,8 +677,6 @@ function startGame(weaponId = currentWeapon.id) {
   hero.transition = { from: "idle", to: "idle", age: 1, duration: 0.08 };
   hero.poseState = "idle";
   hero.poseCombo = 0;
-  for (const s of skills) s.cooldown = 0;
-  Object.keys(specials).forEach((k) => (specials[k] = true));
   destinationMarker.visible = false;
   targetMarker.visible = false;
   ui.showScreen("hide");
@@ -876,7 +838,6 @@ function spawnWave(index) {
   });
   if (index > 1) {
     hero.hp = Math.min(hero.maxHp, hero.hp + 25);
-    hero.souls = Math.min(100, hero.souls + 40);
     ui.notify(index === 2 ? "第二阵 · 重甲压境" : "终阵 · 鬼将现身");
   }
 }
@@ -894,7 +855,6 @@ function nearestEnemy(position = hero.pos, max = Infinity) {
   return best;
 }
 function beginAttack(enemy) {
-  if (hero.mount > 0) return;
   hero.state = "attack";
   hero.combatAge = 0;
   hero.elapsed = 0;
@@ -920,9 +880,7 @@ function hurtEnemy(
   from = hero.pos,
   force = 1,
   critical = false,
-  skill = false,
   playerContact = false,
-  contactKind = null,
 ) {
   if (e.state === "dead" || e.state === "spawn") return false;
   e.hp = Math.max(0, e.hp - damage);
@@ -939,9 +897,9 @@ function hurtEnemy(
   e.hurtStrength = critical ? 1 : 0.65;
   e.localHitStop = Math.max(e.localHitStop || 0, critical ? 0.038 : 0.027);
   e.velocity.addScaledVector(temp, force * (e.type === "boss" ? 0.4 : 1));
-  showDamage(e, damage, critical ? "critical" : skill ? "skill" : "normal");
+  showDamage(e, damage, critical ? "critical" : "normal");
   if (playerContact) {
-    weaponFx.impact(currentWeapon.id, e.pos.clone().add(new THREE.Vector3(0, 1.05, 0)), hero.angle, hero.combo, critical, contactKind);
+    weaponFx.impact(currentWeapon.id, e.pos.clone().add(new THREE.Vector3(0, 1.05, 0)), hero.angle, hero.combo, critical);
   } else if (fx.impact)
     fx.impact(
       e.pos
@@ -954,29 +912,24 @@ function hurtEnemy(
   else fx.burst(e.pos, critical ? 1.2 : 0.55);
   combo++;
   comboTimeout = 3;
-  hero.souls = Math.min(100, hero.souls + 2);
   if (playerContact || e.pos.distanceTo(hero.pos) < 6)
     kickCamera(hitDirection, (critical ? 0.075 : 0.035) * (playerContact ? 0.7 + currentWeapon.stats.power * 0.12 : 1));
-  const isPlayerContact =
-    playerContact &&
-    ((hero.state === "attack" && !skill) ||
-      (hero.state === "skill" && skill && (hero.skillIndex !== 4 || currentWeapon.id === 'yanling-dao')));
+  const isPlayerContact = playerContact && hero.state === "attack";
   if (isPlayerContact && !hero.impactDone) {
     hero.impactDone = true;
     const contactStop = currentWeapon.moves[hero.combo].hitstop;
-    hero.localHitStop = skill ? 0.038 : Math.min(0.08, contactStop * (critical ? 1.2 : 1));
+    hero.localHitStop = Math.min(0.08, contactStop * (critical ? 1.2 : 1));
   }
   if (
     playerContact &&
     hero.state === "attack" &&
     hero.combo === 3 &&
-    !skill &&
     !hero.globalImpactDone
   ) {
     hero.globalImpactDone = true;
     hitStop = Math.max(hitStop, 0.025);
   }
-  if (playerContact) safeAudio("weaponHit", currentWeapon.id, critical ? 1.5 : 0.75, hero.combo, contactKind);
+  if (playerContact) safeAudio("weaponHit", currentWeapon.id, critical ? 1.5 : 0.75, hero.combo);
   else safeAudio("hit", critical ? 1.5 : 0.75, hero.combo);
   if (e.hp <= 0) {
     e.state = "dead";
@@ -984,7 +937,6 @@ function hurtEnemy(
     e.duration = 1.5;
     e.bar.visible = false;
     kills++;
-    hero.souls = Math.min(100, hero.souls + 5);
     dropLoot(e.pos);
     e.deathDirection = hitDirection;
     e.deathImpactDone = false;
@@ -997,10 +949,9 @@ function hurtEnemy(
     return true;
   }
   if (e.type === "boss") {
-    // Ordinary blades preserve the general's wind-up. Finishers and skills
-    // can break his stance, with a recovery window that prevents a stun loop.
-    const heavyHit =
-      skill || (critical && hero.state === "attack" && hero.combo === 3);
+    // The last basic slash can break the general's stance. Recovery prevents
+    // chaining these contacts into a permanent stun.
+    const heavyHit = critical && hero.state === "attack" && hero.combo === 3;
     if (!heavyHit || (e.poise || 0) > 0) return true;
     e.poise = 3.2;
   }
@@ -1026,9 +977,8 @@ function attackHit(phase = attackContacts[hero.combo]) {
       e,
       Math.round(attackDamages[c] * (crit ? 1.5 : 1)),
       origin,
-      move.knockback * (move.shape === "hook" && currentWeapon.category === "奇门" ? -2.2 : c === 3 ? 5 : 3.5),
+      move.knockback * (c === 3 ? 5 : 3.5),
       crit,
-      false,
       true,
     );
   }
@@ -1038,8 +988,7 @@ function attackHit(phase = attackContacts[hero.combo]) {
   }
 }
 function reviewedStrike(phase,frames) {
-  const skill=hero.state==='skill';
-  const action=getReviewedAttack(currentWeapon.id,skill?hero.skillIndex:hero.combo,hero.state);
+  const action=getReviewedAttack(currentWeapon.id,hero.combo,hero.state);
   if(!action)return;
   const previous=hero.reviewedPrevious;
   action.contacts.forEach((contact,stroke)=>{
@@ -1049,43 +998,37 @@ function reviewedStrike(phase,frames) {
     hero.hitDone=true;
     if(!hero.strokeContacts.has(stroke)){
       hero.strokeContacts.add(stroke);
-      if(currentWeapon.id==='yanling-dao')hero.impactDone=false;
-      safeAudio('weaponSlash',currentWeapon.id,skill?hero.skillIndex:hero.combo,contact.kind??'cut');
+      safeAudio('weaponSlash',currentWeapon.id,hero.combo,contact.kind??'cut');
     }
-    const prior=previous&&previous.state===hero.state&&previous.combo===(skill?hero.skillIndex:hero.combo)&&previous.phase>=contact.window[0]
+    const prior=previous&&previous.state===hero.state&&previous.combo===hero.combo&&previous.phase>=contact.window[0]
       ?previous.frames.find(b=>b.hand===contact.hand):null;
     for(const e of enemies){
       const key=`${stroke}:${e.id}`;
       if(e.state==='dead'||e.state==='spawn'||hero.attackHits.has(key))continue;
       const target={x:e.pos.x,z:e.pos.z,minY:.18,maxY:e.type==='boss'?3.2:e.type==='brute'?2.4:1.85};
-      const contains=contact.kind==='thrust'?bladeThrustContains:bladeSweepContains;
-      if(!contains(frame,prior,target,e.radius,action.width*.5))continue;
+      if(!bladeSweepContains(frame,prior,target,e.radius,action.width*.5))continue;
       hero.attackHits.add(key);
       const move=currentWeapon.moves[hero.combo];
-      const critical=skill||hero.combo===3;
-      const totalDamage=skill?[75,100,115,95,150][hero.skillIndex]:move.damage;
-      hurtEnemy(e,Math.round(totalDamage/action.contacts.length*(critical?1.25:1)),hero.pos,move.knockback*(skill?5:3.5),critical,skill,true,currentWeapon.id==='yanling-dao'?contact.kind:null);
+      const critical=hero.combo===3;
+      hurtEnemy(e,Math.round(move.damage/action.contacts.length*(critical?1.25:1)),hero.pos,move.knockback*3.5,critical,true);
     }
   });
-  hero.reviewedPrevious={state:hero.state,combo:skill?hero.skillIndex:hero.combo,phase,frames};
+  hero.reviewedPrevious={state:hero.state,combo:hero.combo,phase,frames};
 }
 function sampleHeroTrails(frames,tips,phase,dt,active) {
-  const action=['attack','skill'].includes(hero.state)?getReviewedAttack(currentWeapon.id,hero.state==='skill'?hero.skillIndex:hero.combo,hero.state):null;
-  const source=`${currentWeapon.id}:${hero.trailSeries}:${hero.state}:${hero.state==='skill'?hero.skillIndex:hero.combo}`;
+  const action=hero.state==='attack'?getReviewedAttack(currentWeapon.id,hero.combo):null;
+  const source=`${currentWeapon.id}:${hero.trailSeries}:${hero.state}:${hero.combo}`;
   for(let i=0;i<trails.length;i++){
     const trail=trails[i];
     const blade=action&&frames.find(b=>b.hand===i);
     const contact=action?.contacts.find(c=>c.hand===i&&phase>=c.window[0]&&phase<=c.window[1]);
     const cutting=action?!!blade&&!!contact:active&&!!tips[i];
-    // Stabs leave a thin wake behind the real point; a full heel-to-tip
-    // ribbon would make the narrow entry look like a sweeping cut.
-    const trailHeel=b=>contact?.kind==='thrust'?b.tip.clone().lerp(b.heel,.06):b.heel;
     // A short active interval can cover one displayed frame. Seed from the
     // preceding real blade pose so its path still forms a visible ribbon.
     if(blade&&cutting&&dt>0&&!trail.wasActive&&trail.previousBlade?.source===source&&phase-trail.previousBlade.phase<.1){
-      fx.sample(trail,trail.previousBlade.tip,trailHeel(trail.previousBlade),true,0);
+      fx.sample(trail,trail.previousBlade.tip,trail.previousBlade.heel,true,0);
     }
-    fx.sample(trail,blade?blade.tip:tips[i],blade?trailHeel(blade):hero.pos,dt>0&&cutting,dt);
+    fx.sample(trail,blade?blade.tip:tips[i],blade?blade.heel:hero.pos,dt>0&&cutting,dt);
     trail.previousBlade=blade?{tip:blade.tip,heel:blade.heel,phase,source}:null;
   }
 }
@@ -1094,9 +1037,7 @@ function damageHero(amount, from) {
     mode !== "playing" ||
     hero.hp <= 0 ||
     hero.state === "dead" ||
-    hero.invulnerable > 0 ||
-    hero.mount > 0 ||
-    hero.flight > 0
+    hero.invulnerable > 0
   )
     return;
   hero.combatAge = 0;
@@ -1169,7 +1110,6 @@ function roll(direction) {
     hero.state === "roll"
   )
     return;
-  if (hero.state === "skill" && hero.elapsed < hero.duration * 0.65) return;
   const d =
     direction?.clone() ||
     temp.set(Math.sin(hero.angle), 0, Math.cos(hero.angle)).clone();
@@ -1195,101 +1135,6 @@ function roll(direction) {
   safeAudio("roll");
   fx.ring(hero.pos, 0.8, 0xcbb99a, 0.25);
 }
-function castSkill(index) {
-  if (mode !== "playing" || hero.hp <= 0) return;
-  const s = skills[index];
-  if (!s) return;
-  if (s.cooldown > 0) {
-    ui.notify("招式尚未回气");
-    return;
-  }
-  if (hero.souls < s.cost) {
-    ui.notify("魂晶不足 · 斩敌与拾取可补充");
-    return;
-  }
-  if (hero.state === "roll") return;
-  audio.unlock?.();
-  hero.souls -= s.cost;
-  metrics.skills++;
-  s.cooldown = s.maxCooldown;
-  const target =
-    hero.target && hero.target.state !== "dead"
-      ? hero.target
-      : nearestEnemy(hero.pos, 12);
-  if (target) face(temp.subVectors(target.pos, hero.pos), 1);
-  hero.state = "skill";
-  hero.combatAge = 0;
-  hero.skillIndex = index;
-  hero.elapsed = 0;
-  hero.duration = [0.72, 0.85, 1.05, 0.85, 0.8][index] * (1.13 - currentWeapon.stats.speed * 0.026);
-  const reviewed=getReviewedAttack(currentWeapon.id,index,'skill');
-  if(reviewed)hero.duration=reviewed.duration;
-  hero.reviewedPrevious=null;
-  hero.strokeContacts.clear();
-  hero.trailSeries++;
-  hero.attackHits.clear();
-  hero.skillHits.clear();
-  hero.impactDone = false;
-  hero.globalImpactDone = false;
-  hero.localHitStop = 0;
-  hero.hitDone = false;
-  hero.destination = null;
-  hero.invulnerable = index === 2 ? 0.88 : 0.38;
-  hero.dashDirection.set(Math.sin(hero.angle), 0, Math.cos(hero.angle));
-  destinationMarker.visible = false;
-  safeAudio("weaponSkill", currentWeapon.id, index);
-  if(!reviewed)weaponFx.skill(currentWeapon.id, hero.pos, hero.angle, index);
-  fx.ring(
-    hero.pos,
-    reviewed?0.65:index === 3 ? weaponSkillRadius(4.8) : 1.7,
-    index === 3 ? 0xaacbe7 : currentWeapon.effectColor,
-    0.4,
-  );
-}
-function weaponSkillRadius(radius) {
-  return radius * THREE.MathUtils.clamp(Math.max(...attackRanges) / 2.6, 0.68, 1.35);
-}
-function skillHit(radius, damage, force, full = true, once = true) {
-  radius = weaponSkillRadius(radius);
-  damage = Math.round(damage * (0.76 + currentWeapon.stats.power * 0.09));
-  let did = false;
-  for (const e of enemies) {
-    if (
-      e.state === "dead" ||
-      e.state === "spawn" ||
-      (once && hero.skillHits.has(e.id))
-    )
-      continue;
-    const d = e.pos.distanceTo(hero.pos);
-    if (d > radius + e.radius) continue;
-    if (
-      !full &&
-      temp.subVectors(e.pos, hero.pos).normalize().dot(hero.dashDirection) < 0.2
-    )
-      continue;
-    hero.skillHits.add(e.id);
-    hurtEnemy(e, damage, hero.pos, force, true, true, true);
-    did = true;
-    if (
-      hero.skillIndex === 3 &&
-      e.state !== "dead" &&
-      (e.type !== "boss" || e.state === "hurt")
-    ) {
-      e.state = "frozen";
-      e.elapsed = 0;
-      e.duration = 2.6;
-      e.cooldown = 3;
-    }
-  }
-  if (did && !hero.globalImpactDone) {
-    hero.globalImpactDone = true;
-    hitStop = Math.max(hitStop, 0.032);
-  }
-}
-function skillContactFeedback(index) {
-  weaponFx.skill(currentWeapon.id, hero.pos, hero.angle, index, true);
-  safeAudio("weaponSlash", currentWeapon.id, index % 4);
-}
 function updateHero(frameDt) {
   const frozen = Math.min(frameDt, hero.localHitStop);
   hero.localHitStop = Math.max(0, hero.localHitStop - frameDt);
@@ -1301,7 +1146,6 @@ function updateHero(frameDt) {
   hero.flash = Math.max(0, hero.flash - frameDt * 7);
   hero.rig.setFlash?.(hero.flash);
   hero.stamina = Math.min(100, hero.stamina + frameDt * 27);
-  hero.souls = Math.min(100, hero.souls + frameDt * 1.4);
   hero.disengage = Math.max(0, hero.disengage - frameDt);
   hero.nextAttackIn = Math.max(0, hero.nextAttackIn - frameDt);
   hero.comboTimer += frameDt;
@@ -1309,7 +1153,7 @@ function updateHero(frameDt) {
   hero.velocity.multiplyScalar(Math.exp(-dt * 10));
   hero.pos.addScaledVector(hero.velocity, dt);
   if (hero.target?.state === "dead") hero.target = null;
-  const maxSpeed = hero.mount > 0 ? 12 : hero.flight > 0 ? 8.5 : 5.8 * (0.88 + currentWeapon.stats.speed * 0.024);
+  const maxSpeed = 5.8 * (0.88 + currentWeapon.stats.speed * 0.024);
   function navigate() {
     const goal = movementGoal();
     locomotion(
@@ -1394,82 +1238,11 @@ function updateHero(frameDt) {
       if (
         next &&
         hero.pos.distanceTo(next.pos) <
-          (getReviewedAttack(currentWeapon.id,hero.combo)?attackRanges[hero.combo]*.8+next.radius*.35+.1:attackRanges[hero.combo] + next.radius + 0.35) &&
-        hero.mount <= 0 &&
-        !(hero.flight > 0)
+          (getReviewedAttack(currentWeapon.id,hero.combo)?attackRanges[hero.combo]*.8+next.radius*.35+.1:attackRanges[hero.combo] + next.radius + 0.35)
       )
         beginAttack(next);
       else navigate();
     }
-  } else if (hero.state === "skill") {
-    const phase = hero.elapsed / hero.duration,
-      index = hero.skillIndex;
-    const reviewed = getReviewedAttack(currentWeapon.id,index,'skill');
-    if (reviewed) {
-      locomotion(dt,null);
-    } else {
-    hero.ghostTimer -= dt;
-    if ((index === 0 || index === 1) && hero.ghostTimer <= 0) {
-      fx.ghost(hero.rig);
-      hero.ghostTimer = 0.1;
-    }
-    if (index === 0 && phase >= SKILL_CONTACTS[index] && phase < 0.73) {
-      if (!hero.hitDone) {
-        hero.hitDone = true;
-        skillContactFeedback(index);
-      }
-      move(hero.pos, hero.dashDirection, 17, dt);
-      skillHit(2.3, 58, 6, false);
-    }
-    if (index === 1 && phase >= SKILL_CONTACTS[index] && phase < 0.85) {
-      if (!hero.hitDone) {
-        hero.hitDone = true;
-        skillContactFeedback(index);
-        skillHit(3.8, 75, 7);
-      }
-      hero.angle += dt * 15;
-    }
-    if (index === 2 && phase < 0.52)
-      move(hero.pos, hero.dashDirection, 6.5, dt);
-    if (index === 2 && phase >= SKILL_CONTACTS[index] && !hero.hitDone) {
-      hero.hitDone = true;
-      skillContactFeedback(index);
-      skillHit(4.5, 100, 9);
-      fx.ring(hero.pos, weaponSkillRadius(4.5), currentWeapon.effectAccent, 0.55);
-      fx.burst(hero.pos, 2);
-      kickCamera(hero.dashDirection, 0.15);
-      if (!hero.globalImpactDone) {
-        hero.globalImpactDone = true;
-        hitStop = Math.max(hitStop, 0.04);
-      }
-    }
-    if (index === 3 && phase >= SKILL_CONTACTS[index] && !hero.hitDone) {
-      hero.hitDone = true;
-      skillContactFeedback(index);
-      skillHit(5, 52, 2);
-      fx.ring(hero.pos, weaponSkillRadius(5), 0xb3cddd, 1.1);
-    }
-    if (index === 4 && phase >= SKILL_CONTACTS[index] && !hero.hitDone) {
-      hero.hitDone = true;
-      skillContactFeedback(index);
-      for (let i = -2; i <= 2; i++)
-        spawnProjectile(
-          hero.pos.clone().add(new THREE.Vector3(0, 1, 0)),
-          new THREE.Vector3(
-            Math.sin(hero.angle + i * 0.2),
-            0,
-            Math.cos(hero.angle + i * 0.2),
-          ),
-          18,
-          true,
-          60,
-          currentWeapon.effectColor,
-          2.6,
-        );
-    }
-    }
-    hero.moveVelocity.multiplyScalar(Math.exp(-dt * 25));
-    if (phase >= 1) locomotionState();
   } else if (hero.state === "hurt" || hero.state === "dead") {
     hero.moveVelocity.multiplyScalar(Math.exp(-dt * 28));
     if (hero.state === "hurt" && hero.elapsed >= hero.duration) navigate();
@@ -1482,49 +1255,20 @@ function updateHero(frameDt) {
       hero.pos.distanceTo(enemy.pos) <
         (getReviewedAttack(currentWeapon.id,hero.combo)?attackRanges[hero.combo]*.8+enemy.radius*.35+.1:attackRanges[hero.combo] + enemy.radius - 0.12) &&
       hero.disengage <= 0 &&
-      hero.nextAttackIn <= 0 &&
-      hero.mount <= 0 &&
-      !(hero.flight > 0)
+      hero.nextAttackIn <= 0
     ) {
       beginAttack(enemy);
     } else navigate();
   }
-  if (hero.mount > 0) {
-    hero.mount -= dt;
-    for (const e of enemies) {
-      if (
-        e.state !== "dead" &&
-        e.pos.distanceTo(hero.pos) < 1.8 + e.radius &&
-        (hero.mountHits.get(e.id) || 0) < gameTime
-      ) {
-        hero.mountHits.set(e.id, gameTime + 0.45);
-        hurtEnemy(e, 48, hero.pos, 8, true, true);
-        fx.arc(hero.pos, hero.angle, 2.3, 0, 0xe4cf9b);
-      }
-    }
-    if (horseMesh) {
-      horseMesh.position.copy(hero.pos);
-      horseMesh.rotation.y = hero.angle;
-      horseMesh.children.forEach((p, i) => {
-        if (p.userData.leg)
-          p.rotation.x = Math.sin(hero.gaitPhase * 1.25 + i) * 0.55;
-      });
-    }
-    if (hero.mount <= 0) {
-      disposeGroup(horseMesh);
-      horseMesh = null;
-      ui.notify(`战马已退 · 继续${currentWeapon.name}作战`);
-    }
-  }
   clampPosition(hero.pos);
   const reviewedMotion = getReviewedAttack(currentWeapon.id,
-    hero.state === 'skill' ? hero.skillIndex : hero.combo, hero.state);
+    hero.combo, hero.state);
   if (reviewedMotion) hero.attackCarry = THREE.MathUtils.clamp(hero.moveVelocity.length() / maxSpeed, 0, 1);
   const moved = hero.pos.distanceTo(previousPosition);
   const locomoting =
     hero.state === "run" ||
     hero.state === "idle" ||
-    ((hero.state === "attack" || (hero.state === "skill" && reviewedMotion)) && hero.attackCarry > 0.05);
+    (hero.state === "attack" && hero.attackCarry > 0.05);
   const previousFoot = Math.floor(hero.gaitPhase / Math.PI);
   if (locomoting)
     hero.gaitPhase +=
@@ -1539,7 +1283,7 @@ function updateHero(frameDt) {
     Math.floor(hero.gaitPhase / Math.PI) !== previousFoot &&
     moved > 0.001
   )
-    safeAudio("footstep", hero.mount > 0 ? 1.4 : 0.6);
+    safeAudio("footstep", 0.6);
   hero.actualSpeed = dt > 0 ? moved / dt : 0;
   const targetBlend = THREE.MathUtils.clamp(
     hero.moveVelocity.length() / maxSpeed,
@@ -1552,10 +1296,10 @@ function updateHero(frameDt) {
     1 - Math.exp(-frameDt * 20),
   );
   hero.rig.group.position.copy(hero.pos);
-  hero.rig.group.position.y = hero.mount > 0 ? 1 : 0;
+  hero.rig.group.position.y = 0;
   hero.rig.group.rotation.y = hero.angle;
   const phase = hero.duration ? Math.min(1, hero.elapsed / hero.duration) : 0;
-  const poseState = hero.mount > 0 ? "charge" : hero.state;
+  const poseState = hero.state;
   const switched =
     hero.poseState !== poseState ||
     (poseState === "attack" && hero.poseCombo !== hero.combo);
@@ -1586,19 +1330,17 @@ function updateHero(frameDt) {
     attackCarry: hero.attackCarry,
     hurtDirection: hero.hurtDirection || 0,
     hurtStrength: hero.hurtStrength || 0,
-    skill: hero.skillIndex,
   });
   hero.rig.group.updateMatrixWorld(true);
   const tips = hero.rig.weaponTips();
   const blades = hero.rig.weaponBlades();
-  if(dt>0&&(hero.state==='attack'||hero.state==='skill'))reviewedStrike(phase,blades);
+  if(dt>0&&hero.state==='attack')reviewedStrike(phase,blades);
   const active =
     !switched &&
     dt > 0 &&
-    ((hero.state === "attack" &&
-      phase >= attackWindows[hero.combo][0] &&
-      phase <= attackWindows[hero.combo][1]) ||
-      (hero.state === "skill" && phase > 0.25 && phase < 0.8));
+    hero.state === "attack" &&
+    phase >= attackWindows[hero.combo][0] &&
+    phase <= attackWindows[hero.combo][1];
   sampleHeroTrails(blades,tips,phase,frameDt,active&&!switched);
 }
 function beginEnemyAttack(e) {
@@ -1713,7 +1455,7 @@ function updateEnemies(dt) {
             )
             .normalize()
             .clone();
-          spawnProjectile(start, dir, 11, false, e.damage, 0xeab875, 2.2);
+          spawnProjectile(start, dir, 11, e.damage, 0xeab875, 2.2);
         } else if (e.type === "boss" && e.attackKind === 2) {
           for (let j = -2; j <= 2; j++) {
             spawnProjectile(
@@ -1724,7 +1466,6 @@ function updateEnemies(dt) {
                 Math.cos(e.angle + j * 0.28),
               ),
               9,
-              false,
               12,
               0xc88550,
               2.5,
@@ -1862,7 +1603,7 @@ function updateEnemies(dt) {
       if (hero.hp > 0) finishGame(true);
     } else {
       waveTimer = 2.4;
-      ui.notify("尸潮暂歇 · 生命与魂晶恢复");
+      ui.notify("尸潮暂歇 · 生命恢复");
     }
   }
   if (waveTimer > 0) {
@@ -1877,7 +1618,6 @@ function spawnProjectile(
   position,
   direction,
   speed,
-  friendly,
   damage,
   color = 0xe1b975,
   duration = 2,
@@ -1893,10 +1633,8 @@ function spawnProjectile(
     mesh,
     direction: direction.clone(),
     speed,
-    friendly,
     damage,
     life: duration,
-    hit: new Set(),
   });
 }
 function updateProjectiles(dt) {
@@ -1904,21 +1642,7 @@ function updateProjectiles(dt) {
     const p = projectiles[i];
     p.life -= dt;
     p.mesh.position.addScaledVector(p.direction, p.speed * dt);
-    if (p.friendly) {
-      for (const e of enemies) {
-        if (e.state === "dead" || e.state === "spawn" || p.hit.has(e.id))
-          continue;
-        const d = Math.hypot(
-          p.mesh.position.x - e.pos.x,
-          p.mesh.position.z - e.pos.z,
-        );
-        if (d < e.radius + 0.45) {
-          p.hit.add(e.id);
-          hurtEnemy(e, p.damage, p.mesh.position, 3, false, true, true);
-          if (p.hit.size >= 3) p.life = 0;
-        }
-      }
-    } else if (
+    if (
       Math.hypot(
         p.mesh.position.x - hero.pos.x,
         p.mesh.position.z - hero.pos.z,
@@ -1938,26 +1662,16 @@ function updateProjectiles(dt) {
     }
   }
 }
-const coinGeometry = new THREE.CylinderGeometry(0.13, 0.13, 0.05, 8);
-coinGeometry.rotateX(Math.PI / 2);
-const soulGeometry = new THREE.OctahedronGeometry(0.13);
 const healGeometry = new THREE.IcosahedronGeometry(0.15, 0);
 function dropLoot(position) {
   const count = 1 + Math.floor(Math.random() * 2);
   for (let i = 0; i < count; i++) {
-    const kind =
-      Math.random() < 0.14 ? "heal" : Math.random() < 0.55 ? "soul" : "gold";
+    if (Math.random() >= 0.14) continue;
     const mesh = new THREE.Mesh(
-      kind === "heal"
-        ? healGeometry
-        : kind === "soul"
-          ? soulGeometry
-          : coinGeometry,
+      healGeometry,
       new THREE.MeshStandardMaterial({
-        color:
-          kind === "heal" ? 0xd69078 : kind === "soul" ? 0xb19bbb : 0xe8bb5d,
-        emissive:
-          kind === "heal" ? 0x391813 : kind === "soul" ? 0x342d41 : 0x493319,
+        color: 0xd69078,
+        emissive: 0x391813,
         emissiveIntensity: 0.6,
         metalness: 0.6,
         roughness: 0.4,
@@ -1968,7 +1682,7 @@ function dropLoot(position) {
     mesh.position.z += (Math.random() - 0.5) * 0.9;
     mesh.position.y = 0.2;
     scene.add(mesh);
-    drops.push({ mesh, kind, age: 0 });
+    drops.push({ mesh, age: 0 });
   }
 }
 function updateDrops(dt) {
@@ -1987,15 +1701,12 @@ function updateDrops(dt) {
       d.mesh.position.addScaledVector(temp, (7 + (3.4 - distance) * 3) * dt);
     }
     if (distance < 0.6) {
-      hero.souls = Math.min(100, hero.souls + (d.kind === "soul" ? 8 : 3));
-      if (d.kind === "heal") {
-        hero.hp = Math.min(hero.maxHp, hero.hp + 15);
-        queueDamage(
-          "+15",
-          hero.pos.clone().add(new THREE.Vector3(0, 2.2, 0)),
-          "heal",
-        );
-      }
+      hero.hp = Math.min(hero.maxHp, hero.hp + 15);
+      queueDamage(
+        "+15",
+        hero.pos.clone().add(new THREE.Vector3(0, 2.2, 0)),
+        "heal",
+      );
       scene.remove(d.mesh);
       d.mesh.material.dispose();
       drops.splice(i, 1);
@@ -2004,229 +1715,6 @@ function updateDrops(dt) {
       d.mesh.material.dispose();
       drops.splice(i, 1);
     }
-  }
-}
-let horseMesh = null,
-  eagleMesh = null;
-function simpleMesh(geometry, color) {
-  return new THREE.Mesh(
-    geometry,
-    new THREE.MeshStandardMaterial({
-      color,
-      roughness: 0.85,
-      metalness: 0.12,
-      flatShading: true,
-    }),
-  );
-}
-function makeHorse() {
-  const g = new THREE.Group();
-  const body = simpleMesh(new THREE.BoxGeometry(0.7, 0.75, 1.7), 0x393229);
-  body.position.y = 0.95;
-  g.add(body);
-  const neck = simpleMesh(new THREE.BoxGeometry(0.42, 0.8, 0.5), 0x4b3c2b);
-  neck.position.set(0, 1.4, 0.55);
-  neck.rotation.x = -0.3;
-  g.add(neck);
-  const head = simpleMesh(new THREE.BoxGeometry(0.4, 0.4, 0.75), 0x4b3c2b);
-  head.position.set(0, 1.8, 0.85);
-  g.add(head);
-  const saddle = simpleMesh(new THREE.BoxGeometry(0.72, 0.16, 0.55), 0x8a2c29);
-  saddle.position.y = 1.4;
-  g.add(saddle);
-  for (const x of [-0.25, 0.25])
-    for (const z of [-0.55, 0.6]) {
-      const leg = simpleMesh(new THREE.BoxGeometry(0.18, 0.85, 0.18), 0x302d25);
-      leg.position.set(x, 0.43, z);
-      leg.userData.leg = true;
-      g.add(leg);
-    }
-  const shaft = simpleMesh(
-    new THREE.CylinderGeometry(0.045, 0.045, 3.5, 6),
-    0x9c7851,
-  );
-  shaft.rotation.x = Math.PI / 2 - 0.25;
-  shaft.position.set(0.65, 1.65, 1.1);
-  g.add(shaft);
-  const blade = simpleMesh(new THREE.ConeGeometry(0.15, 0.72, 4), 0xc6cfcd);
-  blade.rotation.x = Math.PI / 2 - 0.25;
-  blade.position.set(0.65, 2.1, 2.9);
-  g.add(blade);
-  return g;
-}
-function makeEagle() {
-  const g = new THREE.Group();
-  const body = simpleMesh(new THREE.ConeGeometry(0.4, 1.3, 5), 0x64543c);
-  body.rotation.x = Math.PI / 2;
-  g.add(body);
-  const head = simpleMesh(new THREE.IcosahedronGeometry(0.27, 0), 0xc6bca0);
-  head.position.set(0, 0.18, 0.65);
-  g.add(head);
-  for (const side of [-1, 1]) {
-    const wing = simpleMesh(new THREE.BoxGeometry(1.7, 0.09, 0.6), 0x514937);
-    wing.position.set(side * 0.95, 0, -0.15);
-    wing.userData.wing = side;
-    g.add(wing);
-    const feather = simpleMesh(new THREE.ConeGeometry(0.3, 1.2, 3), 0x413f32);
-    feather.rotation.z = (side * Math.PI) / 2;
-    feather.position.set(side * 1.7, 0, -0.3);
-    g.add(feather);
-  }
-  const bow = simpleMesh(new THREE.BoxGeometry(1.05, 0.07, 0.12), 0xac9970);
-  bow.position.set(0, 0.75, 0.7);
-  g.add(bow);
-  return g;
-}
-function useSpecial(kind) {
-  if (mode !== "playing" || hero.hp <= 0 || !specials[kind]) return;
-  metrics.specials++;
-  specials[kind] = false;
-  hero.state = "idle";
-  hero.elapsed = 0;
-  hero.invulnerable = 0.5;
-  safeAudio("skill", 1);
-  if (kind === "horse") {
-    if (eagleMesh) {
-      disposeGroup(eagleMesh);
-      eagleMesh = null;
-      hero.flight = 0;
-    }
-    hero.mount = 8;
-    hero.mountHits = new Map();
-    horseMesh = makeHorse();
-    scene.add(horseMesh);
-    ui.notify("借马 · 八秒骑戟冲阵");
-  } else if (kind === "eagle") {
-    if (horseMesh) {
-      disposeGroup(horseMesh);
-      horseMesh = null;
-      hero.mount = 0;
-    }
-    hero.flight = 9;
-    hero.flightFire = 0;
-    eagleMesh = makeEagle();
-    scene.add(eagleMesh);
-    ui.notify("乘鹰 · 九秒空中连弩");
-  } else if (kind === "captain") {
-    const rig = createCharacter("hero");
-    rig.group.scale.multiplyScalar(0.9);
-    rig.group.traverse((o) => {
-      if (o.isMesh && o.material?.color) {
-        o.material = o.material.clone();
-        o.material.color.lerp(new THREE.Color(0xc6ac62), 0.25);
-      }
-    });
-    scene.add(rig.group);
-    companions.push({
-      rig,
-      pos: hero.pos.clone().add(new THREE.Vector3(-1, 0, 0)),
-      state: "run",
-      elapsed: 0,
-      duration: 15,
-      cooldown: 0,
-      attackTime: 0,
-      angle: hero.angle,
-      hitDone: false,
-    });
-    ui.notify("副将 · 十五秒并肩斩敌");
-  }
-  fx.ring(hero.pos, 2.2, 0xe2c68c, 0.55);
-}
-function updateCompanions(dt) {
-  if (hero.flight > 0) {
-    hero.flight -= dt;
-    hero.flightFire -= dt;
-    hero.rig.group.position.y = 2.3 + Math.sin(globalTime * 3) * 0.12;
-    if (eagleMesh) {
-      eagleMesh.position.copy(hero.pos);
-      eagleMesh.position.y = 2.45;
-      eagleMesh.rotation.y = hero.angle;
-      eagleMesh.children.forEach((c) => {
-        if (c.userData.wing)
-          c.rotation.z = Math.sin(globalTime * 6) * 0.25 * c.userData.wing;
-      });
-    }
-    if (hero.flightFire <= 0) {
-      const target = nearestEnemy(hero.pos, 15);
-      if (target) {
-        const from = hero.pos.clone().add(new THREE.Vector3(0, 2.8, 0)),
-          to = target.pos.clone().add(new THREE.Vector3(0, 1.2, 0));
-        spawnProjectile(
-          from,
-          to.sub(from).normalize(),
-          19,
-          true,
-          28,
-          0xe3cc95,
-          1.6,
-        );
-        hero.flightFire = 0.32;
-        safeAudio("slash", 2);
-      }
-    }
-    if (hero.flight <= 0) {
-      disposeGroup(eagleMesh);
-      eagleMesh = null;
-      ui.notify("鹰已退 · 落地继续作战");
-    }
-  }
-  for (let i = companions.length - 1; i >= 0; i--) {
-    const c = companions[i];
-    const companionPrevious = c.pos.clone();
-    c.elapsed += dt;
-    c.cooldown -= dt;
-    if (c.elapsed > c.duration) {
-      disposeGroup(c.rig.group, false);
-      companions.splice(i, 1);
-      continue;
-    }
-    const target = nearestEnemy(c.pos, 12);
-    if (c.state === "attack") {
-      c.attackTime += dt;
-      if (c.attackTime > 0.18 && !c.hitDone) {
-        c.hitDone = true;
-        if (target && target.pos.distanceTo(c.pos) < 2.4) {
-          hurtEnemy(target, 24, c.pos, 3);
-          fx.arc(c.pos, c.angle, 2, 0, 0xe3c991);
-        }
-      }
-      if (c.attackTime > 0.43) {
-        c.state = "idle";
-        c.cooldown = 0.4;
-      }
-    } else if (target) {
-      temp.subVectors(target.pos, c.pos);
-      c.angle = Math.atan2(temp.x, temp.z);
-      if (temp.length() > 1.8) {
-        move(c.pos, temp.normalize(), 7, dt);
-        c.state = "run";
-      } else if (c.cooldown <= 0) {
-        c.state = "attack";
-        c.attackTime = 0;
-        c.hitDone = false;
-      }
-    } else {
-      temp.subVectors(hero.pos, c.pos);
-      if (temp.length() > 2) {
-        move(c.pos, temp.normalize(), 6, dt);
-        c.state = "run";
-      } else c.state = "idle";
-    }
-    c.rig.group.position.copy(c.pos);
-    c.rig.group.rotation.y = c.angle;
-    poseCharacter(c.rig, {
-      state: c.state,
-      time: globalTime,
-      phase: c.state === "attack" ? c.attackTime / 0.43 : 0,
-      combo: 0,
-      speed: c.state === "run" ? 1 : 0,
-      moveBlend: c.state === "run" ? 1 : 0,
-      gaitPhase: (c.gaitPhase =
-        (c.gaitPhase || 0) +
-        (c.pos.distanceTo(companionPrevious) * Math.PI * 2) / 2.9),
-      dt,
-      skill: 0,
-    });
   }
 }
 let pointerStart = null,
@@ -2353,10 +1841,6 @@ window.addEventListener("keydown", (event) => {
                 );
       roll(direction);
     }
-    if ("12345".includes(key)) castSkill(Number(key) - 1);
-    if (key === "q") useSpecial("horse");
-    if (key === "e") useSpecial("eagle");
-    if (key === "r") useSpecial("captain");
   }
 });
 window.addEventListener("keyup", (event) =>
@@ -2426,7 +1910,7 @@ function updatePresentation(dt) {
   hero.lookYaw = 0;
   rig.group.position.copy(hero.pos);
   rig.group.position.y =
-    mode === "win" ? hero.presentationHeight || 0 : hero.mount > 0 ? 1 : 0;
+    mode === "win" ? hero.presentationHeight || 0 : 0;
   rig.group.rotation.y = hero.angle;
   poseCharacter(rig, {
     state,
@@ -2437,7 +1921,6 @@ function updatePresentation(dt) {
     speed: 0,
     moveBlend: hero.moveBlend,
     gaitPhase: hero.gaitPhase,
-    skill: 0,
     idleAge: hero.idleAge,
     alertness,
     lookYaw: 0,
@@ -2501,7 +1984,6 @@ function animate(now) {
   }
   if (mode === "playing") {
     gameTime += realDt;
-    for (const s of skills) s.cooldown = Math.max(0, s.cooldown - dt);
     if (comboTimeout > 0) comboTimeout -= dt;
     else combo = 0;
     if (dt > 0) {
@@ -2514,7 +1996,6 @@ function animate(now) {
         updateEnemies(step);
         updateProjectiles(step);
         updateDrops(step);
-        updateCompanions(step);
         fx.update(step);
         weaponFx.update(step);
       }
@@ -2639,7 +2120,6 @@ if (new URLSearchParams(location.search).get("debug") === "1") {
         e,
       );
     },
-    castSkill,
     start: startGame,
     reset: startGame,
     pause: pauseGame,
@@ -2647,7 +2127,6 @@ if (new URLSearchParams(location.search).get("debug") === "1") {
     roll(x = 0, z = -1) {
       roll(new THREE.Vector3(x, 0, z));
     },
-    special: useSpecial,
     getBars() {
       return enemies.map((e) => {
         const bar = e.bar,
@@ -2746,7 +2225,7 @@ if (new URLSearchParams(location.search).get("debug") === "1") {
       if (!e || e.state === "dead" || !Number.isFinite(amount) || amount <= 0)
         return false;
       if (e.state === "spawn") e.state = "idle";
-      return hurtEnemy(e, amount, hero.pos, 1, false, false);
+      return hurtEnemy(e, amount, hero.pos, 1);
     },
     positionEnemy(id, x, z) {
       const e = enemies.find((enemy) => enemy.id === id);
@@ -2792,16 +2271,15 @@ if (new URLSearchParams(location.search).get("debug") === "1") {
     killAll() {
       for (const e of enemies) {
         if (e.state === "spawn") e.state = "idle";
-        hurtEnemy(e, e.hp + 1, hero.pos, 2, true, true);
+        hurtEnemy(e, e.hp + 1, hero.pos, 2, true);
       }
     },
     damage(amount = 10) {
       hero.invulnerable = 0;
       damageHero(amount, hero.pos.clone().add(new THREE.Vector3(1, 0, 0)));
     },
-    setResources(souls = 100, stamina = 100) {
-      hero.souls = souls;
-      hero.stamina = stamina;
+    setStamina(stamina = 100) {
+      if (Number.isFinite(stamina)) hero.stamina = THREE.MathUtils.clamp(stamina, 0, 100);
     },
   };
 }

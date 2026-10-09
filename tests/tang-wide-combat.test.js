@@ -62,8 +62,8 @@ test('Tang low carry preserves breathing and the travelling foot gait', () => {
 test('Tang stepping and recovery retain a grounded support foot', () => {
   const rig = createCharacter('hero');
   rig.setWeapon('tang-dao');
-  for (const state of ['attack', 'skill']) {
-    for (let action = 0; action < (state === 'attack' ? 4 : 5); action++) {
+  for (const state of ['attack']) {
+    for (let action = 0; action < 4; action++) {
       const spec = getReviewedAttack('tang-dao', action, state);
       for (let frame = 0; frame <= Math.ceil(spec.duration * 60); frame++) {
         poseCharacter(rig, {state, combo: action, skill: action,

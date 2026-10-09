@@ -6,7 +6,7 @@ import { createWeaponEffects } from '../src/weaponEffects.js';
 
 const position=new THREE.Vector3();
 function bounds(mesh){mesh.geometry.computeBoundingBox();return mesh.geometry.boundingBox.getSize(new THREE.Vector3());}
-test('all 108 move trails are finite, match contact shape, and retain diverse geometry',()=>{
+test('all eight basic attack trails are finite, match contact shape, and retain diverse geometry',()=>{
   const scene=new THREE.Scene(),fx=createWeaponEffects(scene),signatures=new Set();
   for(const weapon of WEAPONS)for(let combo=0;combo<4;combo++){
     fx.attack(weapon.id,position,0,combo);
@@ -19,7 +19,7 @@ test('all 108 move trails are finite, match contact shape, and retain diverse ge
     if(move.shape==='radial')assert.ok(size.x>move.reach&&size.z>move.reach,`${weapon.id}:${combo} must circle`);
     fx.clear();
   }
-  assert.ok(signatures.size>=90,`distinct geometries: ${signatures.size}`);
+  assert.ok(signatures.size>=6,`distinct geometries: ${signatures.size}`);
   fx.destroy();
 });
 test('pause freezes, expiry reuses pooled groups, and clear removes every active object',()=>{
@@ -28,19 +28,19 @@ test('pause freezes, expiry reuses pooled groups, and clear removes every active
   fx.update(0);assert.equal(first.children[0].material.opacity,opacity);
   fx.update(1);assert.equal(scene.children.length,0);
   fx.attack('dual-dao',position,0,0);assert.equal(scene.children[0],first);
-  for(let i=0;i<100;i++)fx.attack('war-hammer',position,0,i%4);
+  for(let i=0;i<100;i++)fx.attack('tang-dao',position,0,i%4);
   assert.ok(scene.children.length<=72);
   fx.clear();assert.equal(scene.children.length,0);
   fx.destroy();fx.destroy();fx.attack('dual-dao',position,0,0);assert.equal(scene.children.length,0);
 });
-test('contact delegates one physical impact and every skill stage expires',()=>{
+test('basic attack contact delegates one physical impact',()=>{
   let impacts=0;const scene=new THREE.Scene(),fx=createWeaponEffects(scene,{impact(){impacts++;},ring(){}});
   for(const weapon of WEAPONS)for(let combo=0;combo<4;combo++){
     fx.impact(weapon.id,position,0,combo,true);
     for(const group of scene.children)group.traverse(mesh=>{if(mesh.isMesh)assert.ok([...mesh.geometry.attributes.position.array].every(Number.isFinite));});
-    fx.clear();fx.skill(weapon.id,position,0,combo);fx.skill(weapon.id,position,0,combo,true);fx.update(1);
+    fx.clear();fx.update(1);
     assert.equal(scene.children.length,0);
   }
-  assert.equal(impacts,WEAPONS.length*4*2);
+  assert.equal(impacts,WEAPONS.length*4);
   fx.destroy();
 });

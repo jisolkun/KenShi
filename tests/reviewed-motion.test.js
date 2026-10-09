@@ -26,12 +26,12 @@ for (const weapon of WEAPONS.slice(0, 5)) {
   test(`${weapon.id}: independent action and travelling gait remain reachable`, () => {
     const rig = createCharacter('hero');
     equipWeapon(rig, weapon.id);
-    for (const state of ['attack', 'skill']) {
-      for (let action = 0; action < (state === 'attack' ? 4 : 5); action++) {
+    for (const state of ['attack']) {
+      for (let action = 0; action < 4; action++) {
         for (const carry of [.25, .5, 1]) {
           for (const phase of [0, .1, .2, .3, .4, .5, .6, .7, .714, .8, .9, 1]) {
             for (const gait of [0, .07, .13, .3, .5, .57, .63, .8, .99]) {
-              poseCharacter(rig, {state, combo: action, skill: action, phase,
+              poseCharacter(rig, {state, combo: action, phase,
                 time: 0, speed: carry, attackCarry: carry, gaitPhase: gait * Math.PI * 2,
                 dt: 1 / 60, immediate: true, transition: false});
               rig.group.updateMatrixWorld(true);
@@ -53,15 +53,15 @@ for (const weapon of WEAPONS.slice(0, 5)) {
 }
 
 // Discover only registry entries: adding another reviewed weapon automatically
-// adds its four normal attacks and five skills without touching this test.
+// adds its four basic attacks without touching this test.
 for (const weapon of WEAPONS.slice(0, 5)) {
   if (!getReviewedAttack(weapon.id, 0, 'attack')) continue;
-  for (const state of ['attack', 'skill']) {
-    for (let combo = 0; combo < (state === 'attack' ? 4 : 5); combo++) {
+  for (const state of ['attack']) {
+    for (let combo = 0; combo < 4; combo++) {
       for (const carry of [0, 1]) {
         test(`${weapon.id} ${state} ${combo} carry=${carry}: rendered motion at 60 Hz`, () => {
           const spec = getReviewedAttack(weapon.id, combo, state);
-          assert.ok(spec, 'every registered weapon must expose all nine actions');
+          assert.ok(spec, 'every registered weapon must expose all four basic attacks');
           assert.ok(Number.isFinite(spec.duration) && spec.duration > 0, 'positive finite duration');
           assert.ok(spec.contacts.length > 0, 'authored contact windows exist');
           const rig = createCharacter('hero');
@@ -79,7 +79,7 @@ for (const weapon of WEAPONS.slice(0, 5)) {
               if (!condition && !failures.has(key)) failures.set(key, `t=${time.toFixed(4)}s phase=${phase.toFixed(4)}: ${detail}`);
             };
             const gaitPhase = time * Math.PI * 2 * 1.5;
-            poseCharacter(rig, { state, combo, skill: combo, phase, time, attackCarry: carry, speed: carry, gaitPhase,
+            poseCharacter(rig, { state, combo, phase, time, attackCarry: carry, speed: carry, gaitPhase,
               dt: previous ? time - previous.time : 1 / 60, immediate: true, transition: false });
             rig.group.updateMatrixWorld(true);
             rig.group.traverse(node => check(node.matrixWorld.elements.every(Number.isFinite), `finite:${node.name}`, `${node.name || node.type} has nonfinite world matrix`));
@@ -212,8 +212,8 @@ for (const weapon of WEAPONS.slice(0, 5)) {
   if (weapon.grip !== 'twohand') continue;
   test(`${weapon.id}: both hands stay on the hilt during state changes`, () => {
     for (const opening of ['idle', 'run']) {
-      for (const state of ['attack', 'skill']) {
-        for (let action = 0; action < (state === 'attack' ? 4 : 5); action++) {
+      for (const state of ['attack']) {
+        for (let action = 0; action < 4; action++) {
           const rig = createCharacter('hero');
           equipWeapon(rig, weapon.id);
           let time = 0;
@@ -227,27 +227,10 @@ for (const weapon of WEAPONS.slice(0, 5)) {
           };
           for (let frame = 0; frame < 8; frame++) pose({state: opening, speed: opening === 'run' ? 1 : 0, gaitPhase: frame * .15});
           const spec = getReviewedAttack(weapon.id, action, state);
-          for (let frame = 0; frame <= Math.ceil(spec.duration * 60); frame++) pose({state, combo: action, skill: action, phase: Math.min(1, frame / (60 * spec.duration))});
+          for (let frame = 0; frame <= Math.ceil(spec.duration * 60); frame++) pose({state, combo: action, phase: Math.min(1, frame / (60 * spec.duration))});
           for (let frame = 0; frame < 8; frame++) pose({state: 'idle', speed: 0});
         }
       }
     }
   });
 }
-
-test('nine loose rings stay attached, follow the blade and freeze on pause', () => {
-  const rig = createCharacter('hero');
-  equipWeapon(rig, 'ring-dao');
-  assert.equal(rig.weaponArticulation.length, 9);
-  poseCharacter(rig, {state: 'attack', combo: 0, phase: .2, time: .2, dt: 1 / 60, immediate: true});
-  const before = rig.weaponArticulation.map(part => part.node.quaternion.clone());
-  for (let frame = 1; frame <= 12; frame++) poseCharacter(rig, {state: 'attack', combo: 0, phase: .2 + frame / 40, time: .2 + frame / 60, dt: 1 / 60, immediate: true});
-  assert.ok(rig.weaponArticulation.some((part, index) => part.node.quaternion.angleTo(before[index]) > .01), 'loose rings never respond to the blade');
-  for (const part of rig.weaponArticulation) {
-    assert.equal(part.node.parent, rig.arms[1].weapon);
-    assert.ok(part.node.quaternion.toArray().every(Number.isFinite));
-  }
-  const frozen = rig.weaponArticulation.map(part => part.node.quaternion.toArray());
-  poseCharacter(rig, {state: 'idle', time: 20, dt: 0});
-  assert.deepEqual(rig.weaponArticulation.map(part => part.node.quaternion.toArray()), frozen);
-});
