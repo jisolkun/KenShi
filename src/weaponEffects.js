@@ -124,7 +124,11 @@ export function createWeaponEffects(scene, baseEffects) {
     }
     lastImpact={sequence:++impactSequence,id,combo:((combo%4)+4)%4,critical,position:pos.toArray(),cutDirection:direction.toArray()};
     emit(id,pos,angle,combo,'impact',critical?(id==='great-dao'?1.25:1.35):1,direction);
-    baseEffects?.impact(pos,direction,id==='great-dao'?(combo===3?1.55:1.08):.75,critical);
+    // Keep the authored combo index with the physical hit so the base effect
+    // can reserve the wide crescent and ground flare for the final great-dao
+    // chop.  Older callers accept the original four arguments, therefore the
+    // optional fifth value remains backwards compatible.
+    baseEffects?.impact(pos,direction,id==='great-dao'?(combo===3?1.55:1.08):.75,critical,combo);
   }
   function updateDebris(o,p) {
     const {mesh,dummy}=o.debris;

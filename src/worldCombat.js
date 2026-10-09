@@ -167,9 +167,14 @@ export function createWorldCombat(parent, { props = [], random = Math.random } =
       if (!contact) continue;
       record.props.add(prop.id); stats.propHits++;
       lastContact = { prop: prop.id, type: prop.type, ...contact };
-      for (let i = 0; i < 8; i++) {
-        velocity.set(direction.x * (1 + random() * 2) + (random() - .5),
-          .6 + random() * 1.8, direction.z * (1 + random() * 2) + (random() - .5));
+      // A heavy finishing edge throws a wider fan of stone and hot sparks.
+      // Keep both streams in the fixed pools; this changes only the burst
+      // density and launch speed, not the collision envelope.
+      const fragments = combo === 3 ? 12 : 8;
+      for (let i = 0; i < fragments; i++) {
+        const launch = combo === 3 ? 1.35 : 1;
+        velocity.set(direction.x * (launch + random() * (combo === 3 ? 2.8 : 2)) + (random() - .5),
+          .6 + random() * (combo === 3 ? 2.35 : 1.8), direction.z * (launch + random() * (combo === 3 ? 2.8 : 2)) + (random() - .5));
         emit(chips, contact, velocity, i % 2 ? 0x78867b : 0xb5b3a1, .6 + random() * .35, .025 + random() * .055, 6);
         emit(sparks, contact, velocity, 0xffd594, .15 + random() * .13, .09 + random() * .08, 2);
       }
@@ -183,7 +188,11 @@ export function createWorldCombat(parent, { props = [], random = Math.random } =
       mark.active = mark.awaiting = true; mark.age = mark.unseen = 0;
       mark.mesh.position.set(low.x, .068, low.z);
       mark.mesh.rotation.set(-Math.PI / 2, 0, -Math.atan2(direction.z, direction.x));
-      mark.mesh.scale.set(.6, 1, 1);
+      // The last descending edge drags a long, visible scar across the paving;
+      // regular sweeps retain the short readable mark used for light contact.
+      mark.mesh.scale.set(combo === 3 ? .92 : .6, combo === 3 ? 1.42 : 1, 1);
+      mark.mesh.material.color.setHex(combo === 3 ? 0x5b3a31 : 0x3c3b32);
+      mark.life = combo === 3 ? 2.1 : 1.5;
     }
     refresh(); // A new event is visible even before the next simulation update.
   }

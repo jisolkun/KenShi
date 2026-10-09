@@ -29,16 +29,26 @@ const feet = [
   [[-.21,.075,.12],[.21,.075,-.12]],
 ];
 const techniques = [
+  // Each chamber is deliberately outside the shoulder line. The wrists only
+  // travel a few centimetres in a cut, while the hips turn the long blade
+  // through the whole arc. This keeps the edge path broad without detaching
+  // the hands from a reachable, two-handed hilt.
   { name:'踏步横扫', kind:'cut', duration:.56, contact:.64, window:[.48,.84], wind:.43, brake:.93,
-    chamber:hand([.12,.29,.42],[.98,.075,.18]), cross:hand([.04,.24,.48],[0,.025,1]),
-    exit:hand([-.12,.20,.40],[-.985,-.08,.15]), turn:[1.04,-1.08], step:0, reach:2.15 },
+    chamber:hand([.20,.31,.38],[.98,.075,.18]), cross:hand([.015,.24,.48],[0,.025,1]),
+    exit:hand([-.22,.18,.39],[-.985,-.08,.15]), turn:[1.12,-1.16], step:0, reach:2.15 },
   { name:'反向斜劈', kind:'cut', duration:.52, contact:.64, window:[.48,.85], wind:.43, brake:.93,
-    chamber:hand([-.12,.54,.42],[-.84,.51,.18]), cross:hand([.04,.30,.48],[.04,.055,.998]),
-    exit:hand([.12,.16,.40],[.94,-.29,.17]), turn:[-1.06,1.10], step:1, reach:2.18 },
+    chamber:hand([-.20,.58,.38],[-.84,.51,.18]), cross:hand([.015,.30,.48],[.04,.055,.998]),
+    exit:hand([.22,.13,.39],[.94,-.29,.17]), turn:[-1.14,1.18], step:1, reach:2.18 },
   { name:'回身大扫', kind:'cut', duration:.50, contact:.66, window:[.47,.91], wind:.42, brake:.96,
-    chamber:hand([.12,.26,.42],[.94,.08,-.33]), cross:hand([.02,.23,.48],[0,.025,1]),
+    // Load behind the lead hip, then let the planted foot and waist unwind
+    // together. The blade is visibly drawn around the back before it crosses
+    // the front lane, giving this third beat a martial full-body pivot.
+    chamber:hand([.12,.26,.42],[.94,.08,-.33]), cross:hand([.015,.23,.48],[0,.025,1]),
     exit:carries[3], turn:[1.24,-1.34], step:0, reach:2.22 },
   { name:'踏地重劈', kind:'chop', duration:.68, contact:.67, window:[.55,.80], wind:.49, brake:.87,
+    // A high, diagonal chamber reads as a loaded overhead cut. It falls past
+    // the centre line into a low opposite-side brake instead of stopping at
+    // the hero's toes, so the final silhouette has a clean, decisive finish.
     chamber:hand([.13,.61,.40],[.10,.94,.33]), cross:hand([.03,.34,.48],[0,.10,.995]),
     exit:hand([.15,.13,.42],[.08,-.60,.80]), turn:[.60,-.44], step:1, reach:2.18 },
 ];
@@ -95,8 +105,12 @@ function tracksFor(spec) {
     {p:release,values:[a*.40,a*.29,-.09,a*.025,.095,.795,-.02,-side*.13,side*.07]},
     // The planted foot and pelvis initiate the burst, then the chest catches
     // the moving blade. Forward pressure and counter-lean persist on braking.
-    {p:c-.035,values:[b*.25,a*.26,heavy?.12:.10,-b*.035,.17,index===2?.75:.775,.065,side*.02,-side*.025]},
-    {p:c+.075,values:[b*.80,b*.32,heavy?.22:.13,-b*.05,.205,index===2?.74:.765,heavy?.11:.07,side*.145,-side*.065]},
+    {p:c-.035,values:heavy
+      ? [b*.25,a*.26,.14,-b*.035,.17,.775,.085,side*.055,-side*.04]
+      : [b*.25,a*.26,.10,-b*.035,.17,index===2?.75:.775,.065,side*.02,-side*.025]},
+    {p:c+.075,values:heavy
+      ? [b*.80,b*.32,.24,-b*.05,.205,.755,.12,side*.17,-side*.075]
+      : [b*.80,b*.32,.13,-b*.05,.205,index===2?.74:.765,.07,side*.145,-side*.065]},
     {p:brake,values:bodies[index+1],stop:true},{p:1,values:bodies[index+1],stop:true}];
   return {tracks:[[{p:0,...start},{p:1,...end}],keys],body,
     torso:[{p:0,values:[0,0],stop:true},{p:wind,values:[a,.40]},

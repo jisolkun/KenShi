@@ -1135,6 +1135,19 @@ function sampleHeroTrails(frames,tips,phase,dt,active) {
   const source=`${currentWeapon.id}:${hero.trailSeries}:${hero.state}:${hero.combo}`;
   for(let i=0;i<trails.length;i++){
     const trail=trails[i];
+    // The great dao carries a wider, warm edge trail so its long physical
+    // path reads as one heavy cut.  The width grows through the chain and the
+    // finisher shifts toward ember orange; the narrow white core keeps the
+    // actual blade direction legible inside the broad ribbon.
+    if(currentWeapon.id==='great-dao'){
+      trail.widthFactor=1.18+Math.min(hero.combo,3)*.08;
+      trail.color.setHex(hero.combo===3?0xffa24e:0xffc66b);
+      trail.coreColor.setHex(0xffffe4);
+    }else{
+      trail.widthFactor=1;
+      trail.color.setHex(0xb0c4ff);
+      trail.coreColor.setHex(0xfff7eb);
+    }
     const blade=action&&frames.find(b=>b.hand===i);
     const contact=action?.contacts.find(c=>c.hand===i&&phase>=c.window[0]&&phase<=c.window[1]);
     const cutting=action?!!blade&&!!contact:active&&!!tips[i];

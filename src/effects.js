@@ -182,7 +182,13 @@ export function createEffects(scene, camera) {
     }
   }
   const direction=new THREE.Vector3(),side=new THREE.Vector3(),velocity=new THREE.Vector3(),point=new THREE.Vector3(),zero=new THREE.Vector3();
-  function impact(position,cutDirection,strength=1,critical=false) {
+  // `style` is the authored attack index when the impact came from a reviewed
+  // weapon animation.  It is optional so projectile/enemy impacts keep their
+  // existing API.  The great dao finisher (style 3) gets a wider second flare
+  // and a crescent that carries the blade direction through the hit.  This is
+  // deliberately additive: no pause or camera-facing billboard replaces the
+  // actual fast blade trail.
+  function impact(position,cutDirection,strength=1,critical=false,style=0) {
     const weight=THREE.MathUtils.clamp(strength,0.4,2);
     direction.copy(cutDirection||zero);if(direction.lengthSq()<0.001)direction.set(0,0,1);direction.normalize();
     side.set(-direction.z,0.15,direction.x).normalize();
@@ -190,6 +196,15 @@ export function createEffects(scene, camera) {
     const angle=Math.atan2(direction.dot(cameraUp),direction.dot(cameraRight)),size=0.22+weight*0.1;
     emit(flashes,position,zero,0xfff9df,0.06+(critical?0.015:0),size,size*0.75,1,0,angle,true);
     emit(flashes,position,zero,0xd3a8ef,critical?0.16:0.12,size*(critical?2.2:1.65),size*0.66,1,0,angle+0.6);
+    if (critical && style === 3) {
+      // A broad warm blade flare makes the last edge read at the instant of
+      // contact.  It lives in the same pooled flash pass as the compact core,
+      // so crowded fights do not allocate a mesh per target.
+      emit(flashes,position,zero,0xffb968,0.14,size*3.1,size*0.16,1,0,angle+Math.PI*.5,true);
+      const crescentPoint = position.clone(); crescentPoint.y = 0;
+      arc(crescentPoint, Math.atan2(direction.x,direction.z), .9 + weight*.22, 3, 0xffb65f);
+      ring(crescentPoint, 1.02 + weight*.18, 0xe49a54, .26);
+    }
     for(let i=0,count=critical?8:Math.round(4+weight);i<count;i++){
       velocity.copy(direction).multiplyScalar(3+Math.random()*3*weight).addScaledVector(side,(Math.random()-0.5)*(critical?4.4:3));
       velocity.y+=0.2+Math.random()*1.5;point.copy(position).addScaledVector(side,(Math.random()-0.5)*0.12);
