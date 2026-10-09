@@ -1014,8 +1014,12 @@ function hurtEnemy(
   if (isPlayerContact && !hero.impactDone) {
     hero.impactDone = true;
     const contactStop = currentWeapon.moves[hero.combo].hitstop;
+    // Great-dao contact is carried by the moving blade and reaction effects;
+    // do not freeze the player's release on impact. The struck enemy keeps
+    // its short local hurt state above, so feedback comes from hard-stun,
+    // knockback, blood and the directional contact flash.
     hero.localHitStop = greatContact
-      ? Math.min(.04, contactStop)
+      ? 0
       : Math.min(.08, contactStop * (critical ? 1.2 : 1));
   }
   if (
