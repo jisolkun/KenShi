@@ -1,45 +1,51 @@
 import * as THREE from 'three';
 import { bladeOrientation, sampleAuthoredTracks, authoredChestTransform } from './trajectory.js';
 
-// Original action-game choreography: a planted waist leads a broad, heavy
-// blade. These timings are authored here, not measured from Undead Slayer.
+// A body-led four-cut chain. These are original game timings, not a frame
+// transcription of Undead Slayer: a slow loaded step releases a short burst.
 export const GREAT_GRIP = { supportDistance: .22, shoulderForward: .12, armReach: .525, handClearance: true };
 const hand = (grip, axis) => ({ grip, axis: new THREE.Vector3(...axis).normalize().toArray() });
 const ready = hand([.18,.17,.40], [.84,-.26,.48]);
 const carries = [ready,
-  hand([-.14,.16,.35], [-.92,-.22,.32]),
-  hand([.24,.19,.35], [.94,-.20,.27]),
-  hand([-.12,.49,.36], [-.76,.57,.30]),
+  hand([-.19,.20,.36], [-.96,-.16,.23]),
+  hand([.25,.27,.37], [.91,.28,.29]),
+  hand([-.24,.35,.30], [-.94,.18,-.29]),
   ready,
 ];
-const techniques = [
-  // The first three cuts are deliberately shorter than the recovery of a
-  // light saber.  A long, quiet chamber is followed by a very small release
-  // window; most of the blade travel therefore happens as one fast body-led
-  // burst instead of a constant-speed arm flourish.
-  { name:'踏步横扫', kind:'cut', duration:.62, contact:.43, window:[.30,.60],
-    chamber:hand([.31,.32,.18],[.98,.08,.18]), cross:hand([.15,.24,.56],[0,.015,1]),
-    exit:hand([-.19,.18,.26],[-.98,-.04,.19]), turn:[.98,-1.10], step:0, wind:.26, brake:.79,
-    bodyDrive:1.03, lunge:.17, drop:.030 },
-  { name:'反向斜劈', kind:'cut', duration:.66, contact:.51, window:[.37,.68],
-    chamber:hand([-.16,.58,.20],[-.83,.54,.15]), cross:hand([.15,.31,.56],[.04,.04,.998]),
-    // The reverse strike keeps a gentler waist crossing so its changeover
-    // from the first cut reads as one continuous handoff, not a snap.
-    exit:hand([.31,.12,.24],[.91,-.37,.19]), turn:[-.88,.86], step:1, wind:.31, brake:.84,
-    bodyDrive:1.00, lunge:.18, drop:.032 },
-  { name:'回身大扫', kind:'cut', duration:.72, contact:.47, window:[.30,.64],
-    chamber:hand([.31,.25,.24],[.97,.06,-.23]), cross:hand([.13,.23,.56],[0,.02,1]),
-    exit:hand([-.21,.33,.28],[-.94,.23,-.25]), turn:[1.22,-1.34], step:0, wind:.26, brake:.81,
-    bodyDrive:1.06, lunge:.20, drop:.045 },
-  { name:'踏地重劈', kind:'chop', duration:.88, contact:.52, window:[.40,.67],
-    chamber:hand([.20,.65,.31],[.46,.86,-.21]), cross:hand([.12,.35,.57],[0,.10,.995]),
-    exit:hand([.17,.12,.40],[.10,-.51,.85]), turn:[.72,-.52], step:1, wind:.34, brake:.84,
-    bodyDrive:1.08, lunge:.20, drop:.075 },
+// pelvis yaw, chest yaw, chest pitch, root x/z/height, pelvis pitch/roll,
+// chest roll. The first three endpoints retain their weight and footwork.
+const bodies = [
+  [0,0,-.06,0,0,.875,0,0,0],
+  [-.60,-.22,.10,.04,.13,.82,.05,.12,-.04],
+  [.58,.18,.08,-.04,.14,.80,.05,-.13,.05],
+  [-.72,-.25,.09,.045,.15,.79,.07,.14,-.045],
+  [0,0,-.06,0,0,.875,0,0,0],
 ];
-const stance = values => ({ yaw:0, load:0, advance:values[4], pelvisYaw:values[0], chestYaw:values[1], pitch:values[2], shiftX:values[3], bodyHeight:values[5] });
-const neutral = [0,0,-.06,0,0,.875];
-function orientationHands(pose) {
-  const inverse = authoredChestTransform(stance(neutral)).q.invert();
+const feet = [
+  [[-.21,.075,.12],[.21,.075,-.12]],
+  [[-.24,.075,.38],[.21,.075,-.12]],
+  [[-.24,.075,.38],[.25,.075,.19]],
+  [[-.25,.075,.08],[.25,.075,.19]],
+  [[-.21,.075,.12],[.21,.075,-.12]],
+];
+const techniques = [
+  { name:'踏步横扫', kind:'cut', duration:.56, contact:.64, window:[.48,.84], wind:.43, brake:.93,
+    chamber:hand([.12,.29,.42],[.98,.075,.18]), cross:hand([.04,.24,.48],[0,.025,1]),
+    exit:hand([-.12,.20,.40],[-.985,-.08,.15]), turn:[1.04,-1.08], step:0, reach:2.15 },
+  { name:'反向斜劈', kind:'cut', duration:.52, contact:.64, window:[.48,.85], wind:.43, brake:.93,
+    chamber:hand([-.12,.54,.42],[-.84,.51,.18]), cross:hand([.04,.30,.48],[.04,.055,.998]),
+    exit:hand([.12,.16,.40],[.94,-.29,.17]), turn:[-1.06,1.10], step:1, reach:2.18 },
+  { name:'回身大扫', kind:'cut', duration:.50, contact:.66, window:[.47,.91], wind:.42, brake:.96,
+    chamber:hand([.12,.26,.42],[.94,.08,-.33]), cross:hand([.02,.23,.48],[0,.025,1]),
+    exit:carries[3], turn:[1.24,-1.34], step:0, reach:2.22 },
+  { name:'踏地重劈', kind:'chop', duration:.68, contact:.67, window:[.55,.80], wind:.49, brake:.87,
+    chamber:hand([.13,.61,.40],[.10,.94,.33]), cross:hand([.03,.34,.48],[0,.10,.995]),
+    exit:hand([.15,.13,.42],[.08,-.60,.80]), turn:[.60,-.44], step:1, reach:2.18 },
+];
+const stance = values => ({ yaw:0, load:0, pelvisYaw:values[0], chestYaw:values[1], pitch:values[2],
+  shiftX:values[3], advance:values[4], bodyHeight:values[5], bodyPitch:values[6], bodyRoll:values[7], chestRoll:values[8] });
+function orientationHands(pose, body) {
+  const inverse = authoredChestTransform(stance(body)).q.invert();
   const axis = new THREE.Vector3(...pose.axis).applyQuaternion(inverse);
   const quaternion = bladeOrientation(axis.toArray(), new THREE.Vector3(1,0,0).applyQuaternion(inverse).toArray()).toArray();
   return [{...pose,quaternion}, {...pose,quaternion}];
@@ -47,60 +53,54 @@ function orientationHands(pose) {
 export function getGreatAttack(id, combo=0, state='attack') {
   if (id !== 'great-dao' || state !== 'attack') return null;
   const index=((combo%4)+4)%4, technique=techniques[index];
-  // Damage starts after the stationary chamber has accelerated and ends
-  // before the blade stops. This also keeps the cutting edge aligned with a
-  // well-defined velocity instead of rolling around a zero-speed reversal.
-  const [release,finish]=technique.window, start=release+.035, end=finish-(index===0?.05:.025);
+  const [release,finish]=technique.window, start=release+.035, end=finish-.05;
   return { ...technique, weaponId:id, index, active:[start,end], swing:[release,finish],
     contacts:[{hand:1,kind:technique.kind,phase:technique.contact,start,end,window:[start,end],edgeWindow:true}],
-    // Keep the attack envelope wide enough to read as a great-weapon arc. The
-    // damage check still uses the rendered heel-to-tip sweep, so this number
-    // only controls approach/spacing and never creates invisible hits.
-    reach:index===2?2.62:2.48, width:.22, halfAngle:index===2?2.18:1.76,
-    ...GREAT_GRIP, midLength:.82, tipLength:1.509, tipOffset:[0,-1.509,0], rootFrame:true,
-    initialHands:orientationHands(carries[index]), finalHands:orientationHands(carries[index+1]),
-    cacheKey:`great-dao-v1:${index}` };
+    width:.22, halfAngle:index===2?2.18:1.76, ...GREAT_GRIP,
+    midLength:.82, tipLength:1.509, tipOffset:[0,-1.509,0], rootFrame:true,
+    minTilt:index===3?-.70:-.54,
+    // The grip root follows the loaded waist instead of tracing a stationary
+    // circle while the character merely turns underneath it.
+    bodyGripFollow:[.55,.4,.65], bodyGripRotation:.85,
+    initialHands:orientationHands(carries[index],bodies[index]),
+    finalHands:orientationHands(carries[index+1],bodies[index+1]),
+    cacheKey:`great-dao-v3:${index}` };
 }
+const ease = u => {u=THREE.MathUtils.clamp(u,0,1);return u*u*(3-2*u);};
 function feetFor(spec,p) {
-  const feet=[{x:-.21,y:.075,z:.15},{x:.21,y:.075,z:-.12}];
-  const lead=spec.step, start=.06, land=spec.contact-.12;
-  const u=THREE.MathUtils.clamp((p-start)/(land-start),0,1), step=u*u*(3-2*u);
-  feet[lead].z+=.27*step;feet[lead].x+=(lead?1:-1)*.035*step;
-  if(p>start&&p<land)feet[lead].y+=Math.sin(Math.PI*u)*.10;
-  // The rear foot stays down during the cut. Only the stepped foot lifts on
-  // recovery, so the downward strike reads as weight transfer, not a jump.
-  const recovery=THREE.MathUtils.clamp((p-spec.brake)/(1-spec.brake),0,1), settle=recovery*recovery*(3-2*recovery);
-  feet[lead].z-=.27*settle;feet[lead].x-=(lead?1:-1)*.035*settle;
-  feet[lead].y+=Math.sin(Math.PI*recovery)*.07;
-  return feet;
+  const initial=feet[spec.index], final=feet[spec.index+1], lead=spec.step;
+  const landing=spec.swing[0]-.065, travel=ease((p-.06)/(landing-.06));
+  const recovery=ease((p-spec.swing[1])/(1-spec.swing[1]));
+  return initial.map((f,index)=>{
+    const landingFoot=index===lead?(spec.index===3?[.25,.075,.43]:final[index]):f;
+    const step=index===lead?travel:0;
+    const point=f.map((value,k)=>THREE.MathUtils.lerp(value,landingFoot[k],step));
+    if(index===lead&&p>.06&&p<landing)point[1]+=.105*Math.sin(Math.PI*(p-.06)/(landing-.06));
+    point.forEach((value,k)=>point[k]=THREE.MathUtils.lerp(value,final[index][k],recovery));
+    // Only the last lead foot returns. The other planted foot supports the
+    // recovery, including the return from the low final blow.
+    if(spec.index===3&&index===lead&&p>spec.swing[1])point[1]+=.085*Math.sin(Math.PI*(p-spec.swing[1])/(1-spec.swing[1]));
+    return {x:point[0],y:point[1],z:point[2]};
+  });
 }
 function tracksFor(spec) {
   const {contact:c,wind,brake,chamber,cross,exit,turn:[a,b],index}=spec;
-  const bodyDrive=spec.bodyDrive??1, lunge=spec.lunge??.18, drop=spec.drop??.03;
-  // The second cut is the handoff from the first side. Keep its waist arc on
-  // the established overlap so the two handed shaft remains continuous while
-  // the other three cuts use the newer, more forceful body drive.
-  const reverseHandoff=index===1;
-  const start=carries[index], end=carries[index+1];
-  const keys=[{p:0,...start},{p:wind,...chamber,stop:true},{p:spec.swing[0],...chamber,stop:true},
-    {p:c,...cross},{p:spec.swing[1],...exit,stop:true},{p:brake,...exit,stop:true},{p:1,...end}];
-  // Unwrapped azimuths take a visible flank-to-front-to-flank path. A diagonal
-  // cut raises the blade; the last cut falls in a steep forward plane.
+  const start=carries[index], end=carries[index+1], release=spec.swing[0], finish=spec.swing[1];
+  const keys=[{p:0,...start,stop:true},{p:wind,...chamber,stop:true},{p:release,...chamber,stop:true},
+    {p:c,...cross},{p:finish,...exit,stop:true},{p:brake,...exit,stop:true},{p:1,...end,stop:true}];
   for(const key of keys)key.angles=[Math.atan2(key.axis[0],key.axis[2]),Math.asin(key.axis[1])];
-  const body=[{p:0,values:neutral},
-    // Hips start the turn and push the centre of mass before the hands move.
-    // Chest rotation intentionally lags the pelvis, making the weapon appear
-    // to be pulled through by the whole body rather than by the wrists.
-    {p:wind-.06,values:reverseHandoff?[a*.65,a*.25,-.065,a*.025,.025,.835]:[a*.70*bodyDrive,a*.22*bodyDrive,-.075-drop*.20,a*.045*bodyDrive,.035,.825]},
-    {p:c-.13,values:reverseHandoff?[a*.62,a*.34,-.08,0,.065,.82]:[a*.68*bodyDrive,a*.38*bodyDrive,-.105-drop*.30,a*.020*bodyDrive,lunge*.40,.805]},
-    // Hip crosses the support leg before the arms accelerate through contact.
-    {p:c-.025,values:reverseHandoff?[b*.52,a*.18,-.10,-b*.03,.15,.815]:[b*.58*bodyDrive,a*.22*bodyDrive,index===3?-.23-drop*.20:-.14-drop*.25,-b*.050*bodyDrive,lunge*.78,.805]},
-    {p:c+.10,values:reverseHandoff?[b*.73,b*.27,-.08,-b*.035,.18,.80]:[b*.84*bodyDrive,b*.33*bodyDrive,index===3?-.21-drop*.30:-.11-drop*.30,-b*.060*bodyDrive,lunge,.795]},
-    {p:brake,values:reverseHandoff?[b*.65,b*.26,-.07,-b*.025,.13,.825]:[b*.74*bodyDrive,b*.31*bodyDrive,-.095-drop*.20,-b*.040*bodyDrive,lunge*.72,.82]},
-    {p:1,values:neutral}];
+  const side=index===1?-1:1, heavy=index===3;
+  const body=[{p:0,values:bodies[index],stop:true},
+    {p:wind-.075,values:[a*.72,a*.20,-.10,a*.035,.065,.815,-.035,-side*.095,side*.045]},
+    {p:release,values:[a*.40,a*.29,-.09,a*.025,.095,.795,-.02,-side*.13,side*.07]},
+    // The planted foot and pelvis initiate the burst, then the chest catches
+    // the moving blade. Forward pressure and counter-lean persist on braking.
+    {p:c-.035,values:[b*.25,a*.26,heavy?.12:.10,-b*.035,.17,index===2?.75:.775,.065,side*.02,-side*.025]},
+    {p:c+.075,values:[b*.80,b*.32,heavy?.22:.13,-b*.05,.205,index===2?.74:.765,heavy?.11:.07,side*.145,-side*.065]},
+    {p:brake,values:bodies[index+1],stop:true},{p:1,values:bodies[index+1],stop:true}];
   return {tracks:[[{p:0,...start},{p:1,...end}],keys],body,
-    torso:[{p:0,values:[0,0]},{p:wind,values:[a,.85]},
-      {p:c,values:[b*.65,.50]},{p:brake,values:[b,.14]},{p:1,values:[0,0]}],
+    torso:[{p:0,values:[0,0],stop:true},{p:wind,values:[a,.40]},
+      {p:c,values:[b*.65,.30]},{p:brake,values:[0,0],stop:true},{p:1,values:[0,0],stop:true}],
     feet:p=>feetFor(spec,p)};
 }
 export function sampleGreatAttack(id,combo=0,phase=0,state='attack') {

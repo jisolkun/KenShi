@@ -1,10 +1,12 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { createWorldCombat } from './worldCombat.js';
 
 // All artwork is generated here. The court is intentionally clear through its centre.
 export function createWorld(scene) {
   const bounds = { minX: -17, maxX: 17, minZ: -15, maxZ: 15 };
   const obstacles = [];
+  const combatProps = [];
   const root = new THREE.Group();
   root.name = 'the-fallen-temple';
   scene.add(root);
@@ -111,7 +113,14 @@ export function createWorld(scene) {
   function rock(x, z, size, collidable = false) {
     const r = mesh(sphereGeo, rand() < .5 ? darkStone : stone, x, size * .32 - .05, z, size * range(.75, 1.12), size * range(.48, .77), size * range(.65, .98));
     r.rotation.set(rand() * 2, rand() * 6, rand() * .6);
-    if (collidable) obstacles.push({ x, z, radius: size * .8 });
+    if (collidable) {
+      obstacles.push({ x, z, radius: size * .8 });
+      // A conservative inner volume of the visible faceted stone. Props react
+      // without moving or changing their existing movement collision circles.
+      combatProps.push({ id: `stone-${combatProps.length}`, type: 'stone', volumes: [{ x, z,
+        radius: Math.min(r.scale.x, r.scale.z) * .72,
+        minY: Math.max(.02, r.position.y - r.scale.y * .72), maxY: r.position.y + r.scale.y * .72 }] });
+    }
     return r;
   }
   for (let i = 0; i < 65; i++) {
@@ -221,6 +230,11 @@ export function createWorld(scene) {
     const tail=mesh(new THREE.TorusGeometry(.23,.09,4,7,Math.PI*1.55),stone,.37,1.02,-.42,1,1,1,p);tail.rotation.y=Math.PI/2;
     mesh(sphereGeo,ochreStone,side*.38,.64,.64,.2,.2,.2,p);
     obstacles.push({x,z,radius:.93});
+    combatProps.push({ id: `lion-${side}`, type: 'stone-lion', volumes: [
+      { x, z, radius: .65, minY: .02, maxY: .56 },
+      { x, z: z + .13, radius: .32, minY: .65, maxY: 1.4 },
+      { x, z: z - .04, radius: .36, minY: 1.43, maxY: 1.87 },
+    ] });
   }
   lion(-7.1,-14,-1);lion(7.1,-14,1);
 
@@ -267,6 +281,14 @@ export function createWorld(scene) {
     for(const sx of [-1,1])for(const sz of [-1,1])box(darkStone,x+sx*.25,1.39,z+sz*.25,.07,.65,.07);
     const cap=mesh(new THREE.ConeGeometry(.66,.44,4),roofMat,x,1.89,z);cap.rotation.y=Math.PI/4;cyl(gold,x,2.16,z,.06,.2);
     obstacles.push({x,z,radius:.57});
+    combatProps.push({ id: `lamp-${x}-${z}`, type: 'stone-lamp', volumes: [
+      { x, z, radius: .55, minY: .02, maxY: .38 },
+      { x, z, radius: .19, minY: .35, maxY: 1.01 },
+      { x, z, radius: .35, minY: .965, maxY: 1.135 },
+      { x, z, radius: .22, minY: 1.105, maxY: 1.675 },
+      { x, z, radius: .30, minY: 1.67, maxY: 1.82 },
+      { x, z, radius: .14, minY: 1.82, maxY: 1.97 },
+    ] });
   }
   stoneLamp(-15.9,-7);stoneLamp(15.9,-7);stoneLamp(-16,6.5);stoneLamp(16,6.5);
 
@@ -326,12 +348,14 @@ export function createWorld(scene) {
   });
   const prune=group=>{for(const child of [...group.children])if(child.isGroup){prune(child);if(child.children.length===0)group.remove(child);}};
   prune(root);
+  const combat = createWorldCombat(root, { props: combatProps, random: rand });
   let environmentTime=0,environmentInitialized=false;
   const wrap=(value,minimum,span)=>minimum+((value-minimum)%span+span)%span;
   function update(dt) {
     // Keep every environmental layer on the same simulation clock. The caller's
     // wall clock can keep running during pause without moving cloth or fire.
     const elapsed=Number.isFinite(dt)?Math.max(0,dt):0;
+    combat.update(elapsed);
     if(environmentInitialized&&elapsed===0)return;
     environmentInitialized=true;
     environmentTime+=elapsed;
@@ -352,5 +376,7 @@ export function createWorld(scene) {
     dust.forEach((d,i)=>{dustPositions[i*3]=d.x+Math.sin(time*.13+d.phase)*.8;dustPositions[i*3+1]=d.y+Math.sin(time*.45+d.phase)*.23;dustPositions[i*3+2]=d.z+Math.cos(time*.15+d.phase)*.65;});dustGeo.attributes.position.needsUpdate=true;
   }
   update(0,0);
-  return {bounds,obstacles,lanternLights,root,update};
+  return {bounds,obstacles,lanternLights,root,update,
+    reactToBlade: combat.reactToBlade, presentedCombat: combat.presentedCombat,
+    clearCombat: combat.clearCombat, getCombatState: combat.getCombatState};
 }

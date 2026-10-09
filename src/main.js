@@ -7,7 +7,7 @@ import { createEffects } from "./effects.js";
 import { requestMobileFullscreen } from "./fullscreen.js";
 import { WEAPONS, getWeapon, DEFAULT_WEAPON_ID, isWeaponUnlocked } from "./weapons.js";
 import { createWeaponEffects } from "./weaponEffects.js";
-import { weaponStrikeContains, bladeSweepContains } from "./weaponCombat.js";
+import { weaponStrikeContains, bladeSweepContains, clipBladeSweep } from "./weaponCombat.js";
 import { getReviewedAttack, sampleReviewedAttack } from "./choreography/index.js";
 import { isCombatTarget, attackDistances, chooseAttackTarget, attackCanTrack,
   attackRecoveryPhase, attackChainPhase, segmentClear, planObstaclePath, projectWalkablePoint } from "./heroAI.js";
@@ -489,6 +489,8 @@ function stateSnapshot() {
       speed: hero.moveVelocity.length(),
       velocity: { x: hero.moveVelocity.x, z: hero.moveVelocity.z },
       angle: hero.angle,
+      attackPhase: hero.state === 'attack' ? Math.min(1, hero.elapsed / hero.duration) : 0,
+      attackDuration: hero.state === 'attack' ? hero.duration : 0,
       target: hero.target?.id ?? null,
       attackTarget: hero.attackTarget?.id ?? null,
       gait: hero.gaitPhase,
@@ -559,6 +561,7 @@ function clearDynamic() {
   drops = [];
   fx.clear();
   weaponFx.clear();
+  world.clearCombat?.();
 }
 function selectWeapon(id = currentWeapon.id, preview = true) {
   if (!isWeaponUnlocked(id)) return false;
@@ -581,7 +584,9 @@ function selectWeapon(id = currentWeapon.id, preview = true) {
   fx.clear();
   weaponFx.clear();
   const width = currentWeapon.id === "great-dao" ? 1.35 : currentWeapon.stats.power >= 4 ? 1.1 : 0.7;
+  world.clearCombat?.();
   for (const trail of trails) {
+    trail.preserveUntilPresented = currentWeapon.id === 'great-dao';
     trail.color = new THREE.Color(currentWeapon.effectColor);
     trail.coreColor = new THREE.Color(currentWeapon.effectAccent);
     trail.widthFactor = width;
@@ -913,6 +918,7 @@ function hurtEnemy(
   force = 1,
   critical = false,
   playerContact = false,
+  cutDirection = null,
 ) {
   if (e.state === "dead" || e.state === "spawn") return false;
   e.hp = Math.max(0, e.hp - damage);
@@ -926,18 +932,17 @@ function hurtEnemy(
   e.hurtDirection = Math.sin(
     Math.atan2(hitDirection.x, hitDirection.z) - e.angle,
   );
-  e.hurtStrength = critical ? 1 : 0.65;
-  // The great dao keeps its momentum through contact. Its stagger, launch,
-  // camera kick and hit effects provide the feedback; freezing the defender
-  // would make the heavy swing feel slow instead of forceful.
   const greatContact = playerContact && currentWeapon.id === "great-dao";
+  e.hurtStrength = greatContact ? critical ? 1.35 : .95 : critical ? 1 : 0.65;
+  // A brief contact accent separates impact from the fast release without
+  // stretching the whole stroke. Each swing accents its first victim once.
   e.localHitStop = greatContact
-    ? 0
+    ? Math.max(e.localHitStop || 0, critical ? .028 : .014)
     : Math.max(e.localHitStop || 0, critical ? 0.038 : 0.027);
   e.velocity.addScaledVector(temp, force * (e.type === "boss" ? 0.4 : 1));
   showDamage(e, damage, critical ? "critical" : "normal");
   if (playerContact) {
-    weaponFx.impact(currentWeapon.id, e.pos.clone().add(new THREE.Vector3(0, 1.05, 0)), hero.angle, hero.combo, critical);
+    weaponFx.impact(currentWeapon.id, e.pos.clone().add(new THREE.Vector3(0, 1.05, 0)), hero.angle, hero.combo, critical, cutDirection);
   } else if (fx.impact)
     fx.impact(
       e.pos
@@ -952,14 +957,14 @@ function hurtEnemy(
   comboTimeout = 3;
   if (playerContact || e.pos.distanceTo(hero.pos) < 6)
     kickCamera(hitDirection, (critical ? 0.075 : 0.035) * (playerContact ? 0.7 + currentWeapon.stats.power * 0.12 : 1) *
-      (playerContact && currentWeapon.id === "great-dao" && hero.combo === 3 ? 1.2 : 1));
+      (greatContact ? critical ? 1.7 : 1.35 : 1));
   const isPlayerContact = playerContact && hero.state === "attack";
   if (isPlayerContact && !hero.impactDone) {
     hero.impactDone = true;
     const contactStop = currentWeapon.moves[hero.combo].hitstop;
     hero.localHitStop = greatContact
-      ? 0
-      : Math.min(currentWeapon.id === "great-dao" ? .11 : .08, contactStop * (critical ? 1.2 : 1));
+      ? Math.min(.04, contactStop)
+      : Math.min(.08, contactStop * (critical ? 1.2 : 1));
   }
   if (
     playerContact &&
@@ -1032,41 +1037,43 @@ function reviewedStrike(phase,frames) {
   const action=getReviewedAttack(currentWeapon.id,hero.combo,hero.state);
   if(!action)return;
   const previous=hero.reviewedPrevious;
+  if (currentWeapon.id === 'great-dao') {
+    const current = frames.find(blade => blade.hand === 1);
+    const prior = previous?.state === hero.state && previous.combo === hero.combo
+      ? previous.frames.find(blade => blade.hand === 1) : null;
+    const sweep = current && clipBladeSweep(current, prior, phase, previous?.phase, [action.swing[0], action.brake]);
+    if (sweep) world.reactToBlade?.({
+      ...sweep, combo: hero.combo,
+      strikeId: hero.trailSeries, origin: hero.pos, phase,
+    });
+  }
   action.contacts.forEach((contact,stroke)=>{
-    if(phase<contact.window[0]||phase>contact.window[1])return;
+    const great = currentWeapon.id === 'great-dao';
+    if(!great && (phase<contact.window[0]||phase>contact.window[1]))return;
     const frame=frames.find(b=>b.hand===contact.hand);
     if(!frame)return;
+    const priorFrame = previous?.state === hero.state && previous.combo === hero.combo
+      ? previous.frames.find(b => b.hand === contact.hand) : null;
+    const sweep = great ? clipBladeSweep(frame, priorFrame, phase, previous?.phase, contact.window) : null;
+    if (great && !sweep) return;
     hero.hitDone=true;
     if(!hero.strokeContacts.has(stroke)){
       hero.strokeContacts.add(stroke);
       safeAudio('weaponSlash',currentWeapon.id,hero.combo,contact.kind??'cut');
-      // Layer a readable arc over the physical blade trail. The trail follows
-      // the authored tip, while this brief luminous sweep makes the release
-      // legible at normal camera distance and matches the game's broad combat
-      // silhouette.
-      if(currentWeapon.id==='great-dao'){
-        fx.arc(hero.pos,hero.angle,action.reach*(hero.combo===3?1.02:.94),hero.combo,currentWeapon.effectColor);
-        if(hero.combo>=2){
-          const forward=new THREE.Vector3(Math.sin(hero.angle),0,Math.cos(hero.angle));
-          fx.groundImpact?.(
-            hero.pos.clone().addScaledVector(forward,1.18),
-            hero.combo===3?1.72:1.05,
-            hero.combo===3,
-          );
-        }
-      }
     }
     const prior=previous&&previous.state===hero.state&&previous.combo===hero.combo&&previous.phase>=contact.window[0]
       ?previous.frames.find(b=>b.hand===contact.hand):null;
+    const cuttingDirection = great && sweep.previous
+      ? sweep.current.tip.clone().sub(sweep.previous.tip).normalize() : null;
     for(const e of enemies){
       const key=`${stroke}:${e.id}`;
       if(e.state==='dead'||e.state==='spawn'||hero.attackHits.has(key))continue;
       const target={x:e.pos.x,z:e.pos.z,minY:.18,maxY:e.type==='boss'?3.2:e.type==='brute'?2.4:1.85};
-      if(!bladeSweepContains(frame,prior,target,e.radius,action.width*.5))continue;
+      if(!bladeSweepContains(sweep?.current ?? frame, great ? sweep.previous : prior,target,e.radius,action.width*.5))continue;
       hero.attackHits.add(key);
       const move=currentWeapon.moves[hero.combo];
       const critical=hero.combo===3;
-      hurtEnemy(e,Math.round(move.damage/action.contacts.length*(critical?1.25:1)),hero.pos,move.knockback*3.5,critical,true);
+      hurtEnemy(e,Math.round(move.damage/action.contacts.length*(critical?1.25:1)),hero.pos,move.knockback*3.5,critical,true,cuttingDirection);
     }
   });
   hero.reviewedPrevious={state:hero.state,combo:hero.combo,phase,frames};
@@ -1958,7 +1965,7 @@ function updatePresentation(dt) {
         }
         break;
       }
-      remaining -= move.duration + 0.1;
+      remaining -= move.duration + (currentWeapon.id === 'great-dao' ? 0 : 0.1);
     }
   }
   hero.state = state;
@@ -2052,7 +2059,8 @@ function animate(now) {
     else combo = 0;
     if (dt > 0) {
       // Keep collision and strike windows stable when a slow frame arrives.
-      const steps = Math.ceil(dt / 0.03),
+      const strikeStep = currentWeapon.id === 'great-dao' ? 1 / 120 : .03;
+      const steps = Math.ceil(dt / strikeStep),
         step = dt / steps;
       for (let i = 0; i < steps && mode === "playing"; i++) {
         globalTime += step;
@@ -2095,6 +2103,9 @@ function animate(now) {
     uiClock = 0;
   }
   renderer.render(scene, camera);
+  fx.presented?.();
+  weaponFx.presented?.();
+  world.presentedCombat?.();
   if (mode === "playing" && hero.state === "attack" && hero.elapsed >= hero.duration)
     hero.attackEndRendered = true;
 }
@@ -2113,6 +2124,23 @@ if (new URLSearchParams(location.search).get("debug") === "1") {
     },
     getState: stateSnapshot,
     getWeapons: () => WEAPONS,
+    getCombatEffects: () => ({
+      world: world.getCombatState?.() ?? null,
+      weapon: weaponFx.getState?.() ?? null,
+      trails: trails.map(trail => ({ vertices: trail.mesh.geometry.drawRange.count,
+        awaitingPresentation: trail.points.filter(point => point.awaitingPresentation).length })),
+    }),
+    positionPlayer(x, z) {
+      if (mode !== 'playing' || !Number.isFinite(x) || !Number.isFinite(z)) return false;
+      hero.pos.set(x, 0, z);
+      clampPosition(hero.pos);
+      hero.velocity.set(0, 0, 0);
+      hero.moveVelocity.set(0, 0, 0);
+      hero.target = hero.destination = hero.navigation = null;
+      rig.group.position.copy(hero.pos);
+      cameraFocus.copy(hero.pos);
+      return true;
+    },
     selectWeapon,
     chooseWeapon,
     getPose() {

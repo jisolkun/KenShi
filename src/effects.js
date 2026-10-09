@@ -269,20 +269,42 @@ export function createEffects(scene, camera) {
     geo.setAttribute('position',new THREE.BufferAttribute(positions,3).setUsage(THREE.DynamicDrawUsage));geo.setAttribute('color',new THREE.BufferAttribute(colors,3).setUsage(THREE.DynamicDrawUsage));geo.setDrawRange(0,0);
     const material=additive(0xffffff,0.8);material.vertexColors=true;
     const mesh=new THREE.Mesh(geo,material);mesh.frustumCulled=false;scene.add(mesh);
-    const trail={mesh,points:[],color:new THREE.Color(0xb0c4ff),coreColor:new THREE.Color(0xfff7eb),widthFactor:1,spare:Array.from({length:32},()=>({tip:new THREE.Vector3(),inner:new THREE.Vector3(),core:new THREE.Vector3(),body:new THREE.Vector3(),age:0})),positions,colors,wasActive:false};trails.push(trail);return trail;
+    const trail={mesh,points:[],color:new THREE.Color(0xb0c4ff),coreColor:new THREE.Color(0xfff7eb),widthFactor:1,preserveUntilPresented:false,spare:Array.from({length:32},()=>({tip:new THREE.Vector3(),inner:new THREE.Vector3(),core:new THREE.Vector3(),body:new THREE.Vector3(),age:0,unseenAge:0,awaitingPresentation:false})),positions,colors,wasActive:false};trails.push(trail);return trail;
+  }
+  function releaseTrailPoint(trail,point) {
+    point.age=0;point.unseenAge=0;point.awaitingPresentation=false;
+    trail.spare.push(point);
   }
   function resetTrail(trail) {
-    while(trail.points.length)trail.spare.push(trail.points.pop());trail.mesh.geometry.setDrawRange(0,0);trail.wasActive=false;
+    while(trail.points.length)releaseTrailPoint(trail,trail.points.pop());trail.mesh.geometry.setDrawRange(0,0);trail.wasActive=false;trail.previousBlade=null;
+  }
+  function presented() {
+    // Called after the actual draw, once all simulation steps have contributed
+    // their real blade samples. Only the first presentation starts their fade.
+    for(const trail of trails) {
+      if(!trail.mesh.visible||trail.mesh.geometry.drawRange.count===0)continue;
+      for(const point of trail.points)if(point.awaitingPresentation) {
+        point.awaitingPresentation=false;point.age=0;point.unseenAge=0;
+      }
+    }
   }
   function sample(trail,tip,body,active,dt) {
-    const elapsed=Math.max(0,Math.min(dt||0,0.2));for(const p of trail.points)p.age+=elapsed;
-    while(trail.points.length&&trail.points[0].age>=trailLife)trail.spare.push(trail.points.shift());
+    const unseenElapsed=Math.max(0,dt||0),elapsed=Math.min(unseenElapsed,0.2);
+    for(const p of trail.points) {
+      if(p.awaitingPresentation)p.unseenAge+=unseenElapsed;
+      else p.age+=elapsed;
+    }
+    while(trail.points.length) {
+      const point=trail.points[0];
+      if(point.awaitingPresentation?point.unseenAge<firstPresentationTimeout:point.age<trailLife)break;
+      releaseTrailPoint(trail,trail.points.shift());
+    }
     if(active&&tip&&body){
       const last=trail.points.at(-1);
       // Mount/state changes and discontinuous sampling never connect into a rod.
       if(!trail.wasActive||elapsed>0.07||(last&&(last.tip.distanceToSquared(tip)>4.4||last.body.distanceToSquared(body)>1.4)))resetTrail(trail);
       const previous=trail.points.at(-1);
-      if(!previous||previous.tip.distanceToSquared(tip)>0.0004){const p=trail.spare.pop()||trail.points.shift();p.tip.copy(tip);p.body.copy(body);p.inner.copy(tip).lerp(body,0.26*trail.widthFactor);p.core.copy(tip).lerp(body,0.055*trail.widthFactor);p.age=0;trail.points.push(p);if(trail.points.length>29)trail.spare.push(trail.points.shift());}
+      if(!previous||previous.tip.distanceToSquared(tip)>0.0004){const p=trail.spare.pop()||trail.points.shift();p.tip.copy(tip);p.body.copy(body);p.inner.copy(tip).lerp(body,0.26*trail.widthFactor);p.core.copy(tip).lerp(body,0.055*trail.widthFactor);p.age=0;p.unseenAge=0;p.awaitingPresentation=!!trail.preserveUntilPresented;trail.points.push(p);if(trail.points.length>29)releaseTrailPoint(trail,trail.points.shift());}
     }
     trail.wasActive=Boolean(active);let at=0;
     function vertex(point,age,layer,edge){
@@ -305,5 +327,5 @@ export function createEffects(scene, camera) {
     function disposeMesh(mesh){scene.remove(mesh);mesh.traverse(o=>{if(!(o.isMesh||o.isLineSegments))return;if(!disposed.has(o.geometry)){o.geometry.dispose();disposed.add(o.geometry);}for(const material of Array.isArray(o.material)?o.material:[o.material]){if(!disposed.has(material)){material.dispose();disposed.add(material);}}});}
     allCached.forEach(disposeMesh);particlePools.forEach(pool=>disposeMesh(pool.mesh));trails.forEach(trail=>disposeMesh(trail.mesh));geometries.forEach(geometry=>{if(!disposed.has(geometry))geometry.dispose();});allCached.clear();cache.clear();geometries.clear();
   }
-  return {ring,warning,groundImpact,burst,impact,death,arc,ghost,swordTrail,sample,update,clear,destroy};
+  return {ring,warning,groundImpact,burst,impact,death,arc,ghost,swordTrail,sample,presented,update,clear,destroy};
 }

@@ -52,22 +52,22 @@ function raw(spec,tracks,p) {
  const [yaw,load]=interpolate(tracks.torso,p,'values');
  const stance={yaw,load,advance:spec.advance*Math.sin(Math.PI*p),...(spec.bodyHeight?{bodyHeight:spec.bodyHeight}:{})};
  if(tracks.body){
-  const [pelvisYaw,chestYaw,pitch,shiftX,shiftZ,height]=interpolate(tracks.body,p,'values');
-  Object.assign(stance,{pelvisYaw,chestYaw,pitch,shiftX,advance:shiftZ,bodyHeight:height});
+  const [pelvisYaw,chestYaw,pitch,shiftX,shiftZ,height,bodyPitch=0,bodyRoll=0,chestRoll=0]=interpolate(tracks.body,p,'values');
+  Object.assign(stance,{pelvisYaw,chestYaw,pitch,shiftX,advance:shiftZ,bodyHeight:height,bodyPitch,bodyRoll,chestRoll});
  }
  if(tracks.feet){
   stance.feet=tracks.feet(p);
-  const pelvis=new THREE.Quaternion().setFromAxisAngle(v([0,1,0]),stance.pelvisYaw??yaw*.65);
+  const pelvis=new THREE.Quaternion().setFromEuler(new THREE.Euler(stance.bodyPitch??0,stance.pelvisYaw??yaw*.65,stance.bodyRoll??0));
   for(let i=0;i<2;i++){
    const hip=v([i?.155:-.155,-.035,0]).applyQuaternion(pelvis);
    const foot=stance.feet[i],dx=hip.x+(stance.shiftX??-yaw*.07)-foot.x,dz=hip.z+stance.advance-foot.z;
-   const ceiling=foot.y+.035+Math.sqrt(Math.max(.10,.795*.795-dx*dx-dz*dz));
+   const ceiling=foot.y-hip.y+Math.sqrt(Math.max(.10,.795*.795-dx*dx-dz*dz));
    stance.bodyHeight=Math.min(stance.bodyHeight??.875,ceiling);
   }
  }
  const transform=authoredChestTransform(stance);
  const inverse=transform.q.clone().invert();
- const hands=tracks.tracks.map((track,i)=>{const shoulder=v([i?.29:-.29,.365,spec.shoulderForward??0]);const grip=v(interpolate(track,p,'grip'));if(spec.rootFrame)grip.add(v([0,1.025,0])).sub(transform.position).applyQuaternion(inverse);const offset=grip.sub(shoulder);const length=offset.length();if(length>.51)offset.setLength(.548-.038*Math.exp(-(length-.51)/.038));return {grip:offset.add(shoulder).toArray(),axis:(spec.rootFrame&&track[0].angles?(()=>{const [azimuth,rawTilt]=interpolate(track,p,'angles'),tilt=Math.max(-.54,rawTilt);return v([Math.sin(azimuth)*Math.cos(tilt),Math.sin(tilt),Math.cos(azimuth)*Math.cos(tilt)]);})():v(interpolate(track,p,'axis')).normalize()).applyQuaternion(spec.rootFrame?inverse:new THREE.Quaternion())};});
+ const hands=tracks.tracks.map((track,i)=>{const shoulder=v([i?.29:-.29,.365,spec.shoulderForward??0]);const grip=v(interpolate(track,p,'grip'));if(spec.rootFrame){if(spec.bodyGripRotation){const follow=new THREE.Quaternion().slerp(transform.q,spec.bodyGripRotation);grip.applyQuaternion(follow);}grip.add(v([0,1.025,0]));if(spec.bodyGripFollow){const [x,y,z]=spec.bodyGripFollow;grip.add(v([(stance.shiftX??0)*x,((stance.bodyHeight??.875)-.875)*y,stance.advance*z]));}grip.sub(transform.position).applyQuaternion(inverse);}const offset=grip.sub(shoulder);const length=offset.length();if(length>.51)offset.setLength(.548-.038*Math.exp(-(length-.51)/.038));return {grip:offset.add(shoulder).toArray(),axis:(spec.rootFrame&&track[0].angles?(()=>{const [azimuth,rawTilt]=interpolate(track,p,'angles'),tilt=Math.max(spec.minTilt??-.54,rawTilt);return v([Math.sin(azimuth)*Math.cos(tilt),Math.sin(tilt),Math.cos(azimuth)*Math.cos(tilt)]);})():v(interpolate(track,p,'axis')).normalize()).applyQuaternion(spec.rootFrame?inverse:new THREE.Quaternion())};});
  for(const lane of spec.pointLanes??[]){
   const t=THREE.MathUtils.clamp((Math.abs(p-lane.phase)-lane.inner)/(lane.outer-lane.inner),0,1),weight=1-t*t*(3-2*t),h=hands[lane.hand];
   h.grip[0]=THREE.MathUtils.lerp(h.grip[0],lane.x,weight);
@@ -89,8 +89,8 @@ function raw(spec,tracks,p) {
 }
 export function authoredChestTransform(stance) {
  const {yaw,load,advance}=stance;
- const body=new THREE.Quaternion().setFromEuler(new THREE.Euler(0,stance.pelvisYaw??yaw*.65,0));
- const chest=new THREE.Quaternion().setFromEuler(new THREE.Euler(stance.pitch??(-.055-load*.035),stance.chestYaw??yaw*.35,0));
+ const body=new THREE.Quaternion().setFromEuler(new THREE.Euler(stance.bodyPitch??0,stance.pelvisYaw??yaw*.65,stance.bodyRoll??0));
+ const chest=new THREE.Quaternion().setFromEuler(new THREE.Euler(stance.pitch??(-.055-load*.035),stance.chestYaw??yaw*.35,stance.chestRoll??0));
  return {q:body.clone().multiply(chest),position:v([0,.15,0]).applyQuaternion(body).add(v([stance.shiftX??-yaw*.07,(stance.bodyHeight??.875)-load*.055,advance]))};
 }
 function midWorld(r,i,spec) {

@@ -95,9 +95,34 @@ function applyReviewedMotion(rig,pose,plantFoot,readySample=null) {
  // Pelvis starts the turn; the chest follows. Feet remain in the character
  // frame while the hip crosses between the two support legs.
  const pelvisYaw=sample.stance.pelvisYaw??yaw*.65;
- rig.body.rotation.set(0,pelvisYaw,0);
+ const carry=clamp(pose.attackCarry??0,0,1);
+ const resolvedFeet=rig.legs.map((leg,index)=>{
+  const speed=pose.speed>0?clamp(pose.speed,0,1):carry;
+  const cycleDistance=THREE.MathUtils.lerp(.85,2.9,speed);
+  const stance=Math.max(1e-6,2*.19*carry/cycleDistance);
+  const u=(((pose.gaitPhase??0)/(Math.PI*2)+(leg.side===-1?.5:0))%1+1)%1;
+  const swing=clamp((u-stance)/(1-stance),0,1);
+  const stride=u<stance?.19*(1-2*u/stance):THREE.MathUtils.lerp(-.19,.19,ease(swing));
+  const authored=sample.stance.feet?.[index];
+  return {x:authored?.x??leg.side*.16,
+   y:THREE.MathUtils.lerp(authored?.y??.075,.075+Math.sin(Math.PI*swing)*.10,carry),
+   z:THREE.MathUtils.lerp(authored?.z??(index?-.07:.10),.026+stride,carry)};
+ });
+ if(rig.weaponId==='great-dao'&&carry>0){
+  // Travelling gait and authored action phase are independent. Lower the
+  // loaded pelvis enough for the *blended* foot targets, including its tilt.
+  const q=new THREE.Quaternion().setFromEuler(new THREE.Euler(sample.stance.bodyPitch??0,pelvisYaw,sample.stance.bodyRoll??0));
+  resolvedFeet.forEach((foot,index)=>{
+   const hip=rig.legs[index].hip.position.clone().applyQuaternion(q);
+   const dx=hip.x+(sample.stance.shiftX??-yaw*.07)-foot.x;
+   const dz=hip.z+advance-foot.z;
+   const ceiling=foot.y-hip.y+Math.sqrt(Math.max(.10,.795*.795-dx*dx-dz*dz));
+   sample.stance.bodyHeight=Math.min(sample.stance.bodyHeight??.875,ceiling);
+  });
+ }
+ rig.body.rotation.set(sample.stance.bodyPitch??0,pelvisYaw,sample.stance.bodyRoll??0);
  rig.body.position.set(sample.stance.shiftX??-yaw*.07,(sample.stance.bodyHeight??.875)-load*.055,advance);
- rig.chest.rotation.set(sample.stance.pitch??(-.055-load*.035),sample.stance.chestYaw??yaw*.35,0);
+ rig.chest.rotation.set(sample.stance.pitch??(-.055-load*.035),sample.stance.chestYaw??yaw*.35,sample.stance.chestRoll??0);
  rig.head.rotation.set(.02,-yaw*.25,0);
  rig.group.updateMatrixWorld(true);
  const chestQ=rig.chest.getWorldQuaternion(new THREE.Quaternion());
@@ -105,24 +130,10 @@ function applyReviewedMotion(rig,pose,plantFoot,readySample=null) {
   const h=sample.hands[i];
   solveArm(rig,rig.arms[i],new THREE.Vector3(...h.grip),chestQ.clone().multiply(new THREE.Quaternion().fromArray(h.quaternion)),armMode);
  }
- const resolvedFeet=[];
- for(const leg of rig.legs){
+ for(const [index,leg] of rig.legs.entries()){
   leg.hip.rotation.set(0,0,0);leg.knee.rotation.set(0,0,0);leg.foot.rotation.set(0,0,0);
-  const carry=clamp(pose.attackCarry??0,0,1);
-  // Gait phase follows root distance, not elapsed time. Match the blended
-  // short step to that distance so a support ankle stays still in world space.
-  const speed=pose.speed>0?clamp(pose.speed,0,1):carry;
-  const cycleDistance=THREE.MathUtils.lerp(.85,2.9,speed);
-  const stance=Math.max(1e-6,2*.19*carry/cycleDistance);
-  const u=(((pose.gaitPhase??0)/(Math.PI*2)+(leg.side===-1?.5:0))%1+1)%1;
-  const swing=clamp((u-stance)/(1-stance),0,1);
-  const stride=u<stance?.19*(1-2*u/stance):THREE.MathUtils.lerp(-.19,.19,ease(swing));
-  const compact=true,authored=sample.stance.feet?.[leg.side===-1?0:1];
-  const z=THREE.MathUtils.lerp(authored?.z??(leg.side===-1?(compact?.10:.16):(compact?-.07:-.12)),.026+stride,carry);
-  const y=THREE.MathUtils.lerp(authored?.y??.075,.075+Math.sin(Math.PI*swing)*.10,carry);
-  const x=authored?.x??leg.side*(compact?.16:.19);
+  const {x,y,z}=resolvedFeet[index];
   plantFoot?.(rig,leg,1,z,y,x);
-  resolvedFeet.push({x,y,z});
  }
  sample.stance.feet=resolvedFeet;
  rig.pony.rotation.set(.2+load*.08,0,-yaw*.15);
@@ -146,7 +157,21 @@ export function reconcileWeaponGrip(rig) {
    // A blended shaft can put the support fist back through the chest even
    // when both endpoint poses are clear. Apply the same volume/reach guard.
    const localQ=rig.chest.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(desired);
-   constrainPairedGrip(primary,down.clone().applyQuaternion(localQ),grip);
+   const axis=down.clone().applyQuaternion(localQ);
+   constrainPairedGrip(primary,axis,grip);
+   if(rig.weaponId==='great-dao'){
+    // A shortest quaternion blend from the broad returning sweep into carry
+    // can dip the long tip below ground even when both endpoint poses clear.
+    // Project the entire connected hilt upward, retaining reach and palm
+    // clearance, instead of shortening or hiding the rendered blade.
+    const up=new THREE.Vector3(0,1,0).applyQuaternion(rig.chest.getWorldQuaternion(new THREE.Quaternion()).invert());
+    for(let pass=0;pass<12;pass++){
+     const tip=rig.chest.localToWorld(primary.clone()).addScaledVector(down.clone().applyQuaternion(desired),1.509);
+     if(tip.y>=.055)break;
+     primary.addScaledVector(up,.055-tip.y);
+     constrainPairedGrip(primary,axis,grip);
+    }
+   }
   }
   solveArm(rig,rig.arms[1],primary,desired.clone(),'tang');
   rig.group.updateMatrixWorld(true);

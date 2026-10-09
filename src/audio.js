@@ -127,13 +127,17 @@ export function createAudio() {
     const pitch = [1.04,0.94,1.12,0.86][Math.abs(combo)%4];
     const shape=technique === 'thrust' ? 'thrust' : technique === 'chop' ? 'crush'
       : technique === 'cut' ? 'arc' : getWeapon(id).moves[((combo%4)+4)%4].shape;
-    const duration = (0.085 + weight * 0.035)*(shape==='thrust'?0.72:shape==='radial'?1.3:1);
     if(id==='great-dao') {
-      const heavy=shape==='crush';
-      // A low, accelerating rush carries the blade's mass; the edge remains audible.
-      noise(heavy?0.22:0.17,heavy?0.15:0.11,310,860*pitch,'bandpass',0,0.018);
-      tone(heavy?108:145,heavy?38:55,heavy?0.19:0.14,heavy?0.09:0.055,'triangle',0.006,0.009);
+      const heavy=shape==='crush',stage=[.94,1.04,1.16,1.32][((combo%4)+4)%4];
+      // The wind surges abruptly with the released blade, then ends cleanly
+      // before the next cut; a high edge transient keeps the low rush sharp.
+      noise(heavy?.13:.105,.24*stage,410,1420*pitch,'bandpass',0,.004);
+      noise(heavy?.085:.065,.10*stage,3200*pitch,950,'highpass',.003,.002);
+      tone(heavy?110:145,heavy?36:50,heavy?.115:.09,heavy?.085:.052,'triangle',.002,.003);
+      tone(metal*pitch,metal*.46,heavy?.095:.075,.031,'triangle',.005,.003);
+      return;
     }
+    const duration = (0.085 + weight * 0.035)*(shape==='thrust'?0.72:shape==='radial'?1.3:1);
     if(shape==='crush')tone(110,37,0.14,0.065,'sine',0.015,0.005);
     if(shape==='thrust')noise(0.045,0.09,air*1.3,air*0.8,'highpass',0,0.002);
     noise(duration,0.19+weight*0.04,air*pitch,air*0.32,weight>1.5?'bandpass':'highpass',0,0.006);
@@ -151,15 +155,20 @@ export function createAudio() {
     if(context.currentTime-lastHit<0.035 && force<=lastHitWeight*1.3)return;
     lastHit=context.currentTime;lastHitWeight=force;
     const pitch=combo%2?0.94:1.06, mass=Math.min(2.2,weight*force);
+    if(id==='great-dao') {
+      const finisher=((combo%4)+4)%4===3||technique==='chop';
+      // A tight low strike plus a brief edge crack carries force without a
+      // long bass tail masking the increasingly fast follow-up swings.
+      tone((finisher?102:132)*pitch,31,finisher?.14:.105,.26+mass*.055,'sine',0,.002);
+      noise(finisher?.065:.047,.22+mass*.035,finisher?980:1450,155,'lowpass',0,.002);
+      noise(.028,finisher?.15:.105,3200*pitch,1300,'highpass',.001,.001);
+      tone(metal*pitch,metal*.42,finisher?.085:.058,finisher?.065:.047,'triangle',.002,.002);
+      tone(finisher?57:83,28,finisher?.155:.085,finisher?.16:.05,'sine',.002,.002);
+      return;
+    }
     tone((90+weight*30)*pitch,32,0.09+mass*0.045,0.2+mass*0.075,'sine',0,0.002);
     noise(0.035+mass*0.016,0.19+mass*0.055,kind==='wood'?820:air,220,'lowpass',0,0.002);
     tone(metal*pitch,metal*0.62,0.095,0.05,'triangle',0,0.002);
-    if(id==='great-dao') {
-      const finisher=((combo%4)+4)%4===3||technique==='chop';
-      noise(finisher?0.15:0.09,finisher?0.15:0.08,finisher?620:1000,115,'lowpass',0.005,0.003);
-      tone(finisher?67:87,28,finisher?0.25:0.15,finisher?0.20:0.075,'sine',0.004,0.003);
-      if(finisher)tone(415,175,0.16,0.022,'triangle',0.018,0.004);
-    }
   }
   function roll() {
     noise(0.24, 0.3, 800, 180, 'bandpass');

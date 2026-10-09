@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import {bladeSweepContains, bladeThrustContains} from '../src/weaponCombat.js';
+import {bladeSweepContains, bladeThrustContains, clipBladeSweep} from '../src/weaponCombat.js';
 const v=(x,z)=>new THREE.Vector3(x,1,z);
 const frame=(a,b)=>({heel:v(...a),tip:v(...b)});
 test('physical blade hit is a narrow segment and never an invisible rear circle',()=>{
@@ -45,4 +45,23 @@ test('fast point entries sweep a narrow forward line and respect enemy height',(
  assert.equal(bladeThrustContains(after,before,{x:0,z:1.3},.12),true);
  assert.equal(bladeThrustContains(after,before,{x:.5,z:1.3},.12),false);
  assert.equal(bladeThrustContains(after,before,{x:0,z:1.3,minY:2,maxY:3},.12),false);
+});
+
+test('fast strikes retain boundary contact without granting windup or recovery damage',()=>{
+ const before=frame([-1,.4],[-1,1.4]),after=frame([1,.4],[1,1.4]);
+ const full=clipBladeSweep(after,before,.7,.3,[.4,.6]);
+ assert.ok(full);
+ assert.equal(bladeSweepContains(full.current,full.previous,{x:0,z:1},.05,0),true);
+ assert.equal(bladeSweepContains(full.current,full.previous,{x:-.9,z:1},.05,0),false);
+ assert.equal(bladeSweepContains(full.current,full.previous,{x:.9,z:1},.05,0),false);
+ const entering=clipBladeSweep(after,before,.5,.3,[.4,.6]);
+ assert.ok(entering.previous,'the entry segment survives even when the previous frame preceded the window');
+ const leaving=clipBladeSweep(after,before,.7,.5,[.4,.6]);
+ assert.ok(leaving,'the final crossing survives even when the current frame passed the window');
+ assert.equal(clipBladeSweep(after,before,.3,.2,[.4,.6]),null);
+ assert.equal(clipBladeSweep(after,before,.8,.7,[.4,.6]),null);
+ assert.equal(clipBladeSweep(after,null,.3,undefined,[.4,.6]),null);
+ assert.equal(clipBladeSweep(after,null,.5,undefined,[.4,.6]).current,after);
+ assert.equal(before.tip.x,-1,'clipping never mutates the live physical pose');
+ assert.equal(after.tip.x,1);
 });

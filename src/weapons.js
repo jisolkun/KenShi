@@ -179,12 +179,12 @@ export const WEAPON_TYPES = [
     tagline: '腰带重刃，踏地破阵',
     description: '双手挥舞宽厚大刀，踏步转腰接连横扫、斜劈与回身大扫，最后以踏地重劈击退敌阵。蓄势沉稳，出刀迅猛，收势保留刀身惯性。',
     effectColor: 0xffad55, effectAccent: 0xffe6aa,
-    stats: { speed: 2, power: 5, reach: 5 },
+    stats: { speed: 4, power: 5, reach: 4 },
     moves: [
-      {name:'踏步横扫',damage:32,knockback:.78,hitstop:.055,lunge:.42,recoverAt:.85},
-      {name:'反向斜劈',damage:39,knockback:.96,hitstop:.061,lunge:.45,recoverAt:.86},
-      {name:'回身大扫',damage:46,knockback:1.18,hitstop:.069,lunge:.48,recoverAt:.88},
-      {name:'踏地重劈',damage:70,knockback:1.90,hitstop:.095,lunge:.55,recoverAt:.94},
+      {name:'踏步横扫',damage:32,knockback:.78,hitstop:.018,lunge:.42,recoverAt:.93},
+      {name:'反向斜劈',damage:39,knockback:.96,hitstop:.020,lunge:.45,recoverAt:.93},
+      {name:'回身大扫',damage:46,knockback:1.18,hitstop:.022,lunge:.48,recoverAt:.96},
+      {name:'踏地重劈',damage:70,knockback:1.90,hitstop:.036,lunge:.55,recoverAt:.95},
     ],
   }
 ];

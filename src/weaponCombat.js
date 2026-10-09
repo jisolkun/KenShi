@@ -30,6 +30,26 @@ function segmentDistance(target,a,b) {
   return distance;
 }
 
+// Keep both boundary pieces of a fast stroke. Clipping the sampled sweep to
+// its active interval avoids discarding the first/last segment or adding hits
+// from the windup when the fixed simulation grid misses an exact boundary.
+export function clipBladeSweep(current, previous, phase, previousPhase, window) {
+  const [start, end] = window;
+  if (!previous || !Number.isFinite(previousPhase) || phase <= previousPhase) {
+    return phase >= start && phase <= end ? { current, previous: null } : null;
+  }
+  const from = Math.max(start, previousPhase), to = Math.min(end, phase);
+  if (to < from || phase < start || previousPhase > end) return null;
+  const at = p => {
+    if (p === phase) return current;
+    if (p === previousPhase) return previous;
+    const t = (p - previousPhase) / (phase - previousPhase);
+    return { ...current, heel: previous.heel.clone().lerp(current.heel, t),
+      tip: previous.tip.clone().lerp(current.tip, t) };
+  };
+  return { current: at(to), previous: at(from) };
+}
+
 // Sample the physical blade's swept surface between rendered poses. There is
 // no invisible radial damage outside the heel-to-tip trajectory.
 export function bladeSweepContains(frame,previous,target,radius,width=.08) {
