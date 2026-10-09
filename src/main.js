@@ -927,7 +927,13 @@ function hurtEnemy(
     Math.atan2(hitDirection.x, hitDirection.z) - e.angle,
   );
   e.hurtStrength = critical ? 1 : 0.65;
-  e.localHitStop = Math.max(e.localHitStop || 0, critical ? 0.038 : 0.027);
+  // The great dao keeps its momentum through contact. Its stagger, launch,
+  // camera kick and hit effects provide the feedback; freezing the defender
+  // would make the heavy swing feel slow instead of forceful.
+  const greatContact = playerContact && currentWeapon.id === "great-dao";
+  e.localHitStop = greatContact
+    ? 0
+    : Math.max(e.localHitStop || 0, critical ? 0.038 : 0.027);
   e.velocity.addScaledVector(temp, force * (e.type === "boss" ? 0.4 : 1));
   showDamage(e, damage, critical ? "critical" : "normal");
   if (playerContact) {
@@ -951,7 +957,9 @@ function hurtEnemy(
   if (isPlayerContact && !hero.impactDone) {
     hero.impactDone = true;
     const contactStop = currentWeapon.moves[hero.combo].hitstop;
-    hero.localHitStop = Math.min(currentWeapon.id === "great-dao" ? .11 : .08, contactStop * (critical ? 1.2 : 1));
+    hero.localHitStop = greatContact
+      ? 0
+      : Math.min(currentWeapon.id === "great-dao" ? .11 : .08, contactStop * (critical ? 1.2 : 1));
   }
   if (
     playerContact &&
@@ -960,7 +968,7 @@ function hurtEnemy(
     !hero.globalImpactDone
   ) {
     hero.globalImpactDone = true;
-    hitStop = Math.max(hitStop, currentWeapon.id === "great-dao" ? .035 : .025);
+    if (!greatContact) hitStop = Math.max(hitStop, .025);
   }
   if (playerContact) safeAudio("weaponHit", currentWeapon.id, critical ? 1.5 : 0.75, hero.combo);
   else safeAudio("hit", critical ? 1.5 : 0.75, hero.combo);
@@ -1032,6 +1040,21 @@ function reviewedStrike(phase,frames) {
     if(!hero.strokeContacts.has(stroke)){
       hero.strokeContacts.add(stroke);
       safeAudio('weaponSlash',currentWeapon.id,hero.combo,contact.kind??'cut');
+      // Layer a readable arc over the physical blade trail. The trail follows
+      // the authored tip, while this brief luminous sweep makes the release
+      // legible at normal camera distance and matches the game's broad combat
+      // silhouette.
+      if(currentWeapon.id==='great-dao'){
+        fx.arc(hero.pos,hero.angle,action.reach*(hero.combo===3?1.02:.94),hero.combo,currentWeapon.effectColor);
+        if(hero.combo>=2){
+          const forward=new THREE.Vector3(Math.sin(hero.angle),0,Math.cos(hero.angle));
+          fx.groundImpact?.(
+            hero.pos.clone().addScaledVector(forward,1.18),
+            hero.combo===3?1.72:1.05,
+            hero.combo===3,
+          );
+        }
+      }
     }
     const prior=previous&&previous.state===hero.state&&previous.combo===hero.combo&&previous.phase>=contact.window[0]
       ?previous.frames.find(b=>b.hand===contact.hand):null;

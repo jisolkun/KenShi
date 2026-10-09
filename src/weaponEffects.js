@@ -80,7 +80,7 @@ export function createWeaponEffects(scene, baseEffects) {
   function impact(id,pos,angle,combo=0,critical=false) {
     emit(id,pos,angle,combo,'impact',critical?1.35:1);
     direction.set(Math.sin(angle),0,Math.cos(angle));
-    baseEffects?.impact(pos,direction,id==='great-dao'?(combo===3?1.35:1):.75,critical);
+    baseEffects?.impact(pos,direction,id==='great-dao'?(combo===3?1.55:1.08):.75,critical);
   }
   function updateDebris(o,p) {
     const {mesh,dummy}=o.debris;

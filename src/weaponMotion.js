@@ -94,7 +94,8 @@ function applyReviewedMotion(rig,pose,plantFoot,readySample=null) {
  }
  // Pelvis starts the turn; the chest follows. Feet remain in the character
  // frame while the hip crosses between the two support legs.
- rig.body.rotation.set(0,sample.stance.pelvisYaw??yaw*.65,0);
+ const pelvisYaw=sample.stance.pelvisYaw??yaw*.65;
+ rig.body.rotation.set(0,pelvisYaw,0);
  rig.body.position.set(sample.stance.shiftX??-yaw*.07,(sample.stance.bodyHeight??.875)-load*.055,advance);
  rig.chest.rotation.set(sample.stance.pitch??(-.055-load*.035),sample.stance.chestYaw??yaw*.35,0);
  rig.head.rotation.set(.02,-yaw*.25,0);

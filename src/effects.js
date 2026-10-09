@@ -8,6 +8,10 @@ export function createEffects(scene, camera) {
   // Allow two maximum-length (250ms) frames to present; retain 60Hz ground drag.
   const firstPresentationTimeout = 0.5, groundDrag = -60 * Math.log(0.72);
   const additive = (color, opacity = 1) => new THREE.MeshBasicMaterial({color, transparent:true, opacity, depthWrite:false, side:THREE.DoubleSide, blending:THREE.AdditiveBlending, toneMapped:false});
+  // Ground marks use line material instead of a mesh material so the fracture
+  // stays crisp at the edge of the camera frustum.  The geometry is shared;
+  // each pooled group only changes its transform and opacity.
+  const lineAdditive = (color, opacity = 1) => new THREE.LineBasicMaterial({color, transparent:true, opacity, depthWrite:false, blending:THREE.AdditiveBlending, toneMapped:false});
   function cachedGeometry(key, make) {
     if (!geometries.has(key)) geometries.set(key, make());
     return geometries.get(key);
@@ -52,13 +56,79 @@ export function createEffects(scene, camera) {
       o.children[1].material.opacity = 0.45+Math.sin(p*18)*0.2;
     });
   }
+  function groundCrackGeometry() {
+    return cachedGeometry('ground-cracks', () => {
+      const vertices = [];
+      // Uneven spokes read as broken paving rather than a perfect magic ring.
+      const spokes = [
+        [-.06, .08, .92, .24], [.03, .10, .62, .54],
+        [.13, -.04, .83, -.38], [-.16, -.05, .72, -.64],
+        [.01, -.12, .48, -.82], [-.09, .03, -.42, -.68],
+        [-.14, .11, -.77, -.35], [.08, .08, -.86, .16],
+      ];
+      for (const [x,z,dx,dz] of spokes) {
+        const length = Math.hypot(dx, dz) || 1;
+        const side = .018;
+        const nx = -dz / length * side, nz = dx / length * side;
+        // A pair of thin segments gives each crack a chipped, tapered end.
+        vertices.push(
+          x - nx, 0, z - nz,
+          x + dx, 0, z + dz,
+          x + nx, 0, z + nz,
+          x + dx * .66, 0, z + dz * .66,
+        );
+      }
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+      return geometry;
+    });
+  }
+  function groundImpact(position, strength = 1, critical = false) {
+    const weight = THREE.MathUtils.clamp(strength, .45, 2.4);
+    const point = position.clone(); point.y = .055;
+    // The expanding rings sit on the floor and make a heavy blade read as a
+    // force transmitted through the paving, instead of a floating hit flash.
+    ring(point, .56 + weight * .16, critical ? 0xf3c080 : 0xc49368, critical ? .34 : .24);
+    if (critical) ring(point, .94 + weight * .22, 0xd8a36e, .48);
+    const group = acquire('ground-crack', () => {
+      const g = new THREE.Group();
+      const crack = new THREE.LineSegments(groundCrackGeometry(), lineAdditive(0xd2a46f, .68));
+      g.add(crack);
+      return g;
+    });
+    group.position.copy(point);
+    group.scale.setScalar(.75 + weight * .22);
+    group.rotation.y = Math.atan2(position.x + .13, position.z - .17);
+    const crack = group.children[0];
+    crack.material.color.setHex(critical ? 0xffd28d : 0xd2a46f);
+    crack.material.opacity = critical ? .82 : .54;
+    add(group, critical ? .46 : .31, (o, p) => {
+      const fade = Math.pow(1 - p, 1.35);
+      o.children[0].material.opacity = (critical ? .82 : .54) * fade;
+      o.scale.setScalar((.75 + weight * .22) * (1 + p * .17));
+    });
+    // Kick a low dust fan from the same contact point.  This is intentionally
+    // separate from impact() so a normal cut keeps its sharp, compact flash.
+    const count = critical ? 10 : Math.max(4, Math.round(3 + weight * 2));
+    for (let i = 0; i < count; i++) {
+      const angle = i / count * Math.PI * 2 + Math.random() * .24;
+      const speed = 1.1 + Math.random() * (1.4 + weight);
+      velocity.set(Math.sin(angle) * speed, .34 + Math.random() * .72, Math.cos(angle) * speed);
+      emit(slivers, point, velocity, critical ? 0xd5a878 : 0x9c866d,
+        .22 + Math.random() * .12, .14 + weight * .05, .045 + weight * .018, .62, 6, angle, true);
+    }
+    return group;
+  }
   // Three shared draw calls cover every flash, flying sliver and falling chip.
   function flatShape(points) {
     const shape = new THREE.Shape(); shape.moveTo(...points[0]);
     points.slice(1).forEach(p => shape.lineTo(...p)); shape.closePath(); return new THREE.ShapeGeometry(shape);
   }
   function particlePool(geometry, capacity, debris = false) {
-    const material = debris ? new THREE.MeshBasicMaterial({color:0xffffff,toneMapped:false}) : additive(0xffffff);
+    const material = debris
+      ? new THREE.MeshBasicMaterial({color:0xffffff,vertexColors:true,toneMapped:false})
+      : additive(0xffffff);
+    material.vertexColors = true;
     const mesh = new THREE.InstancedMesh(geometry, material, capacity);
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); mesh.frustumCulled = false; mesh.count = 0; mesh.visible = false; mesh.renderOrder = debris ? 0 : 2;
     for (let i=0;i<capacity;i++) mesh.setColorAt(i,tint.setHex(0xffffff));
@@ -124,6 +194,20 @@ export function createEffects(scene, camera) {
       velocity.copy(direction).multiplyScalar(3+Math.random()*3*weight).addScaledVector(side,(Math.random()-0.5)*(critical?4.4:3));
       velocity.y+=0.2+Math.random()*1.5;point.copy(position).addScaledVector(side,(Math.random()-0.5)*0.12);
       emit(slivers,point,velocity,palette[i%palette.length],0.13+Math.random()*0.09,0.26+Math.random()*0.35*weight,0.15+Math.random()*0.12,1,5,0,true);
+    }
+    // A hit also throws a short, directional blood spray.  It uses the pooled
+    // opaque chip pass so the droplets read as red volume instead of another
+    // pale additive slash, while keeping the same draw-call budget.
+    const bloodCount = critical ? 9 : Math.max(3, Math.round(2 + weight * 2));
+    for (let i = 0; i < bloodCount; i++) {
+      const spread = (Math.random() - .5) * (critical ? 2.6 : 1.8);
+      velocity.copy(direction).multiplyScalar(1.4 + Math.random() * (1.8 + weight));
+      velocity.addScaledVector(side, spread);
+      velocity.y += .45 + Math.random() * (critical ? 1.8 : 1.1);
+      point.copy(position).addScaledVector(side, (Math.random() - .5) * .08);
+      emit(chips, point, velocity, i % 3 ? 0xb52f36 : 0xe15a45,
+        .26 + Math.random() * .16, .035 + Math.random() * .028,
+        .026 + Math.random() * .022, .045 + Math.random() * .03, 7.5, Math.random() * 6.28, true);
     }
     if(critical)ring(position,0.85+weight*0.12,0xd5b6ed,0.17);
   }
@@ -218,8 +302,8 @@ export function createEffects(scene, camera) {
   }
   function destroy() {
     clear();const disposed=new Set();
-    function disposeMesh(mesh){scene.remove(mesh);mesh.traverse(o=>{if(!o.isMesh)return;if(!disposed.has(o.geometry)){o.geometry.dispose();disposed.add(o.geometry);}for(const material of Array.isArray(o.material)?o.material:[o.material]){if(!disposed.has(material)){material.dispose();disposed.add(material);}}});}
+    function disposeMesh(mesh){scene.remove(mesh);mesh.traverse(o=>{if(!(o.isMesh||o.isLineSegments))return;if(!disposed.has(o.geometry)){o.geometry.dispose();disposed.add(o.geometry);}for(const material of Array.isArray(o.material)?o.material:[o.material]){if(!disposed.has(material)){material.dispose();disposed.add(material);}}});}
     allCached.forEach(disposeMesh);particlePools.forEach(pool=>disposeMesh(pool.mesh));trails.forEach(trail=>disposeMesh(trail.mesh));geometries.forEach(geometry=>{if(!disposed.has(geometry))geometry.dispose();});allCached.clear();cache.clear();geometries.clear();
   }
-  return {ring,warning,burst,impact,death,arc,ghost,swordTrail,sample,update,clear,destroy};
+  return {ring,warning,groundImpact,burst,impact,death,arc,ghost,swordTrail,sample,update,clear,destroy};
 }
