@@ -235,6 +235,25 @@ export function createEffects(scene, camera) {
       emit(slivers,point,velocity,color||palette[i%palette.length],0.2+Math.random()*0.11,0.28,0.17,1,10);
     }
   }
+  // Blunt enemy contact uses the existing fixed particle passes. It never
+  // invokes the blade crescent or creates a floor ring beneath a torso hit.
+  function hammerImpact(position, headDirection, strength=1, critical=false) {
+    const weight=THREE.MathUtils.clamp(strength,.4,2);
+    direction.copy(headDirection||zero);if(direction.lengthSq()<.001)direction.set(0,0,1);direction.normalize();
+    side.set(-direction.z,.1,direction.x);if(side.lengthSq()<.001)side.set(1,0,0);side.normalize();
+    emit(flashes,position,zero,0xffedc6,critical?.065:.045,.18+weight*.045,.15+weight*.035,1,0,0,true);
+    for(let i=0;i<(critical?8:5);i++){
+      velocity.copy(direction).multiplyScalar(.8+Math.random()*1.3).addScaledVector(side,(Math.random()-.5)*2);
+      velocity.y+=.2+Math.random()*.5;
+      emit(slivers,position,velocity,i%2?0xbda084:0xe6c7a0,.11+Math.random()*.06,
+        .13+Math.random()*.11,.09+Math.random()*.055,1,2,0,true);
+    }
+    for(let i=0;i<(critical?6:3);i++){
+      velocity.copy(direction).multiplyScalar(.7+Math.random()).addScaledVector(side,(Math.random()-.5)*1.5);velocity.y+=.3+Math.random()*.7;
+      emit(chips,position,velocity,i%2?0xb52f36:0xe15a45,.22+Math.random()*.12,
+        .04,.03,.045,7,Math.random()*6.28,true);
+    }
+  }
   function death(position,fallDirection,strength=1) {
     direction.copy(fallDirection||zero);if(direction.lengthSq()>0.001)direction.normalize();point.copy(position);point.y=0.12;
     for(let i=0;i<5+Math.floor(strength);i++){
@@ -344,5 +363,5 @@ export function createEffects(scene, camera) {
     function disposeMesh(mesh){scene.remove(mesh);mesh.traverse(o=>{if(!(o.isMesh||o.isLineSegments))return;if(!disposed.has(o.geometry)){o.geometry.dispose();disposed.add(o.geometry);}for(const material of Array.isArray(o.material)?o.material:[o.material]){if(!disposed.has(material)){material.dispose();disposed.add(material);}}});}
     allCached.forEach(disposeMesh);particlePools.forEach(pool=>disposeMesh(pool.mesh));trails.forEach(trail=>disposeMesh(trail.mesh));geometries.forEach(geometry=>{if(!disposed.has(geometry))geometry.dispose();});allCached.clear();cache.clear();geometries.clear();
   }
-  return {ring,warning,groundImpact,burst,impact,death,arc,ghost,swordTrail,sample,presented,update,clear,destroy};
+  return {ring,warning,groundImpact,burst,impact,hammerImpact,death,arc,ghost,swordTrail,sample,presented,update,clear,destroy};
 }

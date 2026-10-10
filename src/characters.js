@@ -3,6 +3,7 @@ import { equipWeapon } from './weaponModels.js';
 import { DEFAULT_WEAPON_ID } from './weapons.js';
 import { applyWeaponPose, reconcileWeaponGrip, reconcileAttackFootwork } from './weaponMotion.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+const hasHeavyFootwork=id=>id==='great-dao'||id==='great-hammer';
 
 // All body parts share geometry; each character owns its palette for hit flashes.
 const geometries = new Map();
@@ -349,20 +350,20 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
   const locomotion=state==='idle'||state==='run';
   const key=locomotion?'locomotion':`${state}:${state==='attack'?combo:state==='skill'?skill:0}`;
   const restarted=!locomotion && phase<motion.phase-.2;
-  const stepping=rig.weaponId==='great-dao'&&state==='attack'&&attackStep;
-  const footworkChanged=rig.weaponId==='great-dao'&&Boolean(motion.stepActive)!==Boolean(stepping);
+  const stepping=hasHeavyFootwork(rig.weaponId)&&state==='attack'&&attackStep;
+  const footworkChanged=hasHeavyFootwork(rig.weaponId)&&Boolean(motion.stepActive)!==Boolean(stepping);
   if(motion.key!==null && (key!==motion.key||restarted||footworkChanged)) {
-    if(['tang-dao','great-dao'].includes(rig.weaponId)){
+    if(['tang-dao','great-dao','great-hammer'].includes(rig.weaponId)){
       rig.group.updateMatrixWorld(true);
       const groupQ=rig.group.getWorldQuaternion(new THREE.Quaternion());
       motion.shaftFrom={point:rig.group.worldToLocal(rig.arms[1].wrist.getWorldPosition(new THREE.Vector3())),quaternion:groupQ.invert().multiply(rig.arms[1].wrist.getWorldQuaternion(new THREE.Quaternion()))};
-      if(rig.weaponId==='great-dao')motion.feetFrom=rig.legs.map((leg,index)=>rig.group.worldToLocal(
+      if(hasHeavyFootwork(rig.weaponId))motion.feetFrom=rig.legs.map((leg,index)=>rig.group.worldToLocal(
         footworkChanged&&!stepping&&rig.attackFootTargets?rig.attackFootTargets[index].point.clone():leg.foot.getWorldPosition(new THREE.Vector3())));
       if(footworkChanged&&!stepping&&rig.attackFootTargets)motion.footRotationsFrom=rig.attackFootTargets.map(foot=>foot.rotation.clone());
     }
     rig.bind.forEach(({node},i)=>{motion.from[i].p.copy(node.position);motion.from[i].q.copy(node.quaternion);motion.from[i].s.copy(node.scale);});
     motion.elapsed=0;
-    motion.duration=state==='hurt'?.04:state==='roll'?.06:.08;
+    motion.duration=state==='hurt'?.04:state==='roll'?.06:rig.weaponId==='great-hammer'?.24:.08;
     motion.footworkBlend=footworkChanged&&key===motion.key&&!restarted;
     if(motion.footworkBlend)motion.duration=.10;
   } else motion.elapsed+=delta;
@@ -537,6 +538,9 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
     for(const c of cloths){c.rotation.x=-.15-.65*energy;c.rotation.z=.35*energy;}
   }
   rig.attackFootTargets=null;
+  // The reviewed target must come from this frame's authored pose. A hammer
+  // also reconciles its head/tail during sampling, before the new state blend.
+  rig.reviewedShaftBlend=null;
   applyWeaponPose(rig,{state,time,phase:p,combo,skill,speed,dt,gaitPhase:gait,moveBlend:movement,attackCarry,attackStep:stepping,idleClock:motion.idleClock,idleAge:motion.idleAge},plantIdleFoot);
   // Blend only the opening of a changed action. Contacts and complete spin arcs
   // are sampled absolutely; quaternion interpolation never wraps a full turn.
@@ -548,13 +552,12 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
   if(motion.footworkBlend)blend=1;
   const footBlend=motion.footworkBlend?smooth(motion.elapsed/motion.duration):blend;
   if(motion.elapsed>=motion.duration)motion.footworkBlend=false;
-  rig.reviewedShaftBlend=null;
   let blendedFeet;
-  if(footBlend<1&&rig.weaponId==='great-dao'&&motion.feetFrom&&!stepping&&!['roll','dead'].includes(state)){
+  if(footBlend<1&&hasHeavyFootwork(rig.weaponId)&&motion.feetFrom&&!stepping&&!['roll','dead'].includes(state)){
     rig.group.updateMatrixWorld(true);
     blendedFeet=rig.legs.map((leg,i)=>motion.feetFrom[i].clone().lerp(rig.group.worldToLocal(leg.foot.getWorldPosition(new THREE.Vector3())),footBlend));
   }
-  if(blend<1&&['tang-dao','great-dao'].includes(rig.weaponId)&&motion.shaftFrom){
+  if(blend<1&&['tang-dao','great-dao','great-hammer'].includes(rig.weaponId)&&motion.shaftFrom){
     rig.group.updateMatrixWorld(true);
     const groupQ=rig.group.getWorldQuaternion(new THREE.Quaternion());
     const point=rig.group.worldToLocal(rig.arms[1].wrist.getWorldPosition(new THREE.Vector3()));

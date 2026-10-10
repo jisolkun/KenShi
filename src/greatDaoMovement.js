@@ -6,6 +6,12 @@ export const GREAT_DAO_STEPS = [
   { forward: .60, lateral: .28 },
   { forward: .72, lateral: -.10 },
 ];
+export const HAMMER_STEPS = [
+  { forward: .40, lateral: .18 },
+  { forward: .46, lateral: -.20 },
+  { forward: .56, lateral: .20 },
+  { forward: .64, lateral: 0 },
+];
 const clamp = (value, low = 0, high = 1) => Math.max(low, Math.min(high, value));
 const smooth = value => { const t = clamp(value); return t * t * (3 - 2 * t); };
 
@@ -20,6 +26,33 @@ export function greatDaoStepDelta(combo, previousPhase, phase) {
   const step = GREAT_DAO_STEPS[((combo % 4) + 4) % 4];
   const distance = Math.max(0, greatDaoStepProgress(phase) - greatDaoStepProgress(previousPhase));
   return { forward: step.forward * distance, lateral: step.lateral * distance };
+}
+
+export function hammerStepProgress(phase) {
+  if (phase <= .06) return 0;
+  if (phase < .30) return .15 * smooth((phase - .06) / .24);
+  if (phase < .63) return .15 + .75 * smooth((phase - .30) / .33);
+  return .90 + .10 * smooth((phase - .63) / .13);
+}
+
+export function hammerStepDelta(combo, previousPhase, phase) {
+  const step = HAMMER_STEPS[((combo % 4) + 4) % 4];
+  const distance = Math.max(0, hammerStepProgress(phase) - hammerStepProgress(previousPhase));
+  return { forward: step.forward * distance, lateral: step.lateral * distance };
+}
+
+export function getHeavyWeaponSteps(id) {
+  return id === 'great-dao' ? GREAT_DAO_STEPS : id === 'great-hammer' ? HAMMER_STEPS : null;
+}
+
+export function heavyWeaponStepProgress(id, phase) {
+  return id === 'great-dao' ? greatDaoStepProgress(phase)
+    : id === 'great-hammer' ? hammerStepProgress(phase) : 0;
+}
+
+export function heavyWeaponStepDelta(id, combo, previousPhase, phase) {
+  return id === 'great-dao' ? greatDaoStepDelta(combo, previousPhase, phase)
+    : id === 'great-hammer' ? hammerStepDelta(combo, previousPhase, phase) : { forward: 0, lateral: 0 };
 }
 
 export function greatDaoTargetGap(radius = .45) {

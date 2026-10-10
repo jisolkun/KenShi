@@ -8,6 +8,7 @@ export function createAudio() {
   let lastEnemy = 0;
   let lastHit = -Infinity, lastHitWeight = 0, hitSide = 0;
   let lastFootstep = -Infinity, lastKill = -Infinity;
+  let lastHammerGround = -Infinity;
 
   const ready = () => enabled && context?.state === 'running';
   function unlock() {
@@ -119,6 +120,7 @@ export function createAudio() {
   const weaponVoices = {
     'dual-dao':[2700,1320,0.8,'double'], 'tang-dao':[2450,1710,1,'cut'],
     'great-dao':[1280,780,1.8,'heavy-cut'],
+    'great-hammer':[620,110,2.1,'blunt'],
   };
   function weaponSlash(id, combo = 0, technique = null) {
     if (!ready() || context.currentTime - lastSlash < 0.06) return;
@@ -127,6 +129,13 @@ export function createAudio() {
     const pitch = [1.04,0.94,1.12,0.86][Math.abs(combo)%4];
     const shape=technique === 'thrust' ? 'thrust' : technique === 'chop' ? 'crush'
       : technique === 'cut' ? 'arc' : getWeapon(id).moves[((combo%4)+4)%4].shape;
+    if(id==='great-hammer') {
+      const heavy=((combo%4)+4)%4===3;
+      // Broad air displacement, without a sword's ringing metal transient.
+      noise(heavy?.15:.12,heavy?.21:.15,420,180,'lowpass',0,.008);
+      tone(heavy?88:110,36,heavy?.13:.10,heavy?.055:.035,'sine',.004,.006);
+      return;
+    }
     if(id==='great-dao') {
       const heavy=shape==='crush',stage=[.94,1.04,1.16,1.32][((combo%4)+4)%4];
       // The wind surges abruptly with the released blade, then ends cleanly
@@ -155,6 +164,13 @@ export function createAudio() {
     if(context.currentTime-lastHit<0.035 && force<=lastHitWeight*1.3)return;
     lastHit=context.currentTime;lastHitWeight=force;
     const pitch=combo%2?0.94:1.06, mass=Math.min(2.2,weight*force);
+    if(id==='great-hammer') {
+      const heavy=((combo%4)+4)%4===3;
+      tone((heavy?76:102)*pitch,28,heavy?.19:.13,.30+mass*.055,'sine',0,.0015);
+      noise(heavy?.09:.065,.25+mass*.04,heavy?510:720,110,'lowpass',0,.0015);
+      tone(heavy?138:170,54,heavy?.075:.055,.052,'triangle',.001,.002);
+      return;
+    }
     if(id==='great-dao') {
       const finisher=((combo%4)+4)%4===3||technique==='chop';
       // A tight low strike plus a brief edge crack carries force without a
@@ -173,6 +189,14 @@ export function createAudio() {
   function roll() {
     noise(0.24, 0.3, 800, 180, 'bandpass');
     tone(170, 55, 0.15, 0.09, 'sine', 0.12);
+  }
+
+  // Called only after the world confirms an actual hammer-head floor contact.
+  function weaponGround(id, combo = 3) {
+    if(id!=='great-hammer'||combo!==3||!ready()||context.currentTime-lastHammerGround<.12)return;
+    lastHammerGround=context.currentTime;
+    tone(64,25,.22,.24,'sine',0,.0015);
+    noise(.115,.23,430,80,'lowpass',0,.002);
   }
 
   function footstep(weight = 1) {
@@ -231,7 +255,7 @@ export function createAudio() {
     else if (enabled) context.resume().catch(() => {});
   };
   document.addEventListener('visibilitychange', visibility);
-  return { unlock, slash, hit, weaponSlash, weaponHit, roll, footstep, kill, enemy, win, setEnabled, update,
+  return { unlock, slash, hit, weaponSlash, weaponHit, weaponGround, roll, footstep, kill, enemy, win, setEnabled, update,
     destroy() { document.removeEventListener('visibilitychange', visibility); wind?.stop(); context?.close(); },
   };
 }

@@ -58,8 +58,50 @@ export function createWeaponEffects(scene, baseEffects) {
   function material(color,opacity) {return new THREE.MeshBasicMaterial({color,opacity,transparent:true,depthWrite:false,side:THREE.DoubleSide,toneMapped:false});}
   function disposeInstance(o) {o.group.traverse(n=>{if(n.isMesh)n.material.dispose();if(n.isInstancedMesh)n.dispose();});}
   function release(o) {scene.remove(o.group);if(!spare.has(o.key))spare.set(o.key,[]);const pool=spare.get(o.key);if(pool.length<4)pool.push(o);else{disposeInstance(o);all.delete(o);}}
+  function hammerCoreGeometry() {
+    if(!geometries.has('great-hammer:core'))geometries.set('great-hammer:core',new THREE.IcosahedronGeometry(1,0));
+    return geometries.get('great-hammer:core');
+  }
+  function updateHammerImpact(o,phase) {
+    const fade=(1-phase)*(1-phase),dummy=o.dummy;
+    for(let i=0;i<o.dust.count;i++){
+      const angle=i/o.dust.count*Math.PI*2,travel=.055+o.age*(1.3+i%3*.22);
+      dummy.position.set(Math.sin(angle)*travel,Math.cos(angle)*travel*.62,.04+o.age*.65);
+      dummy.rotation.set(i*.8,o.age*3,i*.4);
+      const size=(.045+i%3*.012)*(1+phase*.7)*Math.max(.08,1-phase);
+      dummy.scale.set(size,size*.65,size*1.35);dummy.updateMatrix();o.dust.setMatrixAt(i,dummy.matrix);
+    }
+    o.dust.instanceMatrix.needsUpdate=true;o.dust.material.opacity=.48*fade;
+    const coreFade=Math.max(0,1-o.age/(o.hammerFinisher?.065:.045));
+    o.core.material.opacity=.88*coreFade*coreFade;
+    o.core.scale.setScalar((o.hammerFinisher?.145:.105)*(1+phase*.18));
+  }
+  function emitHammerImpact(pos,combo,power,headDirection) {
+    const style=((combo%4)+4)%4,key=`great-hammer:impact:${style}`;
+    let o=spare.get(key)?.pop();
+    if(!o){
+      const group=new THREE.Group(),core=new THREE.Mesh(hammerCoreGeometry(),material(0xffedc6,.88));
+      core.name='hammer-blunt-core';core.renderOrder=3;
+      const dust=new THREE.InstancedMesh(debrisGeometry(),material(0xbfa285,.48),style===3?8:6);
+      dust.name='hammer-short-impact-dust';dust.instanceMatrix.setUsage(THREE.DynamicDrawUsage);dust.frustumCulled=false;
+      group.add(core,dust);group.children.forEach(mesh=>mesh.frustumCulled=false);
+      o={key,group,core,dust,dummy:new THREE.Object3D(),hammerImpact:true,hammerFinisher:style===3};all.add(o);
+    }
+    const hammerIndices=live.map((entry,index)=>entry.hammerImpact?index:-1).filter(index=>index>=0);
+    if(hammerIndices.length>=24)release(live.splice(hammerIndices[0],1)[0]);
+    if(live.length>=MAX_LIVE)release(live.shift());
+    o.age=0;o.unseenAge=0;o.awaitingPresentation=true;o.life=o.hammerFinisher?.22:.16;
+    o.group.visible=true;o.group.position.copy(pos);o.group.quaternion.setFromUnitVectors(forward,headDirection);o.group.scale.setScalar(power);
+    updateHammerImpact(o,0);scene.add(o.group);live.push(o);
+  }
   function emit(id,pos,angle,combo,mode='attack',power=1,cutDirection=null) {
     if(destroyed)return;
+    if(id==='great-hammer'){
+      // Contact effects require a struck enemy or a confirmed world contact.
+      // The real moving head is presented by the character, not a blade arc.
+      if(mode==='impact')emitHammerImpact(pos,combo,power,cutDirection);
+      return;
+    }
     const style=((combo%4)+4)%4;
     const weapon=getWeapon(id), move=weapon.moves[style], key=`${id}:${mode}:${style}`;
     const greatImpact=id==='great-dao'&&mode==='impact',greatFinisher=greatImpact&&style===3;
@@ -117,16 +159,20 @@ export function createWeaponEffects(scene, baseEffects) {
   function impact(id,pos,angle,combo=0,critical=false,cutDirection=null) {
     if(destroyed)return;
     direction.set(Math.sin(angle),0,Math.cos(angle));
-    if(id==='great-dao') {
+    if(id==='great-dao'||id==='great-hammer') {
       const style=((combo%4)+4)%4;
       if(cutDirection?.isVector3&&Number.isFinite(cutDirection.lengthSq())&&cutDirection.lengthSq()>.0001)direction.copy(cutDirection).normalize();
       else {
-        direction.fromArray(greatCutDirections[style]).normalize();
+        direction.fromArray(id==='great-hammer'?[0,style===3?-1:-.15,style===3?.15:1]:greatCutDirections[style]).normalize();
         direction.applyAxisAngle(up,angle);
       }
     }
     lastImpact={sequence:++impactSequence,id,combo:((combo%4)+4)%4,critical,position:pos.toArray(),cutDirection:direction.toArray()};
     emit(id,pos,angle,combo,'impact',critical?(id==='great-dao'?1.25:1.35):1,direction);
+    if(id==='great-hammer'){
+      baseEffects?.hammerImpact?.(pos,direction,combo===3?1.4:1,critical);
+      return;
+    }
     // Keep the authored combo index with the physical hit so the base effect
     // can reserve the wide crescent and ground flare for the final great-dao
     // chop.  Older callers accept the original four arguments, therefore the
@@ -148,6 +194,7 @@ export function createWeaponEffects(scene, baseEffects) {
     for(let i=live.length-1;i>=0;i--){const o=live[i];
       if(o.awaitingPresentation){o.unseenAge+=dt;if(o.unseenAge>=FIRST_PRESENTATION_TIMEOUT){release(o);live.splice(i,1);}continue;}
       o.age+=dt;const p=Math.min(1,o.age/o.life),fade=(1-p)*(1-p);
+      if(o.hammerImpact){updateHammerImpact(o,p);if(p>=1){release(o);live.splice(i,1);}continue;}
       if(!o.greatImpact)o.group.rotation.y=o.angle+o.spin*p;const size=o.scale*(1+(o.greatImpact?.35:o.mode==='impact'?.55:.06)*p);o.group.scale.set(size*o.mirror,size,size);
       o.group.children[0].material.opacity=(o.greatImpact?.56:o.mode==='impact'?.46:.24)*fade;o.group.children[1].material.opacity=(o.greatImpact?.80:.6)*fade;
       if(o.flash){const flashFade=Math.max(0,1-o.age/(o.greatFinisher?.078:.058));o.flash.material.opacity=.84*flashFade*flashFade;}
@@ -162,7 +209,7 @@ export function createWeaponEffects(scene, baseEffects) {
   }
   function getState() {
     let pooled=0;for(const pool of spare.values())pooled+=pool.length;
-    return {active:live.length,activeGreatImpacts:live.filter(o=>o.greatImpact).length,awaitingPresentation:live.filter(o=>o.awaitingPresentation).length,pooled,destroyed,
+    return {active:live.length,activeGreatImpacts:live.filter(o=>o.greatImpact).length,activeHammerImpacts:live.filter(o=>o.hammerImpact).length,awaitingPresentation:live.filter(o=>o.awaitingPresentation).length,pooled,destroyed,
       lastImpact:lastImpact?{...lastImpact,position:[...lastImpact.position],cutDirection:[...lastImpact.cutDirection]}:null};
   }
   function clear(){while(live.length)release(live.pop());lastImpact=null;}

@@ -124,7 +124,7 @@ export function attackRecoveryPhase(move, reviewedAttack = null) {
 }
 
 export function attackChainPhase(weaponId, combo) {
-  return weaponId === 'great-dao' ? 1 : combo === 3 ? .96 : .9;
+  return ['great-dao','great-hammer'].includes(weaponId) ? 1 : combo === 3 ? .96 : .9;
 }
 
 // A small visibility graph around circular props. The 16-sided perimeter is

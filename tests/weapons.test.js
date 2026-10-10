@@ -16,9 +16,9 @@ const assertFinite = (rig, label) => {
 const signature = rig => [rig.body, rig.chest, ...rig.arms.flatMap(a => [a.shoulder, a.elbow, a.wrist])]
   .flatMap(n => [...n.position, ...n.quaternion]).map(n => n.toFixed(5)).join(',');
 
-test('three weapon types expose twelve valid basic attack contact windows', () => {
-  assert.equal(WEAPONS.length, 3);
-  assert.equal(new Set(WEAPONS.map(w => w.id)).size, 3);
+test('four weapon types expose sixteen valid basic attack contact windows', () => {
+  assert.equal(WEAPONS.length, 4);
+  assert.equal(new Set(WEAPONS.map(w => w.id)).size, 4);
   const shapes = new Set(['arc', 'thrust', 'crush', 'radial', 'chain', 'hook']);
   for (const weapon of WEAPONS) {
     assert.equal(getWeapon(weapon.id), weapon);
@@ -49,7 +49,7 @@ test('each weapon has distinct sampled four-hit choreography and bounded new fin
     assert.equal(new Set(hits).size, 4, `${weapon.id}: four distinct contacts`);
     weaponSignatures.add(hits.join('|'));
   }
-  assert.equal(weaponSignatures.size, 3);
+  assert.equal(weaponSignatures.size, 4);
 });
 
 test('all equipped poses and four basic attacks keep finite body and tip transforms', () => {
@@ -162,9 +162,9 @@ test('new weapon carries breathe, follow gait and let the free hand counterbalan
 });
 
 
-test('the three basic attack weapon types are available to choose', () => {
-  assert.deepEqual([...UNLOCKED_WEAPON_IDS], ['dual-dao', 'tang-dao', 'great-dao']);
-  assert.equal(WEAPONS.filter(w => isWeaponUnlocked(w.id)).length, 3);
+test('the four basic attack weapon types are available to choose', () => {
+  assert.deepEqual([...UNLOCKED_WEAPON_IDS], ['dual-dao', 'tang-dao', 'great-dao', 'great-hammer']);
+  assert.equal(WEAPONS.filter(w => isWeaponUnlocked(w.id)).length, 4);
   assert.equal(isWeaponUnlocked('unknown'), false);
   assert.equal(isWeaponUnlocked('ring-dao'), false);
 });
@@ -178,8 +178,21 @@ test('dual dao uses the original attack timings and bypasses the replacement reg
   assert.ok(!weapon.skillNames?.length);
 });
 
+test('hammer attacks declare a bounded real head volume and finite combat reach', () => {
+  const weapon = getWeapon('great-hammer');
+  assert.equal(weapon.id, 'great-hammer');
+  assert.equal(weapon.grip, 'twohand');
+  for (let combo = 0; combo < 4; combo++) {
+    const action = getReviewedAttack(weapon.id, combo);
+    assert.equal(action.strikeVolume, 'hammer-head');
+    assert.equal(action.headLength, 1.25);
+    assert.ok(action.headRadius > 0 && action.headRadius <= .3, 'a visible head has a compact damaging radius');
+    assert.ok(Number.isFinite(weapon.moves[combo].reach) && weapon.moves[combo].reach > 0);
+  }
+});
+
 test('removed catalogue ids normalize to the default type and active skill registry is empty', () => {
-  assert.deepEqual(WEAPONS.map(weapon => weapon.name), ['双刀', '砍刀', '大刀']);
+  assert.deepEqual(WEAPONS.map(weapon => weapon.name), ['双刀', '砍刀', '大刀', '大锤']);
   for (const id of ['yanling-dao', 'miao-dao', 'ring-dao', 'war-hammer', 'unknown']) {
     assert.equal(getWeapon(id), getWeapon(DEFAULT_WEAPON_ID), `${id}: normalize old save`);
     assert.equal(isWeaponUnlocked(id), false, `${id}: unavailable`);

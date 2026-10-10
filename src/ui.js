@@ -6,7 +6,8 @@ const typeName = weapon => weapon.name;
 const weaponSilhouette = weapon => {
   const blade = '<path d="M17 30V7l9-4q3 14-9 27z" fill="currentColor"/><path d="M12 29h13M17 30v7" stroke="currentColor" stroke-width="2"/>';
   const greatBlade='<path d="M16 28V6l13-3 2 14-8 11z" fill="currentColor"/><path d="M11 28h17M17 28v10" stroke="currentColor" stroke-width="3"/>';
-  return icon(weapon.id === 'dual-dao' ? `<g transform="translate(-7 0) rotate(-12 20 20)">${blade}</g><g transform="translate(7 0) rotate(12 20 20)">${blade}</g>` : weapon.id==='great-dao'?greatBlade:blade, 'weapon-silhouette');
+  const hammer='<path d="M7 6h25l3 4v10l-3 3H7l-3-3V10z" fill="currentColor"/><path d="M17 23h5v14h-5z" fill="currentColor"/><path d="M12 7v15m15-15v15" stroke="#14282a" stroke-width="2"/>';
+  return icon(weapon.id === 'dual-dao' ? `<g transform="translate(-7 0) rotate(-12 20 20)">${blade}</g><g transform="translate(7 0) rotate(12 20 20)">${blade}</g>` : weapon.id==='great-hammer'?hammer:weapon.id==='great-dao'?greatBlade:blade, 'weapon-silhouette');
 };
 
 const healthRatio = (hp, maximum) => {
@@ -43,7 +44,7 @@ export function createUI(callbacks = {}, initialSelectedWeaponId = DEFAULT_WEAPO
     <div class="screen-layer" data-screen="start">
       <section class="intro-panel"><div class="chapter-caption"><i></i><span>第一卷 · 寺影</span><small>CHAPTER I</small></div>
         <div class="game-title"><span class="title-stamp">斩魂</span><h1>亡灵<br>杀手</h1><p>UNDEAD SLAYER</p></div>
-        <div class="intro-copy"><span class="thin-rule"></span><p>荒寺钟声起，百鬼踏夜来。<br>双刀、砍刀与大刀，挥刃破阵。</p></div>
+        <div class="intro-copy"><span class="thin-rule"></span><p>荒寺钟声起，百鬼踏夜来。<br>双刀、砍刀、大刀与大锤，破阵震敌。</p></div>
         <div class="intro-level"><span>壹</span><div><small>今夜之战</small><b>荒寺 · 夜袭</b></div><i>三阵 / 三十六敌</i></div>
         <button class="primary-button start-button" data-action="start"><span>选择类型</span><i>→</i></button>
         <div class="intro-controls"><span>点地行走</span><i>·</i><span>点敌追击</span><i>·</i><span>双击翻滚</span></div>
@@ -61,7 +62,7 @@ export function createUI(callbacks = {}, initialSelectedWeaponId = DEFAULT_WEAPO
     <div class="modal-layer is-hidden"><section class="game-modal" role="dialog" aria-modal="true" aria-label="战场菜单"></section></div>
     <div class="notification" role="status"><span></span></div>
     <div class="damage-layer" aria-hidden="true"></div>
-    <span class="game-version" aria-label="游戏版本">v0.7.0 · 破阵重刃</span>
+    <span class="game-version" aria-label="游戏版本">v0.8.0 · 重锤震阵</span>
     <div class="orientation-notice" role="status"><div class="orientation-icon" aria-hidden="true">↻</div><b>请横屏游玩</b><span>将手机旋转至横向后继续</span><button class="orientation-retry" data-action="mobile-view-retry">重新尝试全屏与横屏</button></div>
   `;
   document.body.append(root);
@@ -222,9 +223,9 @@ export function createUI(callbacks = {}, initialSelectedWeaponId = DEFAULT_WEAPO
     setText($('.preview-weapon-name'), typeName(weapon));
     $('.weapon-grid').innerHTML = WEAPONS.filter(item => isWeaponUnlocked(item.id)).map(item => {
       const selected = item.id === selectedWeaponId;
-      return `<button class="weapon-card ${selected ? 'selected' : ''}" data-weapon="${item.id}" aria-pressed="${selected}">${weaponSilhouette(item)}<b>${typeName(item)}</b><small>${item.id === 'dual-dao' ? '双刃交替' : item.id==='great-dao'?'重刃横扫 · 踏地重劈':'双手挥砍'}</small><span class="weapon-selected">${selected ? '已选' : '选择'}</span></button>`;
+      return `<button class="weapon-card ${selected ? 'selected' : ''}" data-weapon="${item.id}" aria-pressed="${selected}">${weaponSilhouette(item)}<b>${typeName(item)}</b><small>${item.id === 'dual-dao' ? '双刃交替' : item.id==='great-hammer'?'双手重抡 · 过顶砸地':item.id==='great-dao'?'重刃横扫 · 踏地重劈':'双手挥砍'}</small><span class="weapon-selected">${selected ? '已选' : '选择'}</span></button>`;
     }).join('');
-    $('.weapon-detail').innerHTML = `<div class="weapon-detail-heading"><span>所选类型</span>${weaponSilhouette(weapon)}<h3>${typeName(weapon)}</h3><b>四式普攻 · 近敌自动施展</b></div><p class="weapon-description">${weapon.id === 'dual-dao' ? '左右双刃交替挥斩，接续四式普攻。' : weapon.id==='great-dao'?weapon.description:'双手持刀，衔接斜斩、横斩、上撩与落劈。'}<br>点击敌人锁定追击，移动与翻滚调整位置。</p><div class="weapon-moves"><span>普攻动作</span><ol>${weapon.moves.map(move => `<li>${typeof move === 'string' ? move : move.name}</li>`).join('')}</ol></div><button class="primary-button" data-action="armory-confirm"><span>以${typeName(weapon)}入阵</span><i>→</i></button><small class="weapon-preview-note">左侧选类型 · 中央观看普攻</small>`;
+    $('.weapon-detail').innerHTML = `<div class="weapon-detail-heading"><span>所选类型</span>${weaponSilhouette(weapon)}<h3>${typeName(weapon)}</h3><b>四式普攻 · 近敌自动施展</b></div><p class="weapon-description">${weapon.id === 'dual-dao' ? '左右双刃交替挥斩，接续四式普攻。' : ['great-dao','great-hammer'].includes(weapon.id)?weapon.description:'双手持刀，衔接斜斩、横斩、上撩与落劈。'}<br>点击敌人锁定追击，移动与翻滚调整位置。</p><div class="weapon-moves"><span>普攻动作</span><ol>${weapon.moves.map(move => `<li>${typeof move === 'string' ? move : move.name}</li>`).join('')}</ol></div><button class="primary-button" data-action="armory-confirm"><span>以${typeName(weapon)}入阵</span><i>→</i></button><small class="weapon-preview-note">左侧选类型 · 中央观看普攻</small>`;
   }
 
   function setWeapon(id) {

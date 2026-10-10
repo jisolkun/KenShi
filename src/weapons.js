@@ -1,7 +1,7 @@
 // Weapon definitions share their authored motion and combat timings.
 import { getReviewedAttack } from './choreography/index.js';
 export const DEFAULT_WEAPON_ID = 'dual-dao';
-export const UNLOCKED_WEAPON_IDS = new Set(['dual-dao', 'tang-dao', 'great-dao']);
+export const UNLOCKED_WEAPON_IDS = new Set(['dual-dao', 'tang-dao', 'great-dao', 'great-hammer']);
 export function isWeaponUnlocked(id) { return UNLOCKED_WEAPON_IDS.has(id); }
 export const WEAPON_TYPES = [
   {
@@ -186,6 +186,19 @@ export const WEAPON_TYPES = [
       {name:'回身大扫',damage:46,knockback:1.18,hitstop:.022,lunge:.48,recoverAt:.96},
       {name:'踏地重劈',damage:70,knockback:1.90,hitstop:.036,lunge:.55,recoverAt:.95},
     ],
+  },
+  {
+    id: 'great-hammer', name: '大锤', category: '重兵', grip: 'twohand',
+    tagline: '沉肩抡锤，踏地震阵',
+    description: '双手长柄重锤，沉肩转腰横抡、反向上挑，再以回身重扫接过顶砸地。蓄力后迅猛释放，身体随锤势前踏，钝击震退近敌。',
+    effectColor: 0xffcc7a, effectAccent: 0xfff0cb,
+    stats: { speed: 2, power: 5, reach: 4 },
+    moves: [
+      {name:'摆腰横抡',damage:36,knockback:.72,hitstop:0,lunge:.40,recoverAt:.94},
+      {name:'反向上挑',damage:43,knockback:.90,hitstop:0,lunge:.46,recoverAt:.94},
+      {name:'回身重扫',damage:52,knockback:1.12,hitstop:0,lunge:.56,recoverAt:.96},
+      {name:'过顶砸地',damage:82,knockback:1.85,hitstop:0,lunge:.64,recoverAt:.96},
+    ],
   }
 ];
 export const WEAPONS = WEAPON_TYPES;
@@ -193,6 +206,7 @@ const reviewedMoveNames = {
  'dual-dao':['右斜劈','左接斩','反手撩切','错锋双斩'],
  'tang-dao':['踏步斜斩','转胯横斩','提膝上撩','过顶落劈'],
  'great-dao':['踏步横扫','反向斜劈','回身大扫','踏地重劈'],
+ 'great-hammer':['摆腰横抡','反向上挑','回身重扫','过顶砸地'],
 };
 const reviewedDescriptions = {
  'tang-dao':'双手长柄直刃，踏步转胯带动斜斩、宽横斩、上撩与过顶落劈，以大幅刀路扫开前方敌阵。',

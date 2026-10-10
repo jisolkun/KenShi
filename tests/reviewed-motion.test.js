@@ -139,7 +139,8 @@ for (const weapon of WEAPONS.slice(0, 5)) {
             const mid = heel.clone().lerp(tip, .5);
             const orientation = worldQuaternion(rig.arms[hand].weapon);
             const axis = tip.clone().sub(heel).normalize();
-            bladeFrames.set(hand, { mid, tip: tip.clone(), orientation });
+            bladeFrames.set(hand, { mid, tip: tip.clone(), orientation,
+              head: blade.headCenter?.clone() });
             check(Math.min(heel.y, tip.y) >= .05, `floor-blade:${hand}`, `blade ${hand} minimum height ${Math.min(heel.y, tip.y).toFixed(6)}m < .05m`);
             for (const [bodyIndex, envelope] of bodyEnvelopes(rig).entries()) {
               for (let section = 0; section <= 40; section++) {
@@ -154,7 +155,15 @@ for (const weapon of WEAPONS.slice(0, 5)) {
             spec.contacts.forEach((contact, index) => {
               if (contact.hand !== hand || phase < contact.start || phase > contact.end) return;
               seenContacts.add(index);
-              if (contact.kind === 'thrust') {
+              if (contact.kind === 'smash') {
+                // A blunt head has no cutting edge or blade face. Keep the
+                // common grip, floor, clearance and continuity checks above,
+                // and require the actual head to move through this window.
+                check(!!blade.headCenter && !!before.head, `hammer-head:${index}`, 'smash lacks a physical head');
+                if (blade.headCenter && before.head)
+                  check(blade.headCenter.distanceTo(before.head) > EPSILON,
+                    `hammer-velocity:${index}`, `smash ${index} has no head travel`);
+              } else if (contact.kind === 'thrust') {
                 const velocity = tip.clone().sub(before.tip);
                 const forward = new THREE.Vector3(0, 0, 1).transformDirection(rig.group.matrixWorld);
                 check(axis.dot(forward) > .75, `point-axis:${index}`, `thrust ${index} forward axis dot ${axis.dot(forward).toFixed(4)} <= .75`);

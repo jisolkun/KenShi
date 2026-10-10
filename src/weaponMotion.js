@@ -2,9 +2,10 @@ import * as THREE from 'three';
 import { animateWeaponParts } from './weaponModels.js';
 import { sampleTangReady, TANG_GRIP } from './choreography/tangDao.js';
 import { sampleGreatReady, GREAT_GRIP } from './choreography/greatDao.js';
+import {sampleHammerReady, HAMMER_GRIP, HAMMER_HEAD} from './choreography/greatHammer.js';
 import { constrainPairedGrip } from './choreography/trajectory.js';
 import { sampleReviewedAttack } from './choreography/index.js';
-import { greatDaoStepProgress, resolveGreatDaoStep } from './greatDaoMovement.js';
+import { heavyWeaponStepProgress, resolveGreatDaoStep } from './greatDaoMovement.js';
 export { getReviewedAttack, sampleReviewedAttack } from './choreography/index.js';
 
 // Each row describes a deliberately authored contact: shoulder pitch/yaw/roll,
@@ -14,7 +15,11 @@ export const WEAPON_COMBOS = {
  'dual-dao': [[-.8,.5,.8,-.5,.1,.3,.6],[-1,-.7,-.7,-.6,.2,-.3,-.65],[-1.05,.1,.3,-.4,-.2,.1,.2],[-.9,1,.9,-.3,.3,.5,1]],
  'tang-dao': [[-.9,.7,.7,-.3,-.1,.2,.55],[-1.1,-.5,-.6,-.45,.2,-.2,-.5],[-1.5,0,.1,-.12,.05,0,.08],[-1.05,.1,.12,-.25,.3,.1,.2]],
  'great-dao': [[-.9,.7,.7,-.3,-.1,.2,.55],[-1.1,-.5,-.6,-.45,.2,-.2,-.5],[-1.5,0,.1,-.12,.05,0,.08],[-1.05,.1,.12,-.25,.3,.1,.2]],
+ 'great-hammer': [[-.7,.65,.45,-.8,.05,.2,.75],[-.5,-.8,-.4,-.9,.08,-.15,-.8],[-.85,.9,.6,-.7,-.1,.15,1.05],[-1.6,0,.1,-.45,.2,.1,.12]],
 };
+const reviewedWeapon=id=>['tang-dao','great-dao','great-hammer'].includes(id);
+const heavyWeapon=id=>id==='great-dao'||id==='great-hammer';
+const gripFor=id=>id==='great-hammer'?HAMMER_GRIP:id==='great-dao'?GREAT_GRIP:TANG_GRIP;
 const clamp = THREE.MathUtils.clamp;
 const ease = t => { t=clamp(t,0,1); return t*t*(3-2*t); };
 const down=new THREE.Vector3(0,-1,0);
@@ -60,10 +65,10 @@ function supportHand(rig) {
 export function applyWeaponPose(rig, pose, plantFoot) {
  if(rig.type!=='hero'||!WEAPON_COMBOS[rig.weaponId])return;
  const {state,time=0}=pose;
- if(['tang-dao','great-dao'].includes(rig.weaponId)&&state==='attack'){
+ if(reviewedWeapon(rig.weaponId)&&state==='attack'){
   applyReviewedMotion(rig,pose,plantFoot);
- } else if(['tang-dao','great-dao'].includes(rig.weaponId)&&['idle','guard','run','walk'].includes(state)){
-  const ready=rig.weaponId==='great-dao'?sampleGreatReady:sampleTangReady;
+ } else if(reviewedWeapon(rig.weaponId)&&['idle','guard','run','walk'].includes(state)){
+  const ready=rig.weaponId==='great-hammer'?sampleHammerReady:rig.weaponId==='great-dao'?sampleGreatReady:sampleTangReady;
   applyReviewedMotion(rig,pose,plantFoot,ready(pose.idleClock??time));
  }
  animateWeaponParts(rig,pose);
@@ -72,7 +77,7 @@ export function applyWeaponPose(rig, pose, plantFoot) {
 function applyReviewedMotion(rig,pose,plantFoot,readySample=null) {
  const sample=readySample??sampleReviewedAttack(rig.weaponId,pose.combo,pose.phase,pose.state);
  const {yaw,load,advance}=sample.stance;
- const grip=rig.weaponId==='great-dao'?GREAT_GRIP:TANG_GRIP;
+ const grip=gripFor(rig.weaponId);
  const armMode='tang';
  for(const arm of rig.arms){
   arm.weapon.rotation.set(0,0,0);
@@ -91,13 +96,14 @@ function applyReviewedMotion(rig,pose,plantFoot,readySample=null) {
    solveArm(rig,rig.arms[i],new THREE.Vector3(...hand.grip),chestQ.clone().multiply(new THREE.Quaternion().fromArray(hand.quaternion)),armMode);
   }
   rig.reviewedAttackSample=sample;
+  if(rig.weaponId==='great-hammer')reconcileWeaponGrip(rig);
   return;
  }
  // Pelvis starts the turn; the chest follows. Automatic great-dao steps use
  // world contacts, while authored/travelling gait keeps its character frame.
  const pelvisYaw=sample.stance.pelvisYaw??yaw*.65;
  const carry=clamp(pose.attackCarry??0,0,1);
- const stepping=rig.weaponId==='great-dao'&&pose.attackStep;
+ const stepping=heavyWeapon(rig.weaponId)&&pose.attackStep;
  const stepFeet=stepping?sampleAttackFeet(rig,pose):null;
  const resolvedFeet=stepFeet??rig.legs.map((leg,index)=>{
   const speed=pose.speed>0?clamp(pose.speed,0,1):carry;
@@ -111,7 +117,7 @@ function applyReviewedMotion(rig,pose,plantFoot,readySample=null) {
    y:THREE.MathUtils.lerp(authored?.y??.075,.075+Math.sin(Math.PI*swing)*.10,carry),
    z:THREE.MathUtils.lerp(authored?.z??(index?-.07:.10),.026+stride,carry)};
  });
- if(rig.weaponId==='great-dao'&&(carry>0||stepping)){
+ if(heavyWeapon(rig.weaponId)&&(carry>0||stepping)){
   // Travelling gait and authored action phase are independent. Lower the
   // loaded pelvis enough for the *blended* foot targets, including its tilt.
   const q=new THREE.Quaternion().setFromEuler(new THREE.Euler(sample.stance.bodyPitch??0,pelvisYaw,sample.stance.bodyRoll??0));
@@ -142,6 +148,7 @@ function applyReviewedMotion(rig,pose,plantFoot,readySample=null) {
  rig.pony.rotation.set(.2+load*.08,0,-yaw*.15);
  for(const cloth of rig.cloths){cloth.rotation.x=-.15-load*.16;cloth.rotation.z=-yaw*.12;}
  rig.reviewedAttackSample=sample;
+ if(rig.weaponId==='great-hammer')reconcileWeaponGrip(rig);
 }
 
 // A step is authored in world space. The rear foot pushes against the floor,
@@ -170,10 +177,10 @@ function sampleAttackFeet(rig,pose) {
  }
  const p=clamp((pose.phase-context.startPhase)/Math.max(1e-6,1-context.startPhase),0,1);
  const root=rig.group.getWorldPosition(new THREE.Vector3()),heading=rig.group.getWorldQuaternion(new THREE.Quaternion());
- const planned=Math.hypot(step.forward??0,step.lateral??0)*Math.max(0,greatDaoStepProgress(pose.phase)-greatDaoStepProgress(context.startPhase));
+ const planned=Math.hypot(step.forward??0,step.lateral??0)*Math.max(0,heavyWeaponStepProgress(rig.weaponId,pose.phase)-heavyWeaponStepProgress(rig.weaponId,context.startPhase));
  const travelled=Math.hypot(root.x-step.start.x,root.z-step.start.z);
  const stride=planned>1e-8?clamp(travelled/planned,0,1):0;
- const remaining=1-greatDaoStepProgress(context.startPhase);
+ const remaining=1-heavyWeaponStepProgress(rig.weaponId,context.startPhase);
  const feet=rig.legs.map((leg,index)=>{
   const lead=index===context.lead,start=lead ? .06 : .32,end=lead ? .30 : .76;
   const u=clamp((p-start)/(end-start),0,1),progress=ease(u);
@@ -232,13 +239,13 @@ export function reconcileAttackFootwork(rig,plantFoot) {
 // the blended shaft into both arm chains during a state change.
 export function reconcileWeaponGrip(rig) {
  if(rig.type!=='hero'||!rig.offhandGrip)return;
- if(!['tang-dao','great-dao'].includes(rig.weaponId)||!rig.reviewedAttackSample){supportHand(rig);return;}
- const grip=rig.weaponId==='great-dao'?GREAT_GRIP:TANG_GRIP;
+ if(!reviewedWeapon(rig.weaponId)||!rig.reviewedAttackSample){supportHand(rig);return;}
+ const grip=gripFor(rig.weaponId);
  // During a state blend preserve the actual primary wrist and shaft plane.
  // Only move that shaft if its support marker falls outside the left reach.
  rig.group.updateMatrixWorld(true);
  const desired=rig.reviewedShaftBlend?.quaternion.clone()??rig.arms[1].wrist.getWorldQuaternion(new THREE.Quaternion());
- if(rig.reviewedShaftBlend||rig.attackFootTargets){
+ if(rig.reviewedShaftBlend||rig.attackFootTargets||rig.weaponId==='great-hammer'){
   const primary=rig.chest.worldToLocal(rig.reviewedShaftBlend?.point.clone()??rig.arms[1].wrist.getWorldPosition(new THREE.Vector3()));
   if(grip.handClearance){
    // A blended shaft can put the support fist back through the chest even
@@ -246,16 +253,29 @@ export function reconcileWeaponGrip(rig) {
    const localQ=rig.chest.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(desired);
    const axis=down.clone().applyQuaternion(localQ);
    constrainPairedGrip(primary,axis,grip);
-   if(rig.weaponId==='great-dao'){
+   if(rig.weaponId==='great-hammer'){
+    // The iron pommel continues behind the rear palm. Keep that complete
+    // rigid tail (including its radius) in front of the breastplate.
+    for(let pass=0;pass<12;pass++){
+     primary.z=Math.max(primary.z,.24+grip.rearLength*Math.max(0,axis.z));
+     constrainPairedGrip(primary,axis,grip);
+    }
+   }
+   if(heavyWeapon(rig.weaponId)){
     // A shortest quaternion blend from the broad returning sweep into carry
     // can dip the long tip below ground even when both endpoint poses clear.
     // Project the entire connected hilt upward, retaining reach and palm
     // clearance, instead of shortening or hiding the rendered blade.
     const up=new THREE.Vector3(0,1,0).applyQuaternion(rig.chest.getWorldQuaternion(new THREE.Quaternion()).invert());
     for(let pass=0;pass<12;pass++){
-     const tip=rig.chest.localToWorld(primary.clone()).addScaledVector(down.clone().applyQuaternion(desired),1.509);
-     if(tip.y>=.055)break;
-     primary.addScaledVector(up,.055-tip.y);
+     const world=rig.chest.localToWorld(primary.clone()),worldAxis=down.clone().applyQuaternion(desired);
+     const floor=rig.weaponId==='great-hammer'?HAMMER_HEAD.floor:.055;
+     const bottom=rig.weaponId==='great-hammer'?world.y+worldAxis.y*HAMMER_HEAD.length-
+      HAMMER_HEAD.halfExtents.reduce((sum,half,index)=>sum+half*Math.abs(new THREE.Vector3(index===0?1:0,index===1?1:0,index===2?1:0).applyQuaternion(desired).y),0)
+      :world.y+worldAxis.y*1.509;
+     if(bottom>=floor)break;
+     primary.addScaledVector(up,floor-bottom);
+     if(rig.weaponId==='great-hammer')primary.z=Math.max(primary.z,.24+grip.rearLength*Math.max(0,axis.z));
      constrainPairedGrip(primary,axis,grip);
     }
    }
@@ -272,4 +292,9 @@ export function reconcileWeaponGrip(rig) {
   rig.group.updateMatrixWorld(true);
  }
  solveArm(rig,rig.arms[0],rig.chest.worldToLocal(rig.offhandGrip.getWorldPosition(new THREE.Vector3())),desired,'tang');
+ if(rig.weaponId==='great-hammer'){
+  const inverse=rig.chest.getWorldQuaternion(new THREE.Quaternion()).invert();
+  rig.reviewedAttackSample.hands=rig.arms.map(arm=>({grip:rig.chest.worldToLocal(arm.wrist.getWorldPosition(new THREE.Vector3())).toArray(),
+   quaternion:inverse.clone().multiply(arm.wrist.getWorldQuaternion(new THREE.Quaternion())).toArray()}));
+ }
 }

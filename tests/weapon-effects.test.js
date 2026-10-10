@@ -6,10 +6,11 @@ import { createWeaponEffects } from '../src/weaponEffects.js';
 
 const position=new THREE.Vector3();
 function bounds(mesh){mesh.geometry.computeBoundingBox();return mesh.geometry.boundingBox.getSize(new THREE.Vector3());}
-test('all twelve basic attack trails are finite, match contact shape, and retain diverse geometry',()=>{
+test('blade attack trails match their contact shapes while hammer swings create no invented slash',()=>{
   const scene=new THREE.Scene(),fx=createWeaponEffects(scene),signatures=new Set();
   for(const weapon of WEAPONS)for(let combo=0;combo<4;combo++){
     fx.attack(weapon.id,position,0,combo);
+    if(weapon.id==='great-hammer'){assert.equal(scene.children.length,0,'hammer contact must come from its real head');continue;}
     const group=scene.children.at(-1),mesh=group.children[0],move=weapon.moves[combo];
     assert.ok([...mesh.geometry.attributes.position.array].every(Number.isFinite),`${weapon.id}:${combo}`);
     signatures.add([...mesh.geometry.attributes.position.array].map(v=>v.toFixed(3)).join(','));
@@ -33,8 +34,8 @@ test('pause freezes, expiry reuses pooled groups, and clear removes every active
   fx.clear();assert.equal(scene.children.length,0);
   fx.destroy();fx.destroy();fx.attack('dual-dao',position,0,0);assert.equal(scene.children.length,0);
 });
-test('basic attack contact delegates one physical impact',()=>{
-  let impacts=0;const scene=new THREE.Scene(),fx=createWeaponEffects(scene,{impact(){impacts++;},ring(){}});
+test('basic attack contact delegates one physical blade or blunt impact',()=>{
+  let impacts=0;const scene=new THREE.Scene(),fx=createWeaponEffects(scene,{impact(){impacts++;},hammerImpact(){impacts++;},ring(){}});
   for(const weapon of WEAPONS)for(let combo=0;combo<4;combo++){
     fx.impact(weapon.id,position,0,combo,true);
     for(const group of scene.children)group.traverse(mesh=>{if(mesh.isMesh)assert.ok([...mesh.geometry.attributes.position.array].every(Number.isFinite));});
