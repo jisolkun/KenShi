@@ -50,7 +50,7 @@ const techniques = [
     // the centre line into a low opposite-side brake instead of stopping at
     // the hero's toes, so the final silhouette has a clean, decisive finish.
     chamber:hand([.13,.61,.40],[.10,.94,.33]), cross:hand([.03,.34,.48],[0,.10,.995]),
-    exit:hand([.15,.13,.42],[.08,-.60,.80]), turn:[.60,-.44], step:1, reach:2.18 },
+    exit:hand([.15,.13,.42],[.08,-.60,.80]), turn:[.72,-.56], step:1, reach:2.18 },
 ];
 const stance = values => ({ yaw:0, load:0, pelvisYaw:values[0], chestYaw:values[1], pitch:values[2],
   shiftX:values[3], advance:values[4], bodyHeight:values[5], bodyPitch:values[6], bodyRoll:values[7], chestRoll:values[8] });
@@ -74,7 +74,7 @@ export function getGreatAttack(id, combo=0, state='attack') {
     bodyGripFollow:[.55,.4,.65], bodyGripRotation:.85,
     initialHands:orientationHands(carries[index],bodies[index]),
     finalHands:orientationHands(carries[index+1],bodies[index+1]),
-    cacheKey:`great-dao-v3:${index}` };
+    cacheKey:`great-dao-v4:${index}` };
 }
 const ease = u => {u=THREE.MathUtils.clamp(u,0,1);return u*u*(3-2*u);};
 function feetFor(spec,p) {

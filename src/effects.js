@@ -197,13 +197,14 @@ export function createEffects(scene, camera) {
     emit(flashes,position,zero,0xfff9df,0.06+(critical?0.015:0),size,size*0.75,1,0,angle,true);
     emit(flashes,position,zero,0xd3a8ef,critical?0.16:0.12,size*(critical?2.2:1.65),size*0.66,1,0,angle+0.6);
     if (critical && style === 3) {
-      // A broad warm blade flare makes the last edge read at the instant of
-      // contact.  It lives in the same pooled flash pass as the compact core,
-      // so crowded fights do not allocate a mesh per target.
-      emit(flashes,position,zero,0xffb968,0.14,size*3.1,size*0.16,1,0,angle+Math.PI*.5,true);
+      // The reference heavy swing is a cold steel-blue outer edge with a
+      // white core. Keep the flash wide and directional, but let the actual
+      // blade trail remain the source of the motion rather than a screen-sized
+      // hit billboard.
+      emit(flashes,position,zero,0x38b9ff,0.18,size*3.8,size*0.18,1,0,angle+Math.PI*.5,true);
       const crescentPoint = position.clone(); crescentPoint.y = 0;
-      arc(crescentPoint, Math.atan2(direction.x,direction.z), .9 + weight*.22, 3, 0xffb65f);
-      ring(crescentPoint, 1.02 + weight*.18, 0xe49a54, .26);
+      arc(crescentPoint, Math.atan2(direction.x,direction.z), 1.48 + weight*.24, 3, 0x5caecb);
+      ring(crescentPoint, 1.34 + weight*.20, 0x4b9fb8, .34);
     }
     for(let i=0,count=critical?8:Math.round(4+weight);i<count;i++){
       velocity.copy(direction).multiplyScalar(3+Math.random()*3*weight).addScaledVector(side,(Math.random()-0.5)*(critical?4.4:3));
@@ -284,7 +285,7 @@ export function createEffects(scene, camera) {
     geo.setAttribute('position',new THREE.BufferAttribute(positions,3).setUsage(THREE.DynamicDrawUsage));geo.setAttribute('color',new THREE.BufferAttribute(colors,3).setUsage(THREE.DynamicDrawUsage));geo.setDrawRange(0,0);
     const material=additive(0xffffff,0.8);material.vertexColors=true;
     const mesh=new THREE.Mesh(geo,material);mesh.frustumCulled=false;scene.add(mesh);
-    const trail={mesh,points:[],color:new THREE.Color(0xb0c4ff),coreColor:new THREE.Color(0xfff7eb),widthFactor:1,preserveUntilPresented:false,spare:Array.from({length:32},()=>({tip:new THREE.Vector3(),inner:new THREE.Vector3(),core:new THREE.Vector3(),body:new THREE.Vector3(),age:0,unseenAge:0,awaitingPresentation:false})),positions,colors,wasActive:false};trails.push(trail);return trail;
+    const trail={mesh,points:[],color:new THREE.Color(0xb0c4ff),coreColor:new THREE.Color(0xfff7eb),widthFactor:1,life:trailLife,preserveUntilPresented:false,spare:Array.from({length:32},()=>({tip:new THREE.Vector3(),inner:new THREE.Vector3(),core:new THREE.Vector3(),body:new THREE.Vector3(),age:0,unseenAge:0,awaitingPresentation:false})),positions,colors,wasActive:false};trails.push(trail);return trail;
   }
   function releaseTrailPoint(trail,point) {
     point.age=0;point.unseenAge=0;point.awaitingPresentation=false;
@@ -304,6 +305,7 @@ export function createEffects(scene, camera) {
     }
   }
   function sample(trail,tip,body,active,dt) {
+    const life=trail.life??trailLife;
     const unseenElapsed=Math.max(0,dt||0),elapsed=Math.min(unseenElapsed,0.2);
     for(const p of trail.points) {
       if(p.awaitingPresentation)p.unseenAge+=unseenElapsed;
@@ -311,7 +313,7 @@ export function createEffects(scene, camera) {
     }
     while(trail.points.length) {
       const point=trail.points[0];
-      if(point.awaitingPresentation?point.unseenAge<firstPresentationTimeout:point.age<trailLife)break;
+      if(point.awaitingPresentation?point.unseenAge<firstPresentationTimeout:point.age<life)break;
       releaseTrailPoint(trail,trail.points.shift());
     }
     if(active&&tip&&body){
@@ -323,7 +325,7 @@ export function createEffects(scene, camera) {
     }
     trail.wasActive=Boolean(active);let at=0;
     function vertex(point,age,layer,edge){
-      trail.positions[at]=point.x;trail.positions[at+1]=point.y;trail.positions[at+2]=point.z;const fade=Math.pow(Math.max(0,1-age/trailLife),1.6);
+      trail.positions[at]=point.x;trail.positions[at+1]=point.y;trail.positions[at+2]=point.z;const fade=Math.pow(Math.max(0,1-age/life),1.6);
       const color=layer?trail.coreColor:trail.color,strength=layer||edge?1:0.22;
       trail.colors[at]=fade*color.r*strength;trail.colors[at+1]=fade*color.g*strength;trail.colors[at+2]=fade*color.b*strength;at+=3;
     }

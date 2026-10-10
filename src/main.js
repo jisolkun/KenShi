@@ -604,6 +604,7 @@ function selectWeapon(id = currentWeapon.id, preview = true) {
   world.clearCombat?.();
   for (const trail of trails) {
     trail.preserveUntilPresented = currentWeapon.id === 'great-dao';
+    trail.life = currentWeapon.id === 'great-dao' ? .18 : .105;
     trail.color = new THREE.Color(currentWeapon.effectColor);
     trail.coreColor = new THREE.Color(currentWeapon.effectAccent);
     trail.widthFactor = width;
@@ -1115,6 +1116,16 @@ function reviewedStrike(phase,frames) {
     hero.hitDone=true;
     if(!hero.strokeContacts.has(stroke)){
       hero.strokeContacts.add(stroke);
+      if(great){
+        // The sampled blade trail remains the authoritative path. This pooled
+        // veil is a style accent from the reference game's broad swing: it is
+        // emitted once at the release and never participates in collision.
+        const motion=sweep?.previous&&sweep.current
+          ? sweep.current.tip.clone().sub(sweep.previous.tip) : null;
+        const visualAngle=motion&&motion.lengthSq()>.0001
+          ? Math.atan2(motion.x,motion.z) : hero.angle;
+        weaponFx.attack(currentWeapon.id,hero.pos,visualAngle,hero.combo);
+      }
       safeAudio('weaponSlash',currentWeapon.id,hero.combo,contact.kind??'cut');
     }
     const prior=previous&&previous.state===hero.state&&previous.combo===hero.combo&&previous.phase>=contact.window[0]
@@ -1139,22 +1150,27 @@ function sampleHeroTrails(frames,tips,phase,dt,active) {
   const source=`${currentWeapon.id}:${hero.trailSeries}:${hero.state}:${hero.combo}`;
   for(let i=0;i<trails.length;i++){
     const trail=trails[i];
-    // The great dao carries a wider, warm edge trail so its long physical
-    // path reads as one heavy cut.  The width grows through the chain and the
-    // finisher shifts toward ember orange; the narrow white core keeps the
-    // actual blade direction legible inside the broad ribbon.
+    // Keep the great dao's real heel-to-tip path on screen long enough to read
+    // like the source game's heavy swing: a broad steel-blue outer veil, a
+    // white edge core and a longer finisher tail. The trail is still sampled
+    // from the physical blade, so its width never grants extra damage.
     if(currentWeapon.id==='great-dao'){
-      trail.widthFactor=1.18+Math.min(hero.combo,3)*.08;
-      trail.color.setHex(hero.combo===3?0xffa24e:0xffc66b);
-      trail.coreColor.setHex(0xffffe4);
+      trail.widthFactor=1.45+Math.min(hero.combo,3)*.10;
+      trail.life=.18;
+      trail.color.setHex(hero.combo===3?0x5caecb:0x8296d4);
+      trail.coreColor.setHex(0xfff6df);
     }else{
       trail.widthFactor=1;
+      trail.life=.105;
       trail.color.setHex(0xb0c4ff);
       trail.coreColor.setHex(0xfff7eb);
     }
     const blade=action&&frames.find(b=>b.hand===i);
     const contact=action?.contacts.find(c=>c.hand===i&&phase>=c.window[0]&&phase<=c.window[1]);
-    const cutting=action?!!blade&&!!contact:active&&!!tips[i];
+    const fullSwing=currentWeapon.id==='great-dao'&&action
+      &&phase>=Math.max(0,action.swing[0]-.025)
+      &&phase<=Math.min(1,action.brake+.035);
+    const cutting=action?!!blade&&(currentWeapon.id==='great-dao'?fullSwing:!!contact):active&&!!tips[i];
     // A short active interval can cover one displayed frame. Seed from the
     // preceding real blade pose so its path still forms a visible ribbon.
     if(blade&&cutting&&dt>0&&!trail.wasActive&&trail.previousBlade?.source===source&&phase-trail.previousBlade.phase<.1){

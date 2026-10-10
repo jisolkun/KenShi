@@ -16,7 +16,9 @@ export function createWeaponEffects(scene, baseEffects) {
   const cuts = {
     'dual-dao': [arc(1.6,-1.2,0.75,0.13,-0.3),arc(1.55,-0.6,1.35,-0.13,0.3)],
     'tang-dao': [line([-1.45,0.45,1.65],[1.45,-0.3,1.65])],
-    'great-dao': [arc(1.8,-1.35,1.35,0.08)],
+    // Preview slash: leave a long, readable veil on screen even before the
+    // real blade samples begin. Combat trails still come from the physical tip.
+    'great-dao': [arc(2.25,-1.48,1.48,0.08)],
   };
   function ribbon(paths,width) {
     const vertices=[];
@@ -61,6 +63,7 @@ export function createWeaponEffects(scene, baseEffects) {
     const style=((combo%4)+4)%4;
     const weapon=getWeapon(id), move=weapon.moves[style], key=`${id}:${mode}:${style}`;
     const greatImpact=id==='great-dao'&&mode==='impact',greatFinisher=greatImpact&&style===3;
+    const greatSwing=id==='great-dao'&&mode==='attack';
     const authored=cuts[id]||cuts['tang-dao'];
     const reach=move.reach,shapeKind=move.shape;
     const paths=authored.map((path,layer)=>{
@@ -80,7 +83,7 @@ export function createWeaponEffects(scene, baseEffects) {
         } else if(shapeKind==='thrust')shape=[line([0,0,-0.45],[0,0,0.5]),line([-0.14,0,-0.14],[0.14,0,0.14]),line([-0.3,0,0],[0.3,0,0])];
         else shape=paths.map(p=>p.map(v=>[v[0]*0.24,v[1]*0.3,(v[2]-1.1)*0.25]));
       }
-      const width=mode==='impact'?(greatImpact?.065:.045):shapeKind==='thrust'?0.018:0.052;
+      const width=mode==='impact'?(greatImpact?(greatFinisher?.09:.065):.045):shapeKind==='thrust'?0.018:0.052;
       group.add(new THREE.Mesh(geometry(`${key}:veil`,shape,width),material(0xffffff,0.3)),new THREE.Mesh(geometry(`${key}:edge`,shape,width*0.18),material(0xffffff,0.65)));
       o={key,group,age:0,life:0,angle:0,spin:0,scale:1,mode,greatImpact,greatFinisher};all.add(o);
       if(greatImpact) {
@@ -99,14 +102,14 @@ export function createWeaponEffects(scene, baseEffects) {
       if(count>=MAX_GREAT_IMPACTS)release(live.splice(oldest,1)[0]);
     }
     if(live.length>=MAX_LIVE)release(live.shift());
-    o.age=0;o.unseenAge=0;o.awaitingPresentation=greatImpact;o.group.visible=true;o.life=greatFinisher?.24:greatImpact?.19:mode==='impact'?.14:.16;o.angle=angle;o.spin=(combo%2?-1:1)*(shapeKind==='thrust'||shapeKind==='crush'?0:mode==='impact'?0.12:0.32);o.scale=power;
+    o.age=0;o.unseenAge=0;o.awaitingPresentation=greatImpact;o.group.visible=true;o.life=greatFinisher?.25:greatImpact?.19:mode==='impact'?.14:.16;o.angle=angle;o.spin=(combo%2?-1:1)*(shapeKind==='thrust'||shapeKind==='crush'?0:mode==='impact'?0.12:0.32);o.scale=power;
     o.group.position.copy(pos);o.group.position.y+=greatImpact?0:mode==='impact'?.22:1.02;if(mode==='impact'&&shapeKind==='crush'&&id!=='great-dao')o.group.position.y=0.07;
     o.group.rotation.set(0,angle,mode==='impact'||shapeKind==='thrust'||shapeKind==='crush'?0:[0.12,-0.12,0.35,-0.3][combo%4]);
     if(greatImpact)o.group.quaternion.setFromUnitVectors(forward,cutDirection);
     o.mirror=greatImpact?1:combo%2?-1:1;o.group.scale.set(power*o.mirror,power,power);
-    o.group.children[0].material.color.setHex(weapon?.effectColor??0xc9ae7b);o.group.children[1].material.color.setHex(weapon?.effectAccent??0xffe4ac);
+    o.group.children[0].material.color.setHex(greatFinisher?0x5caecb:(greatSwing||greatImpact)?0x7898d0:(weapon?.effectColor??0xc9ae7b));o.group.children[1].material.color.setHex(greatFinisher?0x9fe9ff:(greatSwing||greatImpact)?0xe8f2ff:(weapon?.effectAccent??0xffe4ac));
     o.group.children[0].material.opacity=greatImpact?.56:mode==='impact'?.46:.24;o.group.children[1].material.opacity=greatImpact?.80:.6;
-    if(o.flash){o.flash.material.opacity=.84;o.flash.scale.setScalar(greatFinisher?1.25:1);}
+    if(o.flash){o.flash.material.opacity=.84;o.flash.scale.setScalar(greatFinisher?1.45:1);}
     if(o.debris)updateDebris(o,0);
     scene.add(o.group);live.push(o);
   }
