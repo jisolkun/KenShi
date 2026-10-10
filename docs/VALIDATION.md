@@ -4,7 +4,7 @@
 
 日期：2026-10-10。界面版本从上一轮的 v0.6.0 更新为 v0.7.0，标记本轮大刀宽幅动作、真实刀路延长显示、钢蓝刀光和末击冲击反馈重构。验证结果、生产构建哈希与 Pages 运行记录见本节末尾；此前 v0.5.0 的完整动作与位移记录保留如下作为历史记录。
 
-`node --test tests/*.test.js` 共228项通过，0失败。`npm run build` 通过；生产脚本 `index-CuN49SYi.js`（709477字节，SHA256 `b1155eba46437886bacff76f7411beb3d626d994974390c906b992ae4d90d244`），样式 `index-CLsJ0jA2.css`（33970字节，SHA256 `9473890e78f90f7f6a7095982090e04f7b0ebf73848f1f246e12747adfb91b3a`）。Pages 部署运行记录将在发布后补入。
+`node --test tests/*.test.js` 共228项通过，0失败。`npm run build` 通过；生产脚本 `index-CuN49SYi.js`（709477字节，SHA256 `b1155eba46437886bacff76f7411beb3d626d994974390c906b992ae4d90d244`），样式 `index-CLsJ0jA2.css`（33970字节，SHA256 `9473890e78f90f7f6a7095982090e04f7b0ebf73848f1f246e12747adfb91b3a`）。[Pages运行38023164043](https://github.com/jisolkun/KenShi/actions/runs/38023164043) 的构建和部署均成功，线上脚本已核对为 `v0.7.0`。
 
 ## 前次：v0.5.0 · 踏刃连进
 
