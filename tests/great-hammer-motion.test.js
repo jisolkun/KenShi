@@ -266,8 +266,8 @@ test('great hammer exposes four distinct two-handed smash actions with physical 
     assert.equal(action.headLength, 1.25);
     assert.equal(action.tipLength, 1.44);
     assert.equal(action.headRadius, .27);
-    assert.ok(action.duration >= .5 && action.duration <= 1.5,
-      `hammer ${combo + 1} retains time for a legible load, impact and recovery`);
+    assert.ok(action.duration >= .35 && action.duration <= .75,
+      `hammer ${combo + 1} keeps a short readable swing instead of a long chamber and recovery`);
     assert.ok(action.contacts.length > 0 && action.contacts.every(contact => contact.kind === 'smash'));
     assert.equal(getReviewedAttack(ID, combo, 'skill'), null);
     assert.notDeepEqual([.2, .5, .8].map(phase => sampleReviewedAttack(ID, combo, phase).hands),
@@ -276,8 +276,9 @@ test('great hammer exposes four distinct two-handed smash actions with physical 
     names.add(action.name);
   }
   assert.equal(names.size, 4, 'all four escalating hammer actions have distinct identities');
-  assert.ok(getReviewedAttack(ID, 1).duration < getReviewedAttack(ID, 2).duration,
-    'the compact rising follow-up has a quicker tempo than the full body sweep');
+  const chainDuration=[0,1,2,3].reduce((total,combo)=>total+getReviewedAttack(ID,combo).duration,0);
+  assert.ok(chainDuration>=2.0&&chainDuration<=2.35,
+    `the four attacks should read as a fast continuous chain near 2.18s, got ${chainDuration}s`);
   assert.ok(getReviewedAttack(ID, 3).duration > getReviewedAttack(ID, 0).duration,
     'the terminal overhead smash has a longer commitment than the opening strike');
 });
@@ -299,8 +300,9 @@ for (let combo = 0; combo < 4; combo++) {
         frame.ankles[lead].z - history[0].ankles[lead].z))) > .18,
       'the leading ankle takes a visible actual step under the loaded hammer');
       const action = getReviewedAttack(ID, combo);
-      const active = history.filter(frame => frame.phase >= action.active[0] && frame.phase <= action.active[1]);
-      assert.ok(active.length > 2, 'the frame grid samples a sustained impact window');
+      const impactWindow=combo%2?[action.contact,action.finish+.02]:[action.contact-.04,action.contact+.04];
+      const active = history.filter(frame => frame.phase >= impactWindow[0] && frame.phase <= impactWindow[1]);
+      assert.ok(active.length > 1, 'the frame grid samples the actual area pulse or ground impact');
       for (let side = 0; side < 2; side++) {
         const planted = active[0].ankles[side];
         assert.ok(active.every(frame => frame.ankles[side].distanceTo(planted) < .035),
@@ -311,11 +313,11 @@ for (let combo = 0; combo < 4; combo++) {
     });
   }
 
-  test(`great hammer strike ${combo + 1} loads its real head, accelerates through contact and arrests before recovery`, () => {
+  test(`great hammer strike ${combo + 1} drives a fast substantial real head path through its short release`, () => {
     const f = fixture(), action = getReviewedAttack(ID, combo);
-    const [release, finish] = action.swing, [start, end] = action.active;
-    const speeds = {windup: [], chamber: [], strike: [], arrest: []};
-    let previous;
+    const [start, end] = action.active;
+    const speeds = [];
+    let previous,travel=0;
     for (let frame = 0; frame <= Math.ceil(action.duration * 240); frame++) {
       const time = Math.min(action.duration, frame / 240), phase = time / action.duration;
       poseCharacter(f.rig, {state: 'attack', combo, phase, time, attackCarry: 0,
@@ -323,28 +325,23 @@ for (let combo = 0; combo < 4; combo++) {
       const head = f.rig.weaponBlades()[0].headCenter;
       if (previous && time > previous.time) {
         const speed = head.distanceTo(previous.head) / (time - previous.time);
-        if (phase < release - .045) speeds.windup.push(speed);
-        if (phase >= release - .035 && phase <= release - .008) speeds.chamber.push(speed);
-        if (phase >= start && phase <= end) speeds.strike.push(speed);
-        if (phase >= finish - .012 && phase <= finish + .012) speeds.arrest.push(speed);
+        if (phase >= start && phase <= end) {
+          speeds.push(speed);travel+=head.distanceTo(previous.head);
+        }
       }
       previous = {head, time};
     }
-    for (const [segment, values] of Object.entries(speeds)) assert.ok(values.length > 2, `${segment} is physically visible`);
-    const peak = Math.max(...speeds.strike);
-    const loadedAverage = speeds.windup.reduce((sum, speed) => sum + speed, 0) / speeds.windup.length;
-    assert.ok(peak > 5 && peak > loadedAverage * 1.5,
-      'the actual hammer head develops a strong release beyond its loaded preparation');
-    assert.ok(Math.max(...speeds.chamber) < peak * .5,
-      'the loaded chamber slows the actual head before its forceful release');
-    assert.ok(Math.min(...speeds.arrest) < peak * .35,
-      'the head visibly arrests at the stroke end before its next carry or small rebound');
+    assert.ok(speeds.length>2,'the short attack still has multiple real motion samples');
+    const peak = Math.max(...speeds);
+    assert.ok(peak > 8,
+      'the actual hammer head develops a fast forceful release through the enemy height');
+    assert.ok(travel>1.0,'the fast release moves the actual head across a large visible span');
   });
 
   for (const rate of [60, 120]) {
-    test(`great hammer strike ${combo + 1}, ${rate} Hz: contact damages the moving real head and leaves the handle harmless`, () => {
+    test(`great hammer strike ${combo + 1}, ${rate} Hz: physical head collision follows the visible head and leaves the handle harmless`, () => {
       const f = fixture(), {action, history} = strikeFrames(f, combo, rate);
-      const target = {x: 0, z: action.reach, minY: .18, maxY: 1.85};
+      const target = {x: 0, z: Math.min(action.reach,action.headLength+.45), minY: .18, maxY: 1.85};
       let previous, hit = false, contacts = 0;
       for (const current of history) {
         for (const contact of action.contacts) {
@@ -374,19 +371,19 @@ for (let combo = 0; combo < 4; combo++) {
   }
 }
 
-test('great hammer finisher lifts the actual head high then brings its complete bottom within 10cm of the floor', () => {
-  const f = fixture(), action = getReviewedAttack(ID, 3), [release, finish] = action.swing;
+for(const combo of [1,3])test(`great hammer ground strike ${combo+1} brings the complete physical head down to the stone floor`, () => {
+  const f = fixture(), action = getReviewedAttack(ID, combo), [release, finish] = action.swing;
   const samples = [];
   for (let frame = 0; frame <= 240; frame++) {
     const phase = release + (finish - release) * frame / 240;
-    poseCharacter(f.rig, {state: 'attack', combo: 3, phase, time: phase * action.duration,
+    poseCharacter(f.rig, {state: 'attack', combo, phase, time: phase * action.duration,
       attackCarry: 0, immediate: true, transition: false});
     const current = checkPhysical(f, `finisher release phase ${phase}`, true);
     samples.push(current);
   }
   const heads = samples.map(sample => sample.frame.headCenter), first = heads[0], last = heads.at(-1);
-  assert.ok(first.y > samples[0].characterHeadY + .4, 'the complete smash begins visibly above the character head');
-  assert.ok(first.y - last.y > 1.2, 'the actual heavy head descends through a substantial enemy-height span');
+  assert.ok(first.y > samples[0].characterHeadY + (combo===3?.4:.1), 'the actual smash begins above the character head');
+  assert.ok(first.y - last.y > (combo===3?1.2:.9), 'the actual heavy head descends through a substantial enemy-height span');
   const dt = (finish - release) * action.duration / 240;
   const vertical = heads.slice(1).map((head, n) => (head.y - heads[n].y) / dt);
   assert.ok(Math.min(...vertical) < -5, 'the actual descending hammer develops a forceful vertical velocity');
@@ -415,13 +412,14 @@ test('the real hammer chain changes strike planes and compresses into a planted 
     const release = at(action.release), finish = at(action.finish);
     return {action, samples, release, finish, delta: finish.head.clone().sub(release.head)};
   });
-  assert.ok(paths[0].delta.y < -.3 && Math.abs(paths[0].delta.x) > .5,
-    'the opening head travels downward across a visible diagonal');
-  assert.ok(paths[1].delta.y > .6,
-    'the following head rises out of the loaded low carry');
-  assert.ok(Math.abs(paths[2].delta.x) > 1.2 &&
+  assert.ok(Math.abs(paths[0].delta.x) > 1.5 &&
+    Math.abs(paths[0].delta.x) > Math.abs(paths[0].delta.y) * 1.5,
+    'the opening head makes a broad horizontal sweep through the crowd');
+  assert.ok(paths[1].delta.y < -.9,
+    'the second attack drives the real head down instead of repeating the lateral sweep');
+  assert.ok(Math.abs(paths[2].delta.x) > 1.8 &&
     Math.abs(paths[2].delta.x) > Math.abs(paths[2].delta.y) * 1.6,
-    'the body pivot creates a broad lateral head path');
+    'the body pivot creates a large lateral head path across a different crowd sector');
   assert.ok(paths[3].delta.y < -1.2 &&
     Math.abs(paths[3].delta.y) > Math.abs(paths[3].delta.x) * 2,
     'the final head commits to a vertical smash rather than another side sweep');

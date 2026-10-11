@@ -1,22 +1,22 @@
-// Hammer accents follow the head's real travel. The combo supplies its mass
-// and cadence; it never supplies an extra damage volume or an invented hit.
+// Physical head contact and deliberate impact waves are separate volumes.
+// Sweeps release one bounded fan; a slam requires confirmed floor contact.
 const profiles = [
-  { direction: [-.72,-.62,.32], impactLife: .20, flashLife: .055, coreScale: [.115,.080,.155],
-    dustSpread: .70, dustDrive: 1.8, wakeLife: .090, wakeWidth: 1.50,
-    airTone: 98, airDuration: .105, airVolume: .18, airFilter: 380,
-    hitTone: 105, hitDuration: .14, hitFilter: 620, hitCrackTone: 174, cameraGain: 1.45, enemyStop: .030 },
-  { direction: [.12,.86,.48], impactLife: .19, flashLife: .050, coreScale: [.090,.075,.170],
-    dustSpread: .45, dustDrive: 2.7, wakeLife: .085, wakeWidth: 1.35,
-    airTone: 110, airDuration: .085, airVolume: .16, airFilter: 420,
-    hitTone: 118, hitDuration: .12, hitFilter: 720, hitCrackTone: 184, cameraGain: 1.30, enemyStop: .025 },
-  { direction: [.96,.08,.26], impactLife: .22, flashLife: .065, coreScale: [.135,.090,.155],
-    dustSpread: 1.05, dustDrive: 2.4, wakeLife: .105, wakeWidth: 1.65,
-    airTone: 90, airDuration: .14, airVolume: .21, airFilter: 360,
-    hitTone: 92, hitDuration: .16, hitFilter: 570, hitCrackTone: 168, cameraGain: 1.65, enemyStop: .036 },
-  { direction: [.02,-.96,.28], impactLife: .24, flashLife: .075, coreScale: [.140,.100,.160],
-    dustSpread: .90, dustDrive: 3.1, wakeLife: .115, wakeWidth: 1.80,
-    airTone: 76, airDuration: .16, airVolume: .24, airFilter: 310,
-    hitTone: 70, hitDuration: .19, hitFilter: 440, hitCrackTone: 138, cameraGain: 2.00, enemyStop: .050 },
+  { direction: [-.94,-.06,.34], impactLife: .18, flashLife: .035, coreScale: [.150,.110,.180],
+    dustSpread: 1.20, dustDrive: 3.6, wakeLife: .105, wakeWidth: 4.20,
+    airTone: 98, airDuration: .090, airVolume: .24, airFilter: 380,
+    hitTone: 105, hitDuration: .11, hitFilter: 620, hitCrackTone: 174, cameraGain: 1.80, enemyStop: .012 },
+  { direction: [-.32,-.84,.44], impactLife: .19, flashLife: .040, coreScale: [.155,.120,.180],
+    dustSpread: 1.60, dustDrive: 4.5, wakeLife: .100, wakeWidth: 4.60,
+    airTone: 110, airDuration: .085, airVolume: .23, airFilter: 420,
+    hitTone: 118, hitDuration: .12, hitFilter: 720, hitCrackTone: 184, cameraGain: 2.00, enemyStop: .014 },
+  { direction: [.96,.02,.26], impactLife: .22, flashLife: .045, coreScale: [.170,.120,.180],
+    dustSpread: 1.50, dustDrive: 4.0, wakeLife: .115, wakeWidth: 4.80,
+    airTone: 90, airDuration: .110, airVolume: .28, airFilter: 360,
+    hitTone: 92, hitDuration: .13, hitFilter: 570, hitCrackTone: 168, cameraGain: 2.15, enemyStop: .018 },
+  { direction: [.02,-.96,.28], impactLife: .24, flashLife: .055, coreScale: [.170,.120,.200],
+    dustSpread: 2.00, dustDrive: 5.5, wakeLife: .120, wakeWidth: 5.20,
+    airTone: 76, airDuration: .130, airVolume: .32, airFilter: 310,
+    hitTone: 70, hitDuration: .16, hitFilter: 440, hitCrackTone: 138, cameraGain: 2.70, enemyStop: .028 },
 ].map(profile => Object.freeze({ ...profile,
   direction: Object.freeze(profile.direction), coreScale: Object.freeze(profile.coreScale) }));
 
@@ -39,5 +39,34 @@ export function hammerWakeActive(action, phase, headSpeed) {
 }
 
 export function hammerContactAccent(hitstop, alreadyAccented = false) {
-  return alreadyAccented || !Number.isFinite(hitstop) ? 0 : Math.max(0, Math.min(.065, hitstop));
+  return alreadyAccented || !Number.isFinite(hitstop) ? 0 : Math.max(0, Math.min(.028, hitstop));
+}
+
+export function getHammerArea(combo, origin, angle=0) {
+  const index=((Math.trunc(combo)%4)+4)%4;
+  const ground=index===1||index===3;
+  return { kind:ground?'radial':'fan', origin:{x:origin?.x,y:origin?.y??0,z:origin?.z}, angle,
+    radius:[2.65,2.20,3.00,3.20][index], halfAngle:ground?Math.PI:[1.70,0,1.92,0][index],
+    minY:ground?(origin?.y??0)-.05:.10, maxY:(ground?(origin?.y??0):0)+[2.25,1.60,2.25,2.00][index] };
+}
+
+export function hammerAreaContains(area, target, enemyRadius=0) {
+  if(!area||!target||!['fan','radial'].includes(area.kind)
+    ||![area.origin?.x,area.origin?.y,area.origin?.z,area.radius,area.angle,area.halfAngle,area.minY,area.maxY,
+      target.x,target.z,enemyRadius].every(Number.isFinite)
+    ||area.radius<0||enemyRadius<0||area.halfAngle<0||area.maxY<area.minY)return false;
+  const minY=target.minY??.18,maxY=target.maxY??1.9;
+  if(![minY,maxY].every(Number.isFinite)||maxY<minY||maxY<area.minY||minY>area.maxY)return false;
+  const x=target.x-area.origin.x,z=target.z-area.origin.z,distance=Math.hypot(x,z);
+  if(distance>area.radius+enemyRadius)return false;
+  if(area.kind==='radial'||distance<1e-8)return true;
+  const along=(x*Math.sin(area.angle)+z*Math.cos(area.angle))/distance;
+  const margin=Math.asin(Math.min(1,enemyRadius/distance));
+  return along>=Math.cos(Math.min(Math.PI,area.halfAngle+margin));
+}
+
+export function hammerPulseCrossed(action, phase, previousPhase) {
+  if(!Number.isFinite(action?.contact)||!Number.isFinite(phase))return false;
+  return phase>=action.contact&&(!Number.isFinite(previousPhase)||previousPhase<action.contact)
+    &&(!Number.isFinite(previousPhase)||phase>previousPhase);
 }

@@ -170,6 +170,7 @@ export function createAudio() {
       const feedback=getHammerFeedback(combo),heavy=((combo%4)+4)%4===3;
       tone(feedback.hitTone*pitch,27,feedback.hitDuration,.34+mass*.070,'sine',0,.001);
       noise(heavy?.095:.060,.30+mass*.045,feedback.hitFilter,85,'lowpass',0,.001);
+      noise(.022,.13+mass*.025,2400,800,'highpass',0,.001);
       tone(feedback.hitCrackTone*pitch,45,heavy?.075:.045,.065,'triangle',.001,.0015);
       return;
     }
@@ -193,13 +194,15 @@ export function createAudio() {
     tone(170, 55, 0.15, 0.09, 'sine', 0.12);
   }
 
-  // Called only after the world confirms an actual hammer-head floor contact.
+  // Both descending hammer beats have a confirmed physical paving contact.
   function weaponGround(id, combo = 3) {
-    if(id!=='great-hammer'||combo!==3||!ready()||context.currentTime-lastHammerGround<.12)return;
+    if(id!=='great-hammer'||(combo!==1&&combo!==3)||!ready()||context.currentTime-lastHammerGround<.12)return;
     lastHammerGround=context.currentTime;
-    tone(64,25,.24,.30,'sine',0,.0015);
-    noise(.060,.23,640,120,'lowpass',0,.0015);
-    noise(.165,.19,310,65,'lowpass',.018,.006);
+    const heavy=combo===3;
+    tone(heavy?64:82,25,heavy?.20:.14,heavy?.37:.28,'sine',0,.001);
+    noise(.026,heavy?.23:.18,2800,750,'highpass',0,.001);
+    noise(.060,heavy?.29:.22,640,120,'lowpass',0,.0015);
+    noise(heavy?.16:.11,heavy?.24:.16,310,65,'lowpass',.012,.004);
   }
 
   function footstep(weight = 1) {

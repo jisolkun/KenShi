@@ -32,6 +32,12 @@ export function createWorld(scene) {
   }
   const box = (m, x, y, z, sx, sy, sz, p) => mesh(boxGeo, m, x, y, z, sx, sy, sz, p);
   const cyl = (m, x, y, z, r, h, p) => mesh(cylinderGeo, m, x, y, z, r, h, r, p);
+  function keepBreakableNodes(nodes) {
+    // Preserve each prop's live objects so combat can deform it and restore it.
+    // Mark descendants too: their meshes must remain outside static batches.
+    for (const node of nodes) node.traverse(child => { child.userData.breakableStone = true; });
+    return nodes;
+  }
   function segment(a, b, radius, material, parent = root) {
     const d = new THREE.Vector3().subVectors(b, a);
     const m = mesh(cylinderGeo, material, ...a.clone().add(b).multiplyScalar(.5).toArray(), radius, d.length(), radius, parent);
@@ -115,9 +121,9 @@ export function createWorld(scene) {
     r.rotation.set(rand() * 2, rand() * 6, rand() * .6);
     if (collidable) {
       obstacles.push({ x, z, radius: size * .8 });
-      // A conservative inner volume of the visible faceted stone. Props react
-      // without moving or changing their existing movement collision circles.
-      combatProps.push({ id: `stone-${combatProps.length}`, type: 'stone', volumes: [{ x, z,
+      // A conservative inner volume of the visible faceted stone, paired with
+      // its original mesh for persistent crushing and round-reset restoration.
+      combatProps.push({ id: `stone-${combatProps.length}`, type: 'stone', nodes: keepBreakableNodes([r]), volumes: [{ x, z,
         radius: Math.min(r.scale.x, r.scale.z) * .72,
         minY: Math.max(.02, r.position.y - r.scale.y * .72), maxY: r.position.y + r.scale.y * .72 }] });
     }
@@ -230,7 +236,7 @@ export function createWorld(scene) {
     const tail=mesh(new THREE.TorusGeometry(.23,.09,4,7,Math.PI*1.55),stone,.37,1.02,-.42,1,1,1,p);tail.rotation.y=Math.PI/2;
     mesh(sphereGeo,ochreStone,side*.38,.64,.64,.2,.2,.2,p);
     obstacles.push({x,z,radius:.93});
-    combatProps.push({ id: `lion-${side}`, type: 'stone-lion', volumes: [
+    combatProps.push({ id: `lion-${side}`, type: 'stone-lion', nodes: keepBreakableNodes([p]), volumes: [
       { x, z, radius: .65, minY: .02, maxY: .56 },
       { x, z: z + .13, radius: .32, minY: .65, maxY: 1.4 },
       { x, z: z - .04, radius: .36, minY: 1.43, maxY: 1.87 },
@@ -276,12 +282,13 @@ export function createWorld(scene) {
   bambooLeaves.forEach((l,i)=>{temp.position.set(l.x,l.y,l.z);temp.rotation.set(.15,l.angle,range(-.3,.3));temp.scale.set(1,1,1);temp.updateMatrix();bambooLeafMesh.setMatrixAt(i,temp.matrix);});bambooLeafMesh.castShadow=true;root.add(bambooLeafMesh);
 
   function stoneLamp(x,z) {
+    const firstNode = root.children.length;
     cyl(darkStone,x,.2,z,.6,.4);cyl(paleStone,x,.68,z,.21,.66);box(paleStone,x,1.05,z,.73,.17,.73);
     const light=mat(0xf3c17b,{emissive:0xe8a354,emissiveIntensity:1.1});box(light,x,1.39,z,.44,.57,.44);
     for(const sx of [-1,1])for(const sz of [-1,1])box(darkStone,x+sx*.25,1.39,z+sz*.25,.07,.65,.07);
     const cap=mesh(new THREE.ConeGeometry(.66,.44,4),roofMat,x,1.89,z);cap.rotation.y=Math.PI/4;cyl(gold,x,2.16,z,.06,.2);
     obstacles.push({x,z,radius:.57});
-    combatProps.push({ id: `lamp-${x}-${z}`, type: 'stone-lamp', volumes: [
+    combatProps.push({ id: `lamp-${x}-${z}`, type: 'stone-lamp', nodes: keepBreakableNodes(root.children.slice(firstNode)), volumes: [
       { x, z, radius: .55, minY: .02, maxY: .38 },
       { x, z, radius: .19, minY: .35, maxY: 1.01 },
       { x, z, radius: .35, minY: .965, maxY: 1.135 },
@@ -327,11 +334,12 @@ export function createWorld(scene) {
   dustGeo.setAttribute('position',new THREE.BufferAttribute(dustPositions,3));
   const dustPoints=new THREE.Points(dustGeo,new THREE.PointsMaterial({color:0xf5dbad,size:.042,transparent:true,opacity:.42,depthWrite:false,sizeAttenuation:true}));root.add(dustPoints);
   // Batch decorative construction by material. Thousands of hand-built roof, wall and
-  // bamboo pieces cost only a few dozen draws; animated cloth and lights stay separate.
+  // bamboo pieces cost only a few dozen draws; animated cloth, lights and the
+  // small set of breakable stone props keep their own objects.
   root.updateMatrixWorld(true);
   const batches=new Map();
   root.traverse(o=>{
-    if(!o.isMesh||o.isInstancedMesh||o.userData.animated)return;
+    if(!o.isMesh||o.isInstancedMesh||o.userData.animated||o.userData.breakableStone)return;
     const key=`${o.material.uuid}:${o.castShadow}:${o.receiveShadow}`;
     if(!batches.has(key))batches.set(key,{material:o.material,cast:o.castShadow,receive:o.receiveShadow,objects:[],geometries:[]});
     const batch=batches.get(key);

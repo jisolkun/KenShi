@@ -29,9 +29,9 @@ test('the measured hammer direction drives horizontal knockback and vertical hit
 });
 
 test('one hammer stroke applies a bounded contact pause even when its head meets a crowd', () => {
-  assert.equal(hammerContactAccent(.04), .04);
+  assert.equal(hammerContactAccent(.018), .018);
   const first = hammerContactAccent(.4);
-  assert.ok(first > 0 && first <= .07, 'the pause has a perceptible but bounded duration');
+  assert.ok(first > 0 && first <= .028, 'a fast crowd-clearing hammer cannot halt its whole stroke for a long contact pause');
   assert.equal(hammerContactAccent(.4, true), 0, 'a second victim cannot stack the same stroke pause');
   for (const duration of [-1, NaN, Infinity]) assert.equal(hammerContactAccent(duration), 0);
 });
@@ -44,7 +44,8 @@ test('hammer contacts have distinct compact accents and the terminal smash carri
   assert.ok(profiles[1].impactLife < profiles[2].impactLife,
     'the compact upward follow-up clears sooner than the wide body sweep');
   for (const profile of profiles) {
-    assert.ok(Math.hypot(...profile.coreScale) * 2 < .6, 'contact cores remain small compared with the weapon');
+    assert.ok(Math.hypot(...profile.coreScale) * 2 <= .8, 'the contact flash stays localized inside the much wider crowd-clearing area');
+    assert.ok(profile.enemyStop > 0 && profile.enemyStop <= .028, 'each target keeps a short impact accent');
     assert.ok(profile.wakeLife <= .12, 'the hammer wake clears quickly after the measured head moves');
     assert.ok(profile.impactLife <= .25, 'contacts cannot become a persistent broad damage-looking cloud');
   }

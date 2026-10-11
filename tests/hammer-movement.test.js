@@ -21,23 +21,26 @@ function travel(combo, rate, { frozen = false, obstacles = [], targets = [] } = 
   return { position, path };
 }
 
-test('hammer chain uses a diagonal entry, compact uppercut, wide pivot and planted final stomp', () => {
+test('hammer chain uses a broad entry sweep, short ground step, wide pivot and planted final stomp', () => {
   const positions = [0, 1, 2, 3].map(combo => travel(combo, 120).position);
   for (const position of positions) assert.ok(position.z > .05);
   assert.ok(positions[0].x > .1 && positions[2].x < -.1,
     'the diagonal entry and broad return sweep step to opposing sides');
-  close(positions[1].x, 0);
+  assert.ok(Math.abs(positions[1].x)<Math.abs(positions[0].x),
+    'the diagonal ground step is shorter sideways than the broad opening sweep');
   close(positions[3].x, 0);
   assert.ok(positions[1].z < positions[0].z && positions[1].z < positions[2].z,
-    'the rising follow-up stays compact instead of repeating the broad sweep step');
+    'the quick ground follow-up stays compact instead of repeating the broad sweep step');
   assert.ok(positions[2].z > positions[0].z && positions[2].z > positions[3].z,
     'the body pivot has a visibly wider travel budget than the planted finisher');
+  const advance=positions.reduce((total,position)=>total+position.z,0);
+  assert.ok(advance>=1.4&&advance<=1.7,'the fast four-stroke chain visibly advances into the crowd');
 });
 
-test('each hammer root step settles before its real head can damage an enemy', () => {
+test('each hammer root step settles before its area pulse or ground impact', () => {
   for (let combo = 0; combo < 4; combo++) {
     const action = getReviewedAttack('great-hammer', combo);
-    const start = Math.min(...action.contacts.map(contact => contact.start));
+    const start = action.contact;
     const preparation = hammerStepDelta(combo, 0, start);
     assert.ok(preparation.forward > .05, 'there is a visible step into the loaded attack');
     close(preparation.forward, HAMMER_STEPS[combo].forward);

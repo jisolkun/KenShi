@@ -7,12 +7,12 @@ export const GREAT_DAO_STEPS = [
   { forward: .72, lateral: -.10 },
 ];
 export const HAMMER_STEPS = [
-  { forward: .32, lateral: .16 },
-  { forward: .12, lateral: 0 },
-  { forward: .40, lateral: -.18 },
-  { forward: .26, lateral: 0 },
+  { forward: .46, lateral: .20 },
+  { forward: .28, lateral: -.12 },
+  { forward: .54, lateral: -.24 },
+  { forward: .30, lateral: 0 },
 ];
-const hammerPlants = [[.04,.36],[.02,.22],[.04,.31],[.10,.45]];
+const hammerPlants = [[.01,.25],[.01,.27],[.01,.26],[.01,.32]];
 const clamp = (value, low = 0, high = 1) => Math.max(low, Math.min(high, value));
 const smooth = value => { const t = clamp(value); return t * t * (3 - 2 * t); };
 

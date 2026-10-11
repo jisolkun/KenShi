@@ -245,20 +245,20 @@ export function createEffects(scene, camera) {
     temp.crossVectors(direction,side).normalize();
     cameraRight.set(1,0,0).applyQuaternion(camera.quaternion);cameraUp.set(0,1,0).applyQuaternion(camera.quaternion);
     const angle=Math.atan2(direction.dot(cameraUp),direction.dot(cameraRight));
-    emit(flashes,position,zero,0xffedc6,feedback.flashLife,.17+weight*.040,.10+weight*.025,1,0,angle,true);
+    emit(flashes,position,zero,0xffedc6,feedback.flashLife,.22+weight*.050,.15+weight*.035,1,0,angle,true);
     for(let i=0;i<(critical?8:5);i++){
       velocity.copy(direction).multiplyScalar(feedback.dustDrive*(.5+Math.random()*.4))
         .addScaledVector(side,(Math.random()-.5)*feedback.dustSpread*2)
         .addScaledVector(temp,(Math.random()-.5)*feedback.dustSpread);
       emit(slivers,position,velocity,i%2?0xbda084:0xe6c7a0,.16+Math.random()*.08,
-        .075+Math.random()*.06,.055+Math.random()*.035,1,3,0,true);
+        .10+Math.random()*.09,.070+Math.random()*.045,1,3,0,true);
     }
     for(let i=0;i<(critical?6:3);i++){
       velocity.copy(direction).multiplyScalar(feedback.dustDrive*.45)
         .addScaledVector(side,(Math.random()-.5)*feedback.dustSpread*1.6);
       velocity.y+=.25+Math.random()*.55;
       emit(chips,position,velocity,i%2?0x88765d:0xc7ab7f,.22+Math.random()*.08,
-        .035,.025,.040,7,Math.random()*6.28,true);
+        .055,.040,.060,7,Math.random()*6.28,true);
     }
   }
   function death(position,fallDirection,strength=1) {

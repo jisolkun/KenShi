@@ -363,7 +363,7 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
     }
     rig.bind.forEach(({node},i)=>{motion.from[i].p.copy(node.position);motion.from[i].q.copy(node.quaternion);motion.from[i].s.copy(node.scale);});
     motion.elapsed=0;
-    motion.duration=state==='hurt'?.04:state==='roll'?.06:rig.weaponId==='great-hammer'?(state==='attack'?.18:.22):.08;
+    motion.duration=state==='hurt'?.04:state==='roll'?.06:rig.weaponId==='great-hammer'?(state==='attack'?(motion.key?.startsWith('attack:') ? .08 : combo===2 ? .20 : .16):.18):.08;
     motion.footworkBlend=footworkChanged&&key===motion.key&&!restarted;
     if(motion.footworkBlend)motion.duration=.10;
   } else motion.elapsed+=delta;

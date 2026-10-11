@@ -10,7 +10,8 @@ import { createWeaponEffects } from "./weaponEffects.js";
 import { weaponStrikeContains, bladeSweepContains, clipBladeSweep, clipHammerHeadSweep, hammerHeadSweepContains } from "./weaponCombat.js";
 import { getHeavyWeaponSteps, heavyWeaponStepDelta, greatDaoTargetGap, resolveGreatDaoStep } from "./greatDaoMovement.js";
 import { getReviewedAttack, sampleReviewedAttack } from "./choreography/index.js";
-import { getHammerFeedback, hammerReactionDirection, hammerWakeActive, hammerContactAccent } from "./hammerFeedback.js";
+import { getHammerFeedback, hammerReactionDirection, hammerWakeActive, hammerContactAccent,
+  getHammerArea, hammerAreaContains, hammerPulseCrossed } from "./hammerFeedback.js";
 import { isCombatTarget, attackDistances, chooseAttackTarget, attackCanTrack,
   attackRecoveryPhase, attackChainPhase, segmentClear, planObstaclePath, projectWalkablePoint } from "./heroAI.js";
 import "./style.css";
@@ -1179,6 +1180,13 @@ function reviewedHammerStrike(phase, frames, action, preview=false) {
     hero.strokeContacts.add(0);
     safeAudio('weaponSlash',currentWeapon.id,hero.combo,'smash');
   }
+  const fanPulse=(hero.combo===0||hero.combo===2)&&hammerPulseCrossed(action,phase,priorPhase)
+    &&!hero.strokeContacts.has('area');
+  const impactArea=fanPulse?getHammerArea(hero.combo,hero.pos,hero.angle):null;
+  if(fanPulse) {
+    hero.strokeContacts.add('area');
+    weaponFx.hammerFan(impactArea,hero.combo);
+  }
   const worldSweep=clipHammerHeadSweep(frame.headCenter,prior?.headCenter,phase,priorPhase,[action.swing[0],action.brake]);
   if(worldSweep) {
     const at=p=>{
@@ -1191,13 +1199,16 @@ function reviewedHammerStrike(phase, frames, action, preview=false) {
     const response=world.feedbackStrike?.({weaponId:currentWeapon.id,strikeVolume:'hammer-head',
       current:at(Math.min(phase,action.brake)),
       previous:worldSweep.previous?at(Math.max(priorPhase,action.swing[0])):null,
-      combo:hero.combo,strikeId:hero.trailSeries,origin:hero.pos,headRadius:action.headRadius,groundY:.049});
+      combo:hero.combo,strikeId:hero.trailSeries,origin:hero.pos,angle:hero.angle,impactArea,
+      headRadius:action.headRadius,groundY:.049});
     if(response?.groundContact) {
       safeAudio('weaponGround',currentWeapon.id,hero.combo);
       const travel=prior?frame.headCenter.clone().sub(prior.headCenter):null;
       const radial=response.groundContact.clone().sub(hero.pos);
       const responseDirection=hammerReactionDirection(travel,radial);
-      kickCamera(new THREE.Vector3(responseDirection.x,0,responseDirection.z),.11);
+      kickCamera(new THREE.Vector3(responseDirection.x,0,responseDirection.z),hero.combo===3?.18:.12);
+      if(!preview)applyHammerArea(getHammerArea(hero.combo,response.groundContact,hero.angle),
+        new THREE.Vector3(0,-1,0));
     }
   }
   if(preview)return;
@@ -1224,9 +1235,32 @@ function reviewedHammerStrike(phase, frames, action, preview=false) {
         contactPoint.copy(sweep.previous).addScaledVector(travel,t);
       }
       hurtEnemy(enemy,Math.round(move.damage/action.contacts.length*(critical?1.25:1)),hero.pos,
-        move.knockback*3.5,critical,true,direction,contactPoint);
+        move.knockback*4.2,critical,true,direction,contactPoint);
     }
   });
+  if(impactArea) {
+    hero.hitDone=true;
+    const velocity=prior?frame.headCenter.clone().sub(prior.headCenter).normalize():null;
+    applyHammerArea(impactArea,velocity);
+  }
+}
+function applyHammerArea(area,headDirection) {
+  const move=currentWeapon.moves[hero.combo],critical=hero.combo===3;
+  for(const enemy of enemies) {
+    const key=`0:${enemy.id}`;
+    if(!isCombatTarget(enemy,enemies)||hero.attackHits.has(key))continue;
+    const target={x:enemy.pos.x,z:enemy.pos.z,minY:.18,maxY:enemy.type==='boss'?3.2:enemy.type==='brute'?2.4:1.85};
+    if(!hammerAreaContains(area,target,enemy.radius))continue;
+    hero.attackHits.add(key);
+    const outward=new THREE.Vector3(enemy.pos.x-area.origin.x,0,enemy.pos.z-area.origin.z).normalize();
+    if(outward.lengthSq()<.001)outward.set(Math.sin(hero.angle),0,Math.cos(hero.angle));
+    const direction=area.kind==='radial'?outward
+      :outward.multiplyScalar(.65).addScaledVector(headDirection??outward,.35).normalize();
+    direction.y=area.kind==='radial'?-.85:headDirection?.y??0;
+    const contactPoint=enemy.pos.clone().add(new THREE.Vector3(0,area.kind==='radial'?.60:1.05,0));
+    hurtEnemy(enemy,Math.round(move.damage*(critical?1.25:1)),hero.pos,move.knockback*4.5,
+      critical,true,direction,contactPoint);
+  }
 }
 function sampleHeroTrails(frames,tips,phase,dt,active) {
   const action=hero.state==='attack'?getReviewedAttack(currentWeapon.id,hero.combo):null;
@@ -1242,9 +1276,9 @@ function sampleHeroTrails(frames,tips,phase,dt,active) {
       const feedback=getHammerFeedback(hero.combo);
       trail.widthFactor=feedback.wakeWidth;
       trail.life=feedback.wakeLife;
-      trail.mesh.material.opacity=.70;
-      trail.color.setHex(0xc99757);
-      trail.coreColor.setHex(0xffe5b1);
+      trail.mesh.material.opacity=.90;
+      trail.color.setHex(0xb17f3e);
+      trail.coreColor.setHex(0xffdaa0);
     }else if(currentWeapon.id==='great-dao'){
       trail.mesh.material.opacity=.8;
       trail.widthFactor=1.45+Math.min(hero.combo,3)*.10;

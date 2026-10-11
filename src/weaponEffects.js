@@ -63,6 +63,59 @@ export function createWeaponEffects(scene, baseEffects) {
     if(!geometries.has('great-hammer:core'))geometries.set('great-hammer:core',new THREE.IcosahedronGeometry(1,0));
     return geometries.get('great-hammer:core');
   }
+  function hammerFanGeometry(key,halfAngle) {
+    const geometryKey=`${key}:pressure`;
+    if(!geometries.has(geometryKey)) {
+      const positions=[];
+      for(let i=0;i<28;i++) {
+        const a=-halfAngle+i/28*halfAngle*2,b=-halfAngle+(i+1)/28*halfAngle*2;
+        const inner=i%3===0?.72:.77;
+        const vertices=[[Math.sin(a)*inner,.08,Math.cos(a)*inner],
+          [Math.sin(a),.12,Math.cos(a)],[Math.sin(b)*inner,.08,Math.cos(b)*inner],
+          [Math.sin(b),.12,Math.cos(b)]];
+        for(const n of [0,1,2,2,1,3])positions.push(...vertices[n]);
+      }
+      const geometry=new THREE.BufferGeometry();
+      geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
+      geometries.set(geometryKey,geometry);
+    }
+    return geometries.get(geometryKey);
+  }
+  function updateHammerFan(o,phase) {
+    o.pressure.material.opacity=.46*Math.pow(1-phase,1.4);
+    o.dust.material.opacity=.72*(1-phase);
+    for(let i=0;i<o.dust.count;i++) {
+      const angle=-o.halfAngle*.93+i/(o.dust.count-1)*o.halfAngle*1.86;
+      const radius=.74+phase*.19;
+      o.dummy.position.set(Math.sin(angle)*radius,.12+Math.sin(phase*Math.PI)*.38,Math.cos(angle)*radius);
+      o.dummy.rotation.set(i*.7+phase*2,i*.3,phase*3);
+      const size=(.025+i%3*.009)*(1-phase*.70);
+      o.dummy.scale.set(size,size*.8,size*1.15);o.dummy.updateMatrix();
+      o.dust.setMatrixAt(i,o.dummy.matrix);
+    }
+    o.dust.instanceMatrix.needsUpdate=true;
+  }
+  function hammerFan(area,combo=0) {
+    if(destroyed||area?.kind!=='fan'||![area.radius,area.halfAngle,area.angle,
+      area.origin?.x,area.origin?.y,area.origin?.z].every(Number.isFinite)
+      ||area.radius<=0||area.halfAngle<=0||area.halfAngle>Math.PI)return;
+    const style=((combo%4)+4)%4,key=`great-hammer:fan:${style}:${area.halfAngle.toFixed(4)}`;
+    let o=spare.get(key)?.pop();
+    if(!o) {
+      const group=new THREE.Group(),pressure=new THREE.Mesh(hammerFanGeometry(key,area.halfAngle),material(0xb18c55,.46));
+      pressure.name='hammer-thick-pressure-fan';
+      const dust=new THREE.InstancedMesh(debrisGeometry(),material(0xc4ad87,.72),12);
+      dust.name='hammer-pressure-stones';dust.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      group.add(pressure,dust);group.children.forEach(mesh=>mesh.frustumCulled=false);
+      o={key,group,pressure,dust,dummy:new THREE.Object3D(),hammerFan:true};all.add(o);
+    }
+    if(live.length>=MAX_LIVE)release(live.shift());
+    o.age=0;o.unseenAge=0;o.awaitingPresentation=true;o.life=.16;o.halfAngle=area.halfAngle;
+    o.group.position.set(area.origin.x,area.origin.y,area.origin.z);
+    o.group.rotation.set(0,area.angle,0);o.group.scale.set(area.radius,1,area.radius);
+    o.group.userData.hammerArea={...area,origin:{...area.origin}};
+    o.group.visible=true;updateHammerFan(o,0);scene.add(o.group);live.push(o);
+  }
   function updateHammerImpact(o,phase) {
     const fade=(1-phase)*(1-phase),dummy=o.dummy,feedback=o.feedback;
     for(let i=0;i<o.dust.count;i++){
@@ -73,10 +126,10 @@ export function createWeaponEffects(scene, baseEffects) {
       dummy.position.set(Math.sin(angle)*spread,Math.cos(angle)*spread*.65,
         .025+o.age*feedback.dustDrive*(.8+i%2*.25));
       dummy.rotation.set(i*.8,o.age*3,i*.4);
-      const size=(.037+i%3*.011)*(1+phase*.45)*Math.max(.08,1-phase);
+      const size=(.050+i%3*.018)*(1+phase*.60)*Math.max(.08,1-phase);
       dummy.scale.set(size,size*.62,size*(o.style===1?1.8:1.3));dummy.updateMatrix();o.dust.setMatrixAt(i,dummy.matrix);
     }
-    o.dust.instanceMatrix.needsUpdate=true;o.dust.material.opacity=.57*fade;
+    o.dust.instanceMatrix.needsUpdate=true;o.dust.material.opacity=.70*fade;
     const coreFade=Math.max(0,1-o.age/feedback.flashLife);
     o.core.material.opacity=.94*coreFade*coreFade;
     o.core.scale.fromArray(feedback.coreScale).multiplyScalar(1+phase*.16);
@@ -200,6 +253,7 @@ export function createWeaponEffects(scene, baseEffects) {
     for(let i=live.length-1;i>=0;i--){const o=live[i];
       if(o.awaitingPresentation){o.unseenAge+=dt;if(o.unseenAge>=FIRST_PRESENTATION_TIMEOUT){release(o);live.splice(i,1);}continue;}
       o.age+=dt;const p=Math.min(1,o.age/o.life),fade=(1-p)*(1-p);
+      if(o.hammerFan){updateHammerFan(o,p);if(p>=1){release(o);live.splice(i,1);}continue;}
       if(o.hammerImpact){updateHammerImpact(o,p);if(p>=1){release(o);live.splice(i,1);}continue;}
       if(!o.greatImpact)o.group.rotation.y=o.angle+o.spin*p;const size=o.scale*(1+(o.greatImpact?.35:o.mode==='impact'?.55:.06)*p);o.group.scale.set(size*o.mirror,size,size);
       o.group.children[0].material.opacity=(o.greatImpact?.56:o.mode==='impact'?.46:.24)*fade;o.group.children[1].material.opacity=(o.greatImpact?.80:.6)*fade;
@@ -215,10 +269,10 @@ export function createWeaponEffects(scene, baseEffects) {
   }
   function getState() {
     let pooled=0;for(const pool of spare.values())pooled+=pool.length;
-    return {active:live.length,activeGreatImpacts:live.filter(o=>o.greatImpact).length,activeHammerImpacts:live.filter(o=>o.hammerImpact).length,awaitingPresentation:live.filter(o=>o.awaitingPresentation).length,pooled,destroyed,
+    return {active:live.length,activeGreatImpacts:live.filter(o=>o.greatImpact).length,activeHammerImpacts:live.filter(o=>o.hammerImpact).length,activeHammerFans:live.filter(o=>o.hammerFan).length,awaitingPresentation:live.filter(o=>o.awaitingPresentation).length,pooled,destroyed,
       lastImpact:lastImpact?{...lastImpact,position:[...lastImpact.position],cutDirection:[...lastImpact.cutDirection]}:null};
   }
   function clear(){while(live.length)release(live.pop());lastImpact=null;}
   function destroy(){if(destroyed)return;clear();destroyed=true;for(const o of all)disposeInstance(o);for(const g of geometries.values())g.dispose();all.clear();spare.clear();geometries.clear();}
-  return {attack,impact,presented,getState,update,clear,destroy};
+  return {attack,impact,hammerFan,presented,getState,update,clear,destroy};
 }

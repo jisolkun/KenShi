@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { getHammerArea, hammerAreaContains } from './hammerFeedback.js';
 
 const clamp = (x, low, high) => Math.max(low, Math.min(high, x));
 const point = (a, b, t) => ({ x: a.x + (b.x - a.x) * t,
@@ -55,8 +56,8 @@ export function lowestBladePoint(previous, current) {
   return points.reduce((lowest, candidate) => candidate.y < lowest.y ? candidate : lowest);
 }
 
-// Only the physical hammer head sweeps this volume. The handle and an
-// advertised attack radius cannot create stone fragments.
+// This primitive only sweeps the physical head. Deliberate fan/floor impact
+// waves use their own bounded area test below; the long handle never damages.
 export function sweptHammerPropContact(previous, current, volume, radius = .27) {
   const center=current?.headCenter;
   if(!center||![center.x,center.y,center.z,radius].every(Number.isFinite)||radius<0)return null;
@@ -85,6 +86,10 @@ export function createWorldCombat(parent, { props = [], random = Math.random } =
   const group = new THREE.Group(); group.name = 'blade-world-reactions'; parent.add(group);
   const dummy = new THREE.Object3D(), tint = new THREE.Color();
   const records = new Map();
+  const propDamage=new Map(props.map(prop=>[prop.id,{id:prop.id,hits:0,broken:false,
+    volumes:prop.volumes.map(volume=>({volume,original:{...volume}})),
+    nodes:(prop.nodes??[]).map(node=>({node,position:node.position.clone(),quaternion:node.quaternion.clone(),
+      scale:node.scale.clone(),visible:node.visible}))}]));
   const stats = { dustSweeps: 0, propHits: 0, groundHits: 0 };
   let lastDust = null, lastContact = null, lastGround = null;
   const dustGeometry = new THREE.IcosahedronGeometry(1, 0);
@@ -183,7 +188,7 @@ export function createWorldCombat(parent, { props = [], random = Math.random } =
       if(mark.hammer){
         const age=mark.awaiting?0:mark.age,phase=clamp(age/.20,0,1);
         mark.ring.visible=mark.active&&phase<1;
-        mark.ring.scale.setScalar(.32+phase*.95);mark.ring.material.opacity=.30*(1-phase)*(1-phase);
+        mark.ring.scale.setScalar(.14+phase*.70);mark.ring.material.opacity=.55*(1-phase)*(1-phase);
       }else mark.ring.visible=false;
     }
   }
@@ -247,7 +252,37 @@ export function createWorldCombat(parent, { props = [], random = Math.random } =
     }
     refresh(); // A new event is visible even before the next simulation update.
   }
-  function reactToHammer({previous=null,current,combo=0,strikeId=0,headRadius=.27,groundY=.049}={}){
+  function damageStone(prop) {
+    const state=propDamage.get(prop.id);
+    if(!state)return;
+    state.hits=Math.min(2,state.hits+1);state.broken=state.hits>=2;
+    for(const {volume,original} of state.volumes) {
+      Object.assign(volume,original);
+      if(state.broken) {
+        volume.minY=.02;
+        volume.maxY=Math.max(.12,Math.min(.42,.07+(original.maxY-original.minY)*.32));
+      }
+    }
+    for(const [index,snapshot] of state.nodes.entries()) {
+      const {node,position,quaternion,scale}=snapshot;
+      node.position.copy(position);node.quaternion.copy(quaternion);node.scale.copy(scale);
+      if(!state.broken) {
+        node.scale.y*=.93;
+        node.rotateZ((index%2?-1:1)*.065);
+      } else if(prop.type==='stone-lamp'&&position.y>.40) {
+        const angle=index*2.40;
+        node.position.set(position.x+Math.cos(angle)*.24,.13+index%3*.045,
+          position.z+Math.sin(angle)*.24);
+        node.scale.y*=.48;node.rotateX(.85+index%2*.50);node.rotateZ(angle);
+      } else {
+        node.scale.multiply(new THREE.Vector3(1.15,.32,1.10));
+        node.position.y=Math.min(position.y,.13);node.rotateZ(.18);
+      }
+      node.updateMatrixWorld(true);
+    }
+  }
+  function reactToHammer({previous=null,current,combo=0,strikeId=0,headRadius=.27,groundY=.049,
+    impactArea=null}={}){
     const result={groundContact:null,propContacts:[]},center=current?.headCenter;
     if(!center||![center.x,center.y,center.z,headRadius,groundY].every(Number.isFinite))return result;
     if(!records.has(strikeId)){
@@ -257,42 +292,59 @@ export function createWorldCombat(parent, { props = [], random = Math.random } =
     const record=records.get(strikeId),travel=previous?.headCenter
       ?new THREE.Vector3().subVectors(center,previous.headCenter):new THREE.Vector3(0,0,1);
     if(travel.lengthSq()<1e-6)travel.set(0,0,1);travel.normalize();
+    const strikeProp=(prop,contact)=>{
+      if(record.props.has(prop.id))return;
+      record.props.add(prop.id);stats.propHits++;lastContact={prop:prop.id,type:prop.type,...contact};
+      result.propContacts.push({...lastContact});
+      damageStone(prop);
+      for(let i=0;i<14;i++){
+        const angle=i/14*Math.PI*2;
+        velocity.set(Math.sin(angle)*(1.5+random()*2.8),1.0+random()*2.2,Math.cos(angle)*(1.5+random()*2.8));
+        emit(chips,contact,velocity,i%2?0x78867b:0xb5b3a1,.42+random()*.20,.075+random()*.085,9);
+        if(i<5)emit(sparks,contact,velocity,0xffda93,.055+random()*.06,.09+random()*.10,2);
+      }
+    };
+    const strikeArea=area=>{
+      for(const prop of props) {
+        if(record.props.has(prop.id))continue;
+        const volume=prop.volumes.find(v=>hammerAreaContains(area,
+          {x:v.x,z:v.z,minY:v.minY,maxY:v.maxY},v.radius));
+        if(volume)strikeProp(prop,{x:volume.x,y:Math.max(.14,Math.min(volume.maxY,center.y)),z:volume.z});
+      }
+    };
     for(const prop of props){
       if(record.props.has(prop.id))continue;
       let contact=null;
       for(const volume of prop.volumes){contact=sweptHammerPropContact(previous,current,volume,headRadius);if(contact)break;}
-      if(!contact)continue;
-      record.props.add(prop.id);stats.propHits++;lastContact={prop:prop.id,type:prop.type,...contact};
-      result.propContacts.push({...lastContact});
-      for(let i=0;i<10;i++){
-        const angle=i/10*Math.PI*2;
-        velocity.set(Math.sin(angle)*(.9+random()*1.4),.4+random()*1.1,Math.cos(angle)*(.9+random()*1.4));
-        emit(chips,contact,velocity,i%2?0x78867b:0xb5b3a1,.36+random()*.2,.035+random()*.045,7);
-      }
+      if(contact)strikeProp(prop,contact);
     }
+    if(impactArea&&!record.area){record.area=true;strikeArea(impactArea);}
     // The actual eight-corner head bottom controls contact; its spherical
     // damage envelope must never manufacture a floor hit during a high sweep.
     const candidates=[previous,current].filter(frame=>frame?.headCenter&&Number.isFinite(frame.headBottom));
     const low=candidates.reduce((best,frame)=>!best||frame.headBottom<best.headBottom?frame:best,null);
-    if(combo===3&&!record.ground&&low&&low.headBottom>=groundY-.035&&low.headBottom<=groundY+.025){
+    if((combo===1||combo===3)&&!record.ground&&low&&low.headBottom>=groundY-.035&&low.headBottom<=groundY+.025){
       record.ground=true;stats.groundHits++;
       const contact={x:low.headCenter.x,y:groundY+.018,z:low.headCenter.z};
       record.dust=true;stats.dustSweeps++;lastDust={...contact};
       result.groundContact=new THREE.Vector3(contact.x,contact.y,contact.z);lastGround={...contact};
-      for(let i=0;i<20;i++){
-        const angle=i/20*Math.PI*2+(random()-.5)*.15,speed=1.2+random()*1.7;
-        velocity.set(Math.sin(angle)*speed,.12+random()*.22,Math.cos(angle)*speed);
-        emit(dust,contact,velocity,0xb29a78,.28+random()*.10,.085+random()*.065,1.4);
+      const area=getHammerArea(combo,contact),heavy=combo===3;
+      strikeArea(area);
+      for(let i=0;i<(heavy?36:26);i++){
+        const angle=i/(heavy?36:26)*Math.PI*2+(random()-.5)*.15,speed=(heavy?4.4:3.5)+random()*2.0;
+        velocity.set(Math.sin(angle)*speed,.30+random()*.42,Math.cos(angle)*speed);
+        emit(dust,contact,velocity,0xb29a78,.32+random()*.12,.14+random()*.13,1.4);
       }
-      for(let i=0;i<8;i++){
-        const angle=i/8*Math.PI*2,speed=.9+random()*1.5;
-        velocity.set(Math.sin(angle)*speed,.25+random()*.55,Math.cos(angle)*speed);
-        emit(chips,contact,velocity,i%2?0x8b8170:0xb29c7b,.35+random()*.18,.035+random()*.03,5);
+      for(let i=0;i<(heavy?18:12);i++){
+        const angle=i/(heavy?18:12)*Math.PI*2,speed=1.4+random()*2.5;
+        velocity.set(Math.sin(angle)*speed,1.5+random()*2.2,Math.cos(angle)*speed);
+        emit(chips,contact,velocity,i%2?0x8b8170:0xb29c7b,.42+random()*.16,.075+random()*.10,9);
       }
       const mark=marks[markCursor++%marks.length];
       mark.hammer=true;mark.mesh.geometry=hammerCrackGeometry;mark.mesh.material.color.setHex(0x4d4030);
       mark.active=mark.awaiting=true;mark.age=mark.unseen=0;mark.life=1.5;
-      mark.mesh.position.set(contact.x,contact.y,contact.z);mark.mesh.rotation.set(-Math.PI/2,0,0);mark.mesh.scale.setScalar(1.12);
+      mark.mesh.position.set(contact.x,contact.y,contact.z);mark.mesh.rotation.set(-Math.PI/2,0,0);
+      mark.mesh.scale.setScalar(area.radius/.84);
     }
     refresh();return result;
   }
@@ -329,6 +381,15 @@ export function createWorldCombat(parent, { props = [], random = Math.random } =
     lastDust = lastContact = lastGround = null;
     for (const ppool of pools) for (const p of ppool.particles) p.active = false;
     for (const mark of marks) mark.active = false;
+    for(const state of propDamage.values()) {
+      state.hits=0;state.broken=false;
+      for(const {volume,original} of state.volumes)Object.assign(volume,original);
+      for(const snapshot of state.nodes) {
+        snapshot.node.position.copy(snapshot.position);snapshot.node.quaternion.copy(snapshot.quaternion);
+        snapshot.node.scale.copy(snapshot.scale);snapshot.node.visible=snapshot.visible;
+        snapshot.node.updateMatrixWorld(true);
+      }
+    }
     refresh();
   }
   function getCombatState() {
@@ -338,6 +399,8 @@ export function createWorldCombat(parent, { props = [], random = Math.random } =
       activeHammerRings: marks.filter(mark=>mark.hammer&&mark.ring.visible).length,
       particleBudget: 232, markBudget: marks.length, trackedStrikes: records.size,
       lastDust, lastContact, lastGround,
+      damagedProps:[...propDamage.values()].filter(state=>state.hits>0)
+        .map(({id,hits,broken})=>({id,hits,broken})),
       props: props.map(prop => ({ id: prop.id, type: prop.type, volumes: prop.volumes })) };
   }
   return { group, reactToBlade, feedbackStrike, update, presentedCombat, clearCombat, getCombatState };

@@ -189,15 +189,15 @@ export const WEAPON_TYPES = [
   },
   {
     id: 'great-hammer', name: '大锤', category: '重兵', grip: 'twohand',
-    tagline: '沉肩破甲，拔地镇岳',
-    description: '重锤沉肩斜砸、拔地上挑，借余势盘身摆击；末式双足站定，屈膝举锤后顿足砸地。踏步先稳住重心，锤头短促爆发，命中产生钝击震颤与尘石冲击。',
+    tagline: '横抡开阵，震地碎石',
+    description: '全身轮锤大幅横扫，反向斜砸碎石，借惯性回身扫开两翼，再高举重锤震地破阵。短起手连续挥击，宽面冲击击退成片敌人，砸地掀起碎石、尘浪与放射地裂。',
     effectColor: 0xffcc7a, effectAccent: 0xfff0cb,
-    stats: { speed: 2, power: 5, reach: 4 },
+    stats: { speed: 4, power: 5, reach: 5 },
     moves: [
-      {name:'沉肩斜砸',damage:36,knockback:.72,hitstop:.030,lunge:.32,recoverAt:.91},
-      {name:'拔地挑锤',damage:43,knockback:.90,hitstop:.023,lunge:.12,recoverAt:.90},
-      {name:'盘身摆锤',damage:52,knockback:1.12,hitstop:.038,lunge:.40,recoverAt:.93},
-      {name:'顿足镇岳',damage:82,knockback:1.85,hitstop:.055,lunge:.26,recoverAt:.95},
+      {name:'横抡开阵',damage:42,knockback:1.28,hitstop:.012,lunge:.46,recoverAt:.91},
+      {name:'斜砸碎石',damage:50,knockback:1.50,hitstop:.014,lunge:.28,recoverAt:.90},
+      {name:'回身狂扫',damage:58,knockback:1.75,hitstop:.018,lunge:.54,recoverAt:.93},
+      {name:'震地破阵',damage:92,knockback:2.65,hitstop:.028,lunge:.30,recoverAt:.95},
     ],
   }
 ];
@@ -206,7 +206,7 @@ const reviewedMoveNames = {
  'dual-dao':['右斜劈','左接斩','反手撩切','错锋双斩'],
  'tang-dao':['踏步斜斩','转胯横斩','提膝上撩','过顶落劈'],
  'great-dao':['踏步横扫','反向斜劈','回身大扫','踏地重劈'],
- 'great-hammer':['沉肩斜砸','拔地挑锤','盘身摆锤','顿足镇岳'],
+ 'great-hammer':['横抡开阵','斜砸碎石','回身狂扫','震地破阵'],
 };
 const reviewedDescriptions = {
  'tang-dao':'双手长柄直刃，踏步转胯带动斜斩、宽横斩、上撩与过顶落劈，以大幅刀路扫开前方敌阵。',
