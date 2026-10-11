@@ -1440,10 +1440,11 @@ function commandTap(position) {
   clampPosition(p);
   const input = p.clone().sub(hero.pos);
   input.y = 0;
-  if (input.length() > 1.0) {
+  const inputDistance = input.length();
+  if (inputDistance > 1.0) {
     hero.inputDirection.copy(input.normalize());
     hero.speedFactor = 6.5;
-  } else if (input.length() < .625) {
+  } else if (inputDistance < .625) {
     hero.inputDirection.set(0, 0, 0);
   }
   // Cha_Control raycasts the ground and stores only the point.  A tap over an
@@ -1456,7 +1457,7 @@ function commandTap(position) {
   hero.ai.sensorInside.clear();
   // Source only replaces moveDirection when the sampled point is farther
   // than 1.0 world unit; the .625–1.0 band retains the prior direction.
-  hero.destination = input.length() > 1.0 ? p : null;
+  hero.destination = inputDistance > 1.0 ? p : null;
   hero.navigation = null;
   hero.disengage = 0.12;
   if (
