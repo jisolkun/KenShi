@@ -190,7 +190,8 @@ function checkPhysical(f, context, requireSupport = false) {
     assert.ok(Math.min(...soles) < .01, `${context}: the support sole floats above its retained mesh clearance`);
   }
   checkHandVolumes(f, context);
-  return {frame, quaternion, bottom, ankles, characterHeadY: world(rig.head).y};
+  return {frame, quaternion, bottom, ankles, bodyHeight: rig.body.position.y,
+    characterHeadY: world(rig.head).y};
 }
 
 function checkContinuity(f, current, previous, context) {
@@ -265,8 +266,8 @@ test('great hammer exposes four distinct two-handed smash actions with physical 
     assert.equal(action.headLength, 1.25);
     assert.equal(action.tipLength, 1.44);
     assert.equal(action.headRadius, .27);
-    assert.ok(action.duration > getReviewedAttack('great-dao', combo).duration,
-      `hammer ${combo + 1} must allow its greater load and recovery time`);
+    assert.ok(action.duration >= .5 && action.duration <= 1.5,
+      `hammer ${combo + 1} retains time for a legible load, impact and recovery`);
     assert.ok(action.contacts.length > 0 && action.contacts.every(contact => contact.kind === 'smash'));
     assert.equal(getReviewedAttack(ID, combo, 'skill'), null);
     assert.notDeepEqual([.2, .5, .8].map(phase => sampleReviewedAttack(ID, combo, phase).hands),
@@ -275,6 +276,10 @@ test('great hammer exposes four distinct two-handed smash actions with physical 
     names.add(action.name);
   }
   assert.equal(names.size, 4, 'all four escalating hammer actions have distinct identities');
+  assert.ok(getReviewedAttack(ID, 1).duration < getReviewedAttack(ID, 2).duration,
+    'the compact rising follow-up has a quicker tempo than the full body sweep');
+  assert.ok(getReviewedAttack(ID, 3).duration > getReviewedAttack(ID, 0).duration,
+    'the terminal overhead smash has a longer commitment than the opening strike');
 });
 
 for (let combo = 0; combo < 4; combo++) {
@@ -288,18 +293,28 @@ for (let combo = 0; combo < 4; combo++) {
       const budget = HAMMER_STEPS[combo];
       assert.ok(f.rig.group.position.length() > Math.hypot(budget.forward, budget.lateral) * .95,
         'the hammer attack performs its actual world-root travel budget');
-      const lead = combo % 2;
+      const lead = getReviewedAttack(ID, combo).step;
       assert.ok(Math.max(...history.map(frame => Math.hypot(
         frame.ankles[lead].x - history[0].ankles[lead].x,
         frame.ankles[lead].z - history[0].ankles[lead].z))) > .18,
       'the leading ankle takes a visible actual step under the loaded hammer');
+      const action = getReviewedAttack(ID, combo);
+      const active = history.filter(frame => frame.phase >= action.active[0] && frame.phase <= action.active[1]);
+      assert.ok(active.length > 2, 'the frame grid samples a sustained impact window');
+      for (let side = 0; side < 2; side++) {
+        const planted = active[0].ankles[side];
+        assert.ok(active.every(frame => frame.ankles[side].distanceTo(planted) < .035),
+          `support foot ${side} slides while the actual hammer head is striking`);
+        assert.ok(active.every(frame => Math.abs(frame.ankles[side].y - .075) < .005),
+          `support foot ${side} lifts during the loaded impact`);
+      }
     });
   }
 
-  test(`great hammer strike ${combo + 1} visibly holds its real head, releases faster than loading and brakes its mass`, () => {
+  test(`great hammer strike ${combo + 1} loads its real head, accelerates through contact and arrests before recovery`, () => {
     const f = fixture(), action = getReviewedAttack(ID, combo);
     const [release, finish] = action.swing, [start, end] = action.active;
-    const speeds = {windup: [], chamber: [], strike: [], brake: []};
+    const speeds = {windup: [], chamber: [], strike: [], arrest: []};
     let previous;
     for (let frame = 0; frame <= Math.ceil(action.duration * 240); frame++) {
       const time = Math.min(action.duration, frame / 240), phase = time / action.duration;
@@ -309,18 +324,21 @@ for (let combo = 0; combo < 4; combo++) {
       if (previous && time > previous.time) {
         const speed = head.distanceTo(previous.head) / (time - previous.time);
         if (phase < release - .045) speeds.windup.push(speed);
-        if (phase >= release - .045 && phase <= release) speeds.chamber.push(speed);
+        if (phase >= release - .035 && phase <= release - .008) speeds.chamber.push(speed);
         if (phase >= start && phase <= end) speeds.strike.push(speed);
-        if (phase >= finish && phase <= finish + .05) speeds.brake.push(speed);
+        if (phase >= finish - .012 && phase <= finish + .012) speeds.arrest.push(speed);
       }
       previous = {head, time};
     }
     for (const [segment, values] of Object.entries(speeds)) assert.ok(values.length > 2, `${segment} is physically visible`);
     const peak = Math.max(...speeds.strike);
-    assert.ok(peak > Math.max(...speeds.windup) * 1.5,
-      'the actual hammer head accelerates beyond its slower loaded preparation');
-    assert.ok(Math.max(...speeds.chamber) < peak * .2, 'the chamber visibly holds the head before release');
-    assert.ok(Math.max(...speeds.brake) < peak * .25, 'the head visibly brakes before its carry recovery');
+    const loadedAverage = speeds.windup.reduce((sum, speed) => sum + speed, 0) / speeds.windup.length;
+    assert.ok(peak > 5 && peak > loadedAverage * 1.5,
+      'the actual hammer head develops a strong release beyond its loaded preparation');
+    assert.ok(Math.max(...speeds.chamber) < peak * .5,
+      'the loaded chamber slows the actual head before its forceful release');
+    assert.ok(Math.min(...speeds.arrest) < peak * .35,
+      'the head visibly arrests at the stroke end before its next carry or small rebound');
   });
 
   for (const rate of [60, 120]) {
@@ -377,6 +395,74 @@ test('great hammer finisher lifts the actual head high then brings its complete 
     `the whole head visibly finishes near the floor while retaining stone clearance, got ${bottom}m`);
   assert.ok(heads.some(head => head.y > .5 && head.y < 1.7 && head.z > 1),
     'the descending head actually crosses the forward enemy volume');
+});
+
+test('the real hammer chain changes strike planes and compresses into a planted finishing impact', () => {
+  const f = fixture();
+  const paths = [0, 1, 2, 3].map(combo => {
+    const action = getReviewedAttack(ID, combo);
+    const samples = [];
+    for (let frame = 0; frame <= 180; frame++) {
+      const phase = frame / 180;
+      poseCharacter(f.rig, {state: 'attack', combo, phase, time: phase * action.duration,
+        attackCarry: 0, immediate: true, transition: false});
+      f.rig.group.updateMatrixWorld(true);
+      samples.push({phase, head: f.rig.weaponBlades()[0].headCenter,
+        height: f.rig.body.position.y});
+    }
+    const at = phase => samples.reduce((best, sample) =>
+      Math.abs(sample.phase - phase) < Math.abs(best.phase - phase) ? sample : best);
+    const release = at(action.release), finish = at(action.finish);
+    return {action, samples, release, finish, delta: finish.head.clone().sub(release.head)};
+  });
+  assert.ok(paths[0].delta.y < -.3 && Math.abs(paths[0].delta.x) > .5,
+    'the opening head travels downward across a visible diagonal');
+  assert.ok(paths[1].delta.y > .6,
+    'the following head rises out of the loaded low carry');
+  assert.ok(Math.abs(paths[2].delta.x) > 1.2 &&
+    Math.abs(paths[2].delta.x) > Math.abs(paths[2].delta.y) * 1.6,
+    'the body pivot creates a broad lateral head path');
+  assert.ok(paths[3].delta.y < -1.2 &&
+    Math.abs(paths[3].delta.y) > Math.abs(paths[3].delta.x) * 2,
+    'the final head commits to a vertical smash rather than another side sweep');
+  const finisher = paths[3];
+  const impact = finisher.samples.filter(sample => sample.phase >= finisher.action.contact &&
+    sample.phase <= finisher.action.finish + .04);
+  const compressed = Math.min(...impact.map(sample => sample.height));
+  const acceleration = finisher.samples.filter(sample => sample.phase >= finisher.action.release &&
+    sample.phase < finisher.action.contact);
+  const recovery = finisher.samples.filter(sample => sample.phase >= finisher.action.brake);
+  assert.ok(Math.max(...acceleration.map(sample => sample.height)) - compressed > .04,
+    'the pelvis visibly compresses as the loaded head reaches impact');
+  assert.ok(Math.max(...recovery.map(sample => sample.height)) - compressed > .025,
+    'the body recovers height after absorbing the finishing impact');
+  const rebound = finisher.samples.filter(sample => sample.phase >= finisher.action.finish &&
+    sample.phase <= finisher.action.brake);
+  assert.ok(Math.max(...rebound.map(sample => sample.head.y)) - finisher.finish.head.y > .06,
+    'the head makes a small visible rebound after its floor-level arrest');
+});
+
+test('adjacent hammer actions retain the real head, hands and support feet at their shared carry', () => {
+  const f = fixture();
+  const nodes = [f.rig.body, f.rig.chest, f.rig.head,
+    ...f.rig.arms.flatMap(arm => [arm.shoulder, arm.elbow, arm.wrist]),
+    ...f.rig.legs.flatMap(leg => [leg.hip, leg.knee, leg.foot]), f.rig.arms[1].weapon];
+  for (let combo = 0; combo < 4; combo++) {
+    const snapshot = (index, phase) => {
+      poseCharacter(f.rig, {state: 'attack', combo: index, phase,
+        time: phase * getReviewedAttack(ID, index).duration, attackCarry: 0,
+        immediate: true, transition: false});
+      f.rig.group.updateMatrixWorld(true);
+      return nodes.map(node => ({position: world(node), quaternion: worldQuaternion(node)}));
+    };
+    const finish = snapshot(combo, 1), next = snapshot((combo + 1) % 4, 0);
+    for (let joint = 0; joint < nodes.length; joint++) {
+      assert.ok(finish[joint].position.distanceTo(next[joint].position) < .015,
+        `combo ${combo + 1}: ${nodes[joint].name} jumps between its real carry endpoints`);
+      assert.ok(degrees(finish[joint].quaternion.angleTo(next[joint].quaternion)) < 3,
+        `combo ${combo + 1}: ${nodes[joint].name} rotates abruptly into the next attack`);
+    }
+  }
 });
 
 test('great hammer real head and hand volumes retain clearance throughout idle and running gait', () => {

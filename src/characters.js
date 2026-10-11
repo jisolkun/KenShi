@@ -333,7 +333,7 @@ function sample(p, keys) {
 }
 
 export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,skill=0,dt,
-  gaitPhase,moveBlend,turnLean=0,attackCarry=0,attackStep=null,hurtDirection=1,hurtStrength=1,transition=true,immediate=false,
+  gaitPhase,moveBlend,turnLean=0,attackCarry=0,attackStep=null,hurtDirection=1,hurtStrength=1,hurtVertical=0,hurtBlunt=false,transition=true,immediate=false,
   alertness=.35,idleAge,lookYaw} = {}) {
   if(dt===0&&!immediate&&transition!==false&&rig.motion)return;
   const {body,chest,head,arms,legs,pony,cloths,type} = rig;
@@ -363,7 +363,7 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
     }
     rig.bind.forEach(({node},i)=>{motion.from[i].p.copy(node.position);motion.from[i].q.copy(node.quaternion);motion.from[i].s.copy(node.scale);});
     motion.elapsed=0;
-    motion.duration=state==='hurt'?.04:state==='roll'?.06:rig.weaponId==='great-hammer'?.24:.08;
+    motion.duration=state==='hurt'?.04:state==='roll'?.06:rig.weaponId==='great-hammer'?(state==='attack'?.18:.22):.08;
     motion.footworkBlend=footworkChanged&&key===motion.key&&!restarted;
     if(motion.footworkBlend)motion.duration=.10;
   } else motion.elapsed+=delta;
@@ -476,7 +476,7 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
     pony.rotation.x=-.40*tuck;
     for(const c of cloths){c.rotation.x=-.6*tuck;c.rotation.z=.2*Math.sin(p*TAU);}
   } else if(state==='hurt') {
-    const stagger=sample(p,[[0,0],[.12,1],[.33,.72],[.65,.27],[1,0]])*clamp(hurtStrength,0,1);
+    const stagger=sample(p,[[0,0],[.12,1],[.33,.72],[.65,.27],[1,0]])*clamp(hurtStrength,0,hurtBlunt?1.55:1);
     const side=clamp(hurtDirection,-1,1);
     const resistance=heavy?.52:boss?.34:1;
     body.position.z-=.12*stagger*resistance;body.position.x+=side*.065*stagger*resistance;
@@ -484,6 +484,11 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
     body.rotation.set(-.25*stagger*resistance,side*.23*stagger,-side*.16*stagger*resistance);
     chest.rotation.x=-.08-.24*stagger;chest.rotation.y=side*.30*stagger;
     head.rotation.y=-side*.55*stagger;head.rotation.x=-.24*stagger;
+    const vertical=Number.isFinite(hurtVertical)?clamp(hurtVertical,-1,1):0;
+    body.position.y+=(vertical>0?.035*vertical:.09*vertical)*stagger*resistance;
+    body.rotation.x-=vertical*.20*stagger*resistance;
+    chest.rotation.x-=vertical*.30*stagger*resistance;
+    head.rotation.x-=vertical*.16*stagger*resistance;
     R.shoulder.rotation.x+=.4*stagger;L.shoulder.rotation.z-=.28*stagger;
     LL.hip.rotation.x=-.15-.30*stagger;RL.knee.rotation.x=.28+.30*stagger;
     LL.hip.rotation.z=side*.10*stagger;RL.hip.rotation.z=side*.10*stagger;

@@ -1,4 +1,5 @@
 import { getWeapon } from './weapons.js';
+import { getHammerFeedback } from './hammerFeedback.js';
 
 export function createAudio() {
   let context, master, noiseBuffer, wind, windGain;
@@ -130,10 +131,11 @@ export function createAudio() {
     const shape=technique === 'thrust' ? 'thrust' : technique === 'chop' ? 'crush'
       : technique === 'cut' ? 'arc' : getWeapon(id).moves[((combo%4)+4)%4].shape;
     if(id==='great-hammer') {
-      const heavy=((combo%4)+4)%4===3;
-      // Broad air displacement, without a sword's ringing metal transient.
-      noise(heavy?.15:.12,heavy?.21:.15,420,180,'lowpass',0,.008);
-      tone(heavy?88:110,36,heavy?.13:.10,heavy?.055:.035,'sine',.004,.006);
+      const feedback=getHammerFeedback(combo);
+      // The quick rising beat, long waist swing and loaded slam move
+      // different amounts of air. Their release stays short and low.
+      noise(feedback.airDuration,feedback.airVolume,feedback.airFilter,140,'lowpass',0,.004);
+      tone(feedback.airTone,32,feedback.airDuration,combo===3?.070:.040,'sine',.003,.004);
       return;
     }
     if(id==='great-dao') {
@@ -165,10 +167,10 @@ export function createAudio() {
     lastHit=context.currentTime;lastHitWeight=force;
     const pitch=combo%2?0.94:1.06, mass=Math.min(2.2,weight*force);
     if(id==='great-hammer') {
-      const heavy=((combo%4)+4)%4===3;
-      tone((heavy?76:102)*pitch,28,heavy?.19:.13,.30+mass*.055,'sine',0,.0015);
-      noise(heavy?.09:.065,.25+mass*.04,heavy?510:720,110,'lowpass',0,.0015);
-      tone(heavy?138:170,54,heavy?.075:.055,.052,'triangle',.001,.002);
+      const feedback=getHammerFeedback(combo),heavy=((combo%4)+4)%4===3;
+      tone(feedback.hitTone*pitch,27,feedback.hitDuration,.34+mass*.070,'sine',0,.001);
+      noise(heavy?.095:.060,.30+mass*.045,feedback.hitFilter,85,'lowpass',0,.001);
+      tone(feedback.hitCrackTone*pitch,45,heavy?.075:.045,.065,'triangle',.001,.0015);
       return;
     }
     if(id==='great-dao') {
@@ -195,8 +197,9 @@ export function createAudio() {
   function weaponGround(id, combo = 3) {
     if(id!=='great-hammer'||combo!==3||!ready()||context.currentTime-lastHammerGround<.12)return;
     lastHammerGround=context.currentTime;
-    tone(64,25,.22,.24,'sine',0,.0015);
-    noise(.115,.23,430,80,'lowpass',0,.002);
+    tone(64,25,.24,.30,'sine',0,.0015);
+    noise(.060,.23,640,120,'lowpass',0,.0015);
+    noise(.165,.19,310,65,'lowpass',.018,.006);
   }
 
   function footstep(weight = 1) {

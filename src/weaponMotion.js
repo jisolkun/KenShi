@@ -4,7 +4,7 @@ import { sampleTangReady, TANG_GRIP } from './choreography/tangDao.js';
 import { sampleGreatReady, GREAT_GRIP } from './choreography/greatDao.js';
 import {sampleHammerReady, HAMMER_GRIP, HAMMER_HEAD} from './choreography/greatHammer.js';
 import { constrainPairedGrip } from './choreography/trajectory.js';
-import { sampleReviewedAttack } from './choreography/index.js';
+import { sampleReviewedAttack, getReviewedAttack } from './choreography/index.js';
 import { heavyWeaponStepProgress, resolveGreatDaoStep } from './greatDaoMovement.js';
 export { getReviewedAttack, sampleReviewedAttack } from './choreography/index.js';
 
@@ -169,7 +169,7 @@ function sampleAttackFeet(rig,pose) {
    const q=step.footRotations?.[index];
    return q?new THREE.Quaternion(q.x,q.y,q.z,q.w):leg.foot.getWorldQuaternion(new THREE.Quaternion());
   });
-  let lead=((pose.combo%2)+2)%2;
+  let lead=rig.weaponId==='great-hammer'?getReviewedAttack(rig.weaponId,pose.combo).step:((pose.combo%2)+2)%2;
   if((step.startPhase??pose.phase)>.01&&Math.abs(starts[0].y-starts[1].y)>.025)lead=starts[0].y>starts[1].y?0:1;
   context=rig.motion.attackFootwork={step,starts,rotations,lead,
    localStarts:starts.map(point=>point.clone().sub(origin).applyQuaternion(inverse)),
@@ -177,22 +177,25 @@ function sampleAttackFeet(rig,pose) {
  }
  const p=clamp((pose.phase-context.startPhase)/Math.max(1e-6,1-context.startPhase),0,1);
  const root=rig.group.getWorldPosition(new THREE.Vector3()),heading=rig.group.getWorldQuaternion(new THREE.Quaternion());
- const planned=Math.hypot(step.forward??0,step.lateral??0)*Math.max(0,heavyWeaponStepProgress(rig.weaponId,pose.phase)-heavyWeaponStepProgress(rig.weaponId,context.startPhase));
+ const planned=Math.hypot(step.forward??0,step.lateral??0)*Math.max(0,heavyWeaponStepProgress(rig.weaponId,pose.phase,pose.combo)-heavyWeaponStepProgress(rig.weaponId,context.startPhase,pose.combo));
  const travelled=Math.hypot(root.x-step.start.x,root.z-step.start.z);
  const stride=planned>1e-8?clamp(travelled/planned,0,1):0;
- const remaining=1-heavyWeaponStepProgress(rig.weaponId,context.startPhase);
+ const remaining=1-heavyWeaponStepProgress(rig.weaponId,context.startPhase,pose.combo);
+ const hammer=rig.weaponId==='great-hammer'?getReviewedAttack(rig.weaponId,pose.combo).footwork:null;
  const feet=rig.legs.map((leg,index)=>{
-  const lead=index===context.lead,start=lead ? .06 : .32,end=lead ? .30 : .76;
+  const lead=index===context.lead;
+  const [start,end]=hammer?(lead?hammer.lead:hammer.rear):[lead?.06:.32,lead?.30:.76];
   const u=clamp((p-start)/(end-start),0,1),progress=ease(u);
   let point=context.anchors[index]?.clone(),rotation=context.anchorRotations[index]?.clone();
   if(!point){
    const offset=context.localStarts[index].clone();
-   offset.x=THREE.MathUtils.lerp(offset.x,leg.side*.23,stride);
-   offset.z=THREE.MathUtils.lerp(offset.z,(lead ? .40 : -.10)*remaining,stride);
+   const stanceBlend=hammer?.75+.25*stride:stride;
+   offset.x=THREE.MathUtils.lerp(offset.x,leg.side*(hammer?.width??.23),stanceBlend);
+   offset.z=THREE.MathUtils.lerp(offset.z,(hammer?(lead?hammer.leadZ:hammer.rearZ):(lead?.40:-.10))*remaining,stanceBlend);
    offset.y=.075-root.y;
    const landing=offset.applyQuaternion(heading).add(root);
    point=context.starts[index].clone().lerp(landing,progress);
-   point.y=THREE.MathUtils.lerp(context.starts[index].y,.075,progress)+Math.sin(Math.PI*u)*(lead ? .105 : .085)*stride;
+   point.y=THREE.MathUtils.lerp(context.starts[index].y,.075,progress)+Math.sin(Math.PI*u)*(hammer?.lift??(lead?.105:.085))*(hammer?1:stride);
    const previous=context.previous[index];
    const clipped=resolveGreatDaoStep(previous,{x:point.x-previous.x,z:point.z-previous.z},
     {obstacles:step.obstacles??[],bounds:step.bounds,clearance:.22});

@@ -62,6 +62,22 @@ test('the finishing head contact emits a radial floor burst and crack at the act
   fx.feedbackStrike({...payload,strikeId:2});assert.equal(fx.getCombatState().groundHits,2);
 });
 
+test('a confirmed hammer floor crack holds through the heavy recovery and then fades without growing',()=>{
+  const fx=fixture(),payload=strike(frame(0,.3,1,.055));
+  fx.feedbackStrike(payload);
+  const crack=fx.group.children.find(mesh=>mesh.visible&&!mesh.isInstancedMesh);
+  assert.ok(crack,'the confirmed physical floor contact creates a real pooled mark');
+  const opacity=crack.material.opacity,scale=crack.scale.clone();
+  fx.presentedCombat();fx.update(.5);fx.update(.5);
+  assert.equal(crack.visible,true);assert.equal(crack.material.opacity,opacity);
+  assert.ok(crack.scale.equals(scale),'the ground crack retains its contact footprint');
+  assert.equal(fx.getCombatState().activeHammerRings,0,'the flash ring clears while the impact crack remains');
+  fx.feedbackStrike(payload);assert.equal(fx.getCombatState().groundHits,1);
+  fx.update(.25);assert.ok(crack.material.opacity>0&&crack.material.opacity<opacity);
+  const faded=crack.material.opacity;fx.update(0);assert.equal(crack.material.opacity,faded);
+  fx.update(.26);assert.equal(crack.visible,false);assert.equal(fx.getCombatState().activeMarks,0);
+});
+
 test('hammer world feedback shares fixed budgets, freezes during pause and clears completely on restart',()=>{
   const fx=fixture(),objects=fx.group.children.length,payload=strike(frame(0,.3,1,.055));
   fx.feedbackStrike(payload);fx.update(.02);

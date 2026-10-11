@@ -87,6 +87,11 @@ function raw(spec,tracks,p) {
  }
  return {hands,stance};
 }
+// Blunt heads author their own stable striking faces. They can reuse grip,
+// torso and foot interpolation without building the blade-edge roll cache.
+export function sampleAuthoredPoseTracks(spec, tracks, phase) {
+ return {...raw(spec,tracks,phase),contacts:spec.contacts,name:spec.name};
+}
 export function authoredChestTransform(stance) {
  const {yaw,load,advance}=stance;
  const body=new THREE.Quaternion().setFromEuler(new THREE.Euler(stance.bodyPitch??0,stance.pelvisYaw??yaw*.65,stance.bodyRoll??0));

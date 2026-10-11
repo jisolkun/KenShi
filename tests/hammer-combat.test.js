@@ -96,7 +96,7 @@ test('actual hammer heads can hit at every automatic combat distance with real r
     const action = getReviewedAttack('great-hammer', combo), move = weapon.moves[combo];
     assert.ok(Number.isFinite(move.reach), 'AI reach must come from a valid hammer move');
     const rig = createCharacter('hero'); rig.setWeapon('great-hammer');
-    for (const enemy of [{ type: 'grunt', radius: .45, maxY: 1.85 },
+    for (const rate of [30, 60, 120]) for (const enemy of [{ type: 'grunt', radius: .45, maxY: 1.85 },
       { type: 'brute', radius: .75, maxY: 2.4 }, { type: 'boss', radius: 1, maxY: 3.2 }]) {
       const ranges = attackDistances(move, enemy.radius, true);
       for (const band of ['stop', 'enter', 'retain']) {
@@ -109,9 +109,9 @@ test('actual hammer heads can hit at every automatic combat distance with real r
           footStarts: rig.legs.map(leg => leg.foot.getWorldPosition(new THREE.Vector3())),
           footRotations: rig.legs.map(leg => leg.foot.getWorldQuaternion(new THREE.Quaternion())),
           obstacles: [], bounds };
-        const frames = Math.ceil(action.duration * 120);
+        const frames = Math.ceil(action.duration * rate);
         for (let frame = 0; frame <= frames; frame++) {
-          const phase = Math.min(1, frame / (action.duration * 120)), dt = frame ? 1 / 120 : 0;
+          const phase = Math.min(1, frame / (action.duration * rate)), dt = frame ? 1 / rate : 0;
           if (attackCanTrack(phase, move, action)) {
             const desired = Math.atan2(target.x - position.x, target.z - position.z);
             angle += Math.atan2(Math.sin(desired - angle), Math.cos(desired - angle)) * (1 - Math.exp(-dt * 24));
@@ -126,18 +126,25 @@ test('actual hammer heads can hit at every automatic combat distance with real r
             'a head contact must not depend on stepping through the enemy');
           const carry = dt ? Math.hypot(position.x - before.x, position.z - before.z) / dt / 5.3824 : 0;
           rig.group.position.set(position.x, 0, position.z); rig.group.rotation.y = angle;
-          poseCharacter(rig, { state: 'attack', combo, phase, time: frame / 120, dt,
+          poseCharacter(rig, { state: 'attack', combo, phase, time: frame / rate, dt,
             attackStep: step, speed: Math.min(1, carry), attackCarry: Math.min(1, carry),
             immediate: true, transition: false });
           const current = rig.weaponBlades().find(frame => frame.kind === 'hammer');
           assert.ok(current?.headCenter, 'a real hammer head marker is required');
           const sweep = clipHammerHeadSweep(current.headCenter, previous?.headCenter,
             phase, previousPhase, action.contacts[0].window);
-          if (sweep) hit ||= hammerHeadSweepContains(sweep.current, sweep.previous, target, enemy.radius,
-            current.headRadius, Math.max(current.headHalfHeight, previous?.headHalfHeight ?? .19));
+          if (sweep) {
+            const contact = hammerHeadSweepContains(sweep.current, sweep.previous, target, enemy.radius,
+              current.headRadius, Math.max(current.headHalfHeight, previous?.headHalfHeight ?? .19));
+            if (contact && !hit && combo === 1 && sweep.previous) {
+              assert.ok(sweep.current.y > sweep.previous.y,
+                `uppercut ${rate} Hz ${enemy.type} ${band}: the first real head contact must rise, so its hit can lift the victim`);
+            }
+            hit ||= contact;
+          }
           previous = current; previousPhase = phase;
         }
-        assert.ok(hit, `great-hammer ${combo}, ${enemy.type} ${band}=${ranges[band]}: AI must stand inside the real swept head path`);
+        assert.ok(hit, `great-hammer ${combo}, ${rate} Hz, ${enemy.type} ${band}=${ranges[band]}: AI must stand inside the real swept head path`);
       }
     }
   }

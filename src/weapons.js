@@ -189,15 +189,15 @@ export const WEAPON_TYPES = [
   },
   {
     id: 'great-hammer', name: '大锤', category: '重兵', grip: 'twohand',
-    tagline: '沉肩抡锤，踏地震阵',
-    description: '双手长柄重锤，沉肩转腰横抡、反向上挑，再以回身重扫接过顶砸地。蓄力后迅猛释放，身体随锤势前踏，钝击震退近敌。',
+    tagline: '沉肩破甲，拔地镇岳',
+    description: '重锤沉肩斜砸、拔地上挑，借余势盘身摆击；末式双足站定，屈膝举锤后顿足砸地。踏步先稳住重心，锤头短促爆发，命中产生钝击震颤与尘石冲击。',
     effectColor: 0xffcc7a, effectAccent: 0xfff0cb,
     stats: { speed: 2, power: 5, reach: 4 },
     moves: [
-      {name:'摆腰横抡',damage:36,knockback:.72,hitstop:0,lunge:.40,recoverAt:.94},
-      {name:'反向上挑',damage:43,knockback:.90,hitstop:0,lunge:.46,recoverAt:.94},
-      {name:'回身重扫',damage:52,knockback:1.12,hitstop:0,lunge:.56,recoverAt:.96},
-      {name:'过顶砸地',damage:82,knockback:1.85,hitstop:0,lunge:.64,recoverAt:.96},
+      {name:'沉肩斜砸',damage:36,knockback:.72,hitstop:.030,lunge:.32,recoverAt:.91},
+      {name:'拔地挑锤',damage:43,knockback:.90,hitstop:.023,lunge:.12,recoverAt:.90},
+      {name:'盘身摆锤',damage:52,knockback:1.12,hitstop:.038,lunge:.40,recoverAt:.93},
+      {name:'顿足镇岳',damage:82,knockback:1.85,hitstop:.055,lunge:.26,recoverAt:.95},
     ],
   }
 ];
@@ -206,7 +206,7 @@ const reviewedMoveNames = {
  'dual-dao':['右斜劈','左接斩','反手撩切','错锋双斩'],
  'tang-dao':['踏步斜斩','转胯横斩','提膝上撩','过顶落劈'],
  'great-dao':['踏步横扫','反向斜劈','回身大扫','踏地重劈'],
- 'great-hammer':['摆腰横抡','反向上挑','回身重扫','过顶砸地'],
+ 'great-hammer':['沉肩斜砸','拔地挑锤','盘身摆锤','顿足镇岳'],
 };
 const reviewedDescriptions = {
  'tang-dao':'双手长柄直刃，踏步转胯带动斜斩、宽横斩、上撩与过顶落劈，以大幅刀路扫开前方敌阵。',
@@ -216,7 +216,7 @@ for(const weapon of WEAPONS){
   weapon.moves.forEach((move,combo)=>{
     const action=getReviewedAttack(weapon.id,combo);
     if(!action)return;
-    Object.assign(move,{name:reviewedMoveNames[weapon.id][combo],duration:action.duration,contact:action.contact,active:action.active,reach:action.reach,shape:action.kind==='thrust'?'thrust':action.kind==='chop'?'crush':'arc',width:action.width,halfAngle:action.halfAngle??(weapon.id==='tang-dao'?1.6:action.kind==='thrust'?.28:.95),reviewed:true});
+    Object.assign(move,{name:reviewedMoveNames[weapon.id][combo],duration:action.duration,contact:action.contact,active:action.active,reach:action.reach,shape:action.kind==='thrust'?'thrust':['chop','smash'].includes(action.kind)?'crush':'arc',width:action.width,halfAngle:action.halfAngle??(weapon.id==='tang-dao'?1.6:action.kind==='thrust'?.28:.95),reviewed:true});
   });
 }
 const weaponById = new Map(WEAPONS.map(weapon => [weapon.id, weapon]));

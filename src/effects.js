@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { getHammerFeedback } from './hammerFeedback.js';
 
 export function createEffects(scene, camera) {
   const objects = [], trails = [], allCached = new Set(), cache = new Map(), geometries = new Map();
@@ -237,21 +238,27 @@ export function createEffects(scene, camera) {
   }
   // Blunt enemy contact uses the existing fixed particle passes. It never
   // invokes the blade crescent or creates a floor ring beneath a torso hit.
-  function hammerImpact(position, headDirection, strength=1, critical=false) {
-    const weight=THREE.MathUtils.clamp(strength,.4,2);
+  function hammerImpact(position, headDirection, strength=1, critical=false, combo=0) {
+    const weight=THREE.MathUtils.clamp(strength,.4,2),feedback=getHammerFeedback(combo);
     direction.copy(headDirection||zero);if(direction.lengthSq()<.001)direction.set(0,0,1);direction.normalize();
-    side.set(-direction.z,.1,direction.x);if(side.lengthSq()<.001)side.set(1,0,0);side.normalize();
-    emit(flashes,position,zero,0xffedc6,critical?.065:.045,.18+weight*.045,.15+weight*.035,1,0,0,true);
+    side.set(-direction.z,0,direction.x);if(side.lengthSq()<.001)side.set(1,0,0);side.normalize();
+    temp.crossVectors(direction,side).normalize();
+    cameraRight.set(1,0,0).applyQuaternion(camera.quaternion);cameraUp.set(0,1,0).applyQuaternion(camera.quaternion);
+    const angle=Math.atan2(direction.dot(cameraUp),direction.dot(cameraRight));
+    emit(flashes,position,zero,0xffedc6,feedback.flashLife,.17+weight*.040,.10+weight*.025,1,0,angle,true);
     for(let i=0;i<(critical?8:5);i++){
-      velocity.copy(direction).multiplyScalar(.8+Math.random()*1.3).addScaledVector(side,(Math.random()-.5)*2);
-      velocity.y+=.2+Math.random()*.5;
-      emit(slivers,position,velocity,i%2?0xbda084:0xe6c7a0,.11+Math.random()*.06,
-        .13+Math.random()*.11,.09+Math.random()*.055,1,2,0,true);
+      velocity.copy(direction).multiplyScalar(feedback.dustDrive*(.5+Math.random()*.4))
+        .addScaledVector(side,(Math.random()-.5)*feedback.dustSpread*2)
+        .addScaledVector(temp,(Math.random()-.5)*feedback.dustSpread);
+      emit(slivers,position,velocity,i%2?0xbda084:0xe6c7a0,.16+Math.random()*.08,
+        .075+Math.random()*.06,.055+Math.random()*.035,1,3,0,true);
     }
     for(let i=0;i<(critical?6:3);i++){
-      velocity.copy(direction).multiplyScalar(.7+Math.random()).addScaledVector(side,(Math.random()-.5)*1.5);velocity.y+=.3+Math.random()*.7;
-      emit(chips,position,velocity,i%2?0xb52f36:0xe15a45,.22+Math.random()*.12,
-        .04,.03,.045,7,Math.random()*6.28,true);
+      velocity.copy(direction).multiplyScalar(feedback.dustDrive*.45)
+        .addScaledVector(side,(Math.random()-.5)*feedback.dustSpread*1.6);
+      velocity.y+=.25+Math.random()*.55;
+      emit(chips,position,velocity,i%2?0x88765d:0xc7ab7f,.22+Math.random()*.08,
+        .035,.025,.040,7,Math.random()*6.28,true);
     }
   }
   function death(position,fallDirection,strength=1) {

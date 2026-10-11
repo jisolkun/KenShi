@@ -10,6 +10,7 @@ import { createWeaponEffects } from "./weaponEffects.js";
 import { weaponStrikeContains, bladeSweepContains, clipBladeSweep, clipHammerHeadSweep, hammerHeadSweepContains } from "./weaponCombat.js";
 import { getHeavyWeaponSteps, heavyWeaponStepDelta, greatDaoTargetGap, resolveGreatDaoStep } from "./greatDaoMovement.js";
 import { getReviewedAttack, sampleReviewedAttack } from "./choreography/index.js";
+import { getHammerFeedback, hammerReactionDirection, hammerWakeActive, hammerContactAccent } from "./hammerFeedback.js";
 import { isCombatTarget, attackDistances, chooseAttackTarget, attackCanTrack,
   attackRecoveryPhase, attackChainPhase, segmentClear, planObstaclePath, projectWalkablePoint } from "./heroAI.js";
 import "./style.css";
@@ -602,11 +603,12 @@ function selectWeapon(id = currentWeapon.id, preview = true) {
   hero.previewContact = -1;
   fx.clear();
   weaponFx.clear();
-  const width = currentWeapon.id === 'great-hammer' ? .85 : currentWeapon.id === "great-dao" ? 1.35 : currentWeapon.stats.power >= 4 ? 1.1 : 0.7;
+  const hammerFeedback=currentWeapon.id==='great-hammer'?getHammerFeedback(0):null;
+  const width = hammerFeedback?.wakeWidth ?? (currentWeapon.id === "great-dao" ? 1.35 : currentWeapon.stats.power >= 4 ? 1.1 : 0.7);
   world.clearCombat?.();
   for (const trail of trails) {
     trail.preserveUntilPresented = isHeavyWeapon(currentWeapon.id);
-    trail.life = isHeavyWeapon(currentWeapon.id) ? .18 : .105;
+    trail.life = hammerFeedback?.wakeLife ?? (isHeavyWeapon(currentWeapon.id) ? .18 : .105);
     trail.color = new THREE.Color(currentWeapon.effectColor);
     trail.coreColor = new THREE.Color(currentWeapon.effectAccent);
     trail.widthFactor = width;
@@ -980,22 +982,30 @@ function hurtEnemy(
   e.hp = Math.max(0, e.hp - damage);
   updateEnemyBar(e);
   e.flash = 1;
+  const greatContact = playerContact && currentWeapon.id === "great-dao";
+  const hammerContact = playerContact && currentWeapon.id === 'great-hammer';
+  const heavyContact = greatContact || hammerContact;
   temp.subVectors(e.pos, from);
   if (temp.lengthSq() < 0.01)
     temp.set(Math.sin(hero.angle), 0, Math.cos(hero.angle));
   temp.normalize();
+  if (hammerContact) {
+    const response = hammerReactionDirection(cutDirection, temp);
+    temp.set(response.x, 0, response.z);
+  }
   const hitDirection = temp.clone();
   e.hurtDirection = Math.sin(
     Math.atan2(hitDirection.x, hitDirection.z) - e.angle,
   );
-  const greatContact = playerContact && currentWeapon.id === "great-dao";
-  const hammerContact = playerContact && currentWeapon.id === 'great-hammer';
-  const heavyContact = greatContact || hammerContact;
+  const hammerFeedback = hammerContact ? getHammerFeedback(hero.combo) : null;
+  e.hurtVertical = hammerContact && Number.isFinite(cutDirection?.y)
+    ? THREE.MathUtils.clamp(cutDirection.y, -1, 1) : 0;
+  e.hurtBlunt = hammerContact;
   e.hurtStrength = hammerContact ? critical ? 1.55 : 1.1 : greatContact ? critical ? 1.35 : .95 : critical ? 1 : 0.65;
   // A brief contact accent separates impact from the fast release without
   // stretching the whole stroke. Each swing accents its first victim once.
   e.localHitStop = hammerContact
-    ? Math.max(e.localHitStop || 0, critical ? .034 : .020)
+    ? Math.max(e.localHitStop || 0, hammerFeedback.enemyStop)
     : greatContact
     ? Math.max(e.localHitStop || 0, critical ? .028 : .014)
     : Math.max(e.localHitStop || 0, critical ? 0.038 : 0.027);
@@ -1017,18 +1027,16 @@ function hurtEnemy(
   comboTimeout = 3;
   if (playerContact || e.pos.distanceTo(hero.pos) < 6)
     kickCamera(hitDirection, (critical ? 0.075 : 0.035) * (playerContact ? 0.7 + currentWeapon.stats.power * 0.12 : 1) *
-      (hammerContact ? critical ? 1.9 : 1.45 : greatContact ? critical ? 1.7 : 1.35 : 1));
+      (hammerContact ? hammerFeedback.cameraGain : greatContact ? critical ? 1.7 : 1.35 : 1));
   const isPlayerContact = playerContact && hero.state === "attack";
   if (isPlayerContact && !hero.impactDone) {
     hero.impactDone = true;
     const contactStop = currentWeapon.moves[hero.combo].hitstop;
-    // Great-dao contact is carried by the moving blade and reaction effects;
-    // do not freeze the player's release on impact. The struck enemy keeps
-    // its short local hurt state above, so feedback comes from hard-stun,
-    // knockback, blood and the directional contact flash.
-    hero.localHitStop = heavyContact
-      ? 0
-      : Math.min(.08, contactStop * (critical ? 1.2 : 1));
+    // The hammer accents its first actual contact, then continues through
+    // its mass-driven follow-through. Crowd hits cannot extend the accent.
+    hero.localHitStop = hammerContact
+      ? hammerContactAccent(contactStop)
+      : greatContact ? 0 : Math.min(.08, contactStop * (critical ? 1.2 : 1));
   }
   if (
     playerContact &&
@@ -1157,13 +1165,20 @@ function reviewedStrike(phase,frames) {
   });
   hero.reviewedPrevious={state:hero.state,combo:hero.combo,phase,frames};
 }
-function reviewedHammerStrike(phase, frames, action) {
+function reviewedHammerStrike(phase, frames, action, preview=false) {
   const frame=frames.find(item=>item.headCenter);
   if(!frame)return;
   const previous=hero.reviewedPrevious;
   const sameStroke=previous?.state===hero.state&&previous.combo===hero.combo;
   const prior=sameStroke?previous.frames.find(item=>item.headCenter):null;
   const priorPhase=sameStroke?previous.phase:undefined;
+  // Air displacement belongs to the real release, including a swing that
+  // meets no enemy. A frame crossing the boundary still emits it just once.
+  const crossedRelease=phase>=action.swing[0]&&(!sameStroke||priorPhase<action.swing[0]);
+  if(crossedRelease&&!hero.strokeContacts.has(0)) {
+    hero.strokeContacts.add(0);
+    safeAudio('weaponSlash',currentWeapon.id,hero.combo,'smash');
+  }
   const worldSweep=clipHammerHeadSweep(frame.headCenter,prior?.headCenter,phase,priorPhase,[action.swing[0],action.brake]);
   if(worldSweep) {
     const at=p=>{
@@ -1177,17 +1192,20 @@ function reviewedHammerStrike(phase, frames, action) {
       current:at(Math.min(phase,action.brake)),
       previous:worldSweep.previous?at(Math.max(priorPhase,action.swing[0])):null,
       combo:hero.combo,strikeId:hero.trailSeries,origin:hero.pos,headRadius:action.headRadius,groundY:.049});
-    if(response?.groundContact) safeAudio('weaponGround',currentWeapon.id,hero.combo);
+    if(response?.groundContact) {
+      safeAudio('weaponGround',currentWeapon.id,hero.combo);
+      const travel=prior?frame.headCenter.clone().sub(prior.headCenter):null;
+      const radial=response.groundContact.clone().sub(hero.pos);
+      const responseDirection=hammerReactionDirection(travel,radial);
+      kickCamera(new THREE.Vector3(responseDirection.x,0,responseDirection.z),.11);
+    }
   }
+  if(preview)return;
   action.contacts.forEach((contact,stroke)=>{
     const sweep=clipHammerHeadSweep(frame.headCenter,prior?.headCenter,phase,priorPhase,contact.window);
     if(!sweep)return;
     hero.hitDone=true;
     const direction=sweep.previous?sweep.current.clone().sub(sweep.previous).normalize():null;
-    if(!hero.strokeContacts.has(stroke)) {
-      hero.strokeContacts.add(stroke);
-      safeAudio('weaponSlash',currentWeapon.id,hero.combo,'smash');
-    }
     for(const enemy of enemies) {
       const key=`${stroke}:${enemy.id}`;
       if(!isCombatTarget(enemy,enemies)||hero.attackHits.has(key))continue;
@@ -1219,17 +1237,22 @@ function sampleHeroTrails(frames,tips,phase,dt,active) {
     // like the source game's heavy swing: a broad steel-blue outer veil, a
     // white edge core and a longer finisher tail. The trail is still sampled
     // from the physical blade, so its width never grants extra damage.
-    if(currentWeapon.id==='great-hammer'){
-      trail.widthFactor=.85;
-      trail.life=.18;
-      trail.color.setHex(0xe2b875);
-      trail.coreColor.setHex(0xffedbf);
+    const hammer=currentWeapon.id==='great-hammer';
+    if(hammer){
+      const feedback=getHammerFeedback(hero.combo);
+      trail.widthFactor=feedback.wakeWidth;
+      trail.life=feedback.wakeLife;
+      trail.mesh.material.opacity=.70;
+      trail.color.setHex(0xc99757);
+      trail.coreColor.setHex(0xffe5b1);
     }else if(currentWeapon.id==='great-dao'){
+      trail.mesh.material.opacity=.8;
       trail.widthFactor=1.45+Math.min(hero.combo,3)*.10;
       trail.life=.18;
       trail.color.setHex(hero.combo===3?0x5caecb:0x8296d4);
       trail.coreColor.setHex(0xfff6df);
     }else{
+      trail.mesh.material.opacity=.8;
       trail.widthFactor=1;
       trail.life=.105;
       trail.color.setHex(0xb0c4ff);
@@ -1240,9 +1263,13 @@ function sampleHeroTrails(frames,tips,phase,dt,active) {
     const fullSwing=isHeavyWeapon(currentWeapon.id)&&action
       &&phase>=Math.max(0,action.swing[0]-.025)
       &&phase<=Math.min(1,action.brake+.035);
-    const cutting=action?!!blade&&(isHeavyWeapon(currentWeapon.id)?fullSwing:!!contact):active&&!!tips[i];
     const trailTip=blade?.headCenter??blade?.tip;
     const trailHeel=blade?.headCenter?blade.middle:blade?.heel;
+    const sameSource=trail.previousBlade?.source===source;
+    const headSpeed=dt>0&&sameSource&&trailTip
+      ? trailTip.distanceTo(trail.previousBlade.tip)/dt : 0;
+    const cutting=action?!!blade&&(hammer?hammerWakeActive(action,phase,headSpeed)
+      :isHeavyWeapon(currentWeapon.id)?fullSwing:!!contact):active&&!!tips[i];
     // A short active interval can cover one displayed frame. Seed from the
     // preceding real blade pose so its path still forms a visible ribbon.
     if(blade&&cutting&&dt>0&&!trail.wasActive&&trail.previousBlade?.source===source&&phase-trail.previousBlade.phase<.1){
@@ -1831,6 +1858,8 @@ function updateEnemies(dt) {
       alertness: 0.7,
       hurtDirection: e.hurtDirection || 0,
       hurtStrength: e.hurtStrength || 0,
+      hurtVertical: e.hurtVertical || 0,
+      hurtBlunt: e.hurtBlunt || false,
     });
     updateEnemyBar(e);
   }
@@ -2139,6 +2168,11 @@ function updatePresentation(dt) {
       hero.previewStepIndex = comboIndex;
       hero.attackStep = createHeavyWeaponStep(comboIndex);
       hero.attackStepPhase = 0;
+      if(currentWeapon.id==='great-hammer') {
+        hero.reviewedPrevious=null;
+        hero.strokeContacts.clear();
+        hero.trailSeries++;
+      }
     }
     advanceHeavyWeaponStep(comboIndex, hero.attackStepPhase, phase, dt, true);
     hero.attackStepPhase = phase;
@@ -2177,8 +2211,16 @@ function updatePresentation(dt) {
   });
   rig.group.updateMatrixWorld(true);
   const tips = rig.weaponTips();
+  const frames = rig.weaponBlades();
+  if(dt>0&&mode==='start'&&state==='attack'&&currentWeapon.id==='great-hammer') {
+    const action=getReviewedAttack(currentWeapon.id,comboIndex);
+    if(action) {
+      reviewedHammerStrike(phase,frames,action,true);
+      hero.reviewedPrevious={state,combo:comboIndex,phase,frames};
+    }
+  }
   const active = state === "attack" && phase >= attackWindows[comboIndex][0] && phase <= attackWindows[comboIndex][1];
-  sampleHeroTrails(rig.weaponBlades(),tips,phase,dt,active);
+  sampleHeroTrails(frames,tips,phase,dt,active);
   fx.update(dt);
   weaponFx.update(dt);
   if (mode !== "start") {

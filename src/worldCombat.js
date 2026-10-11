@@ -177,11 +177,13 @@ export function createWorldCombat(parent, { props = [], random = Math.random } =
     }
     for (const mark of marks) {
       mark.mesh.visible = mark.active;
-      mark.mesh.material.opacity = .72 * (mark.awaiting ? 1 : 1 - clamp(mark.age / mark.life, 0, 1));
+      const markFade=mark.awaiting?1:mark.hammer
+        ?1-clamp((mark.age-1)/.5,0,1):1-clamp(mark.age/mark.life,0,1);
+      mark.mesh.material.opacity = .72 * markFade;
       if(mark.hammer){
-        const age=mark.awaiting?0:mark.age,phase=clamp(age/.25,0,1);
+        const age=mark.awaiting?0:mark.age,phase=clamp(age/.20,0,1);
         mark.ring.visible=mark.active&&phase<1;
-        mark.ring.scale.setScalar(.42+phase*1.55);mark.ring.material.opacity=.46*(1-phase)*(1-phase);
+        mark.ring.scale.setScalar(.32+phase*.95);mark.ring.material.opacity=.30*(1-phase)*(1-phase);
       }else mark.ring.visible=false;
     }
   }
@@ -277,20 +279,20 @@ export function createWorldCombat(parent, { props = [], random = Math.random } =
       const contact={x:low.headCenter.x,y:groundY+.018,z:low.headCenter.z};
       record.dust=true;stats.dustSweeps++;lastDust={...contact};
       result.groundContact=new THREE.Vector3(contact.x,contact.y,contact.z);lastGround={...contact};
-      for(let i=0;i<28;i++){
-        const angle=i/28*Math.PI*2+(random()-.5)*.15,speed=1.6+random()*2.3;
+      for(let i=0;i<20;i++){
+        const angle=i/20*Math.PI*2+(random()-.5)*.15,speed=1.2+random()*1.7;
         velocity.set(Math.sin(angle)*speed,.12+random()*.22,Math.cos(angle)*speed);
-        emit(dust,contact,velocity,0xb29a78,.30+random()*.16,.10+random()*.08,1.4);
+        emit(dust,contact,velocity,0xb29a78,.28+random()*.10,.085+random()*.065,1.4);
       }
-      for(let i=0;i<10;i++){
-        const angle=i/10*Math.PI*2,speed=1+random()*1.7;
+      for(let i=0;i<8;i++){
+        const angle=i/8*Math.PI*2,speed=.9+random()*1.5;
         velocity.set(Math.sin(angle)*speed,.25+random()*.55,Math.cos(angle)*speed);
         emit(chips,contact,velocity,i%2?0x8b8170:0xb29c7b,.35+random()*.18,.035+random()*.03,5);
       }
       const mark=marks[markCursor++%marks.length];
       mark.hammer=true;mark.mesh.geometry=hammerCrackGeometry;mark.mesh.material.color.setHex(0x4d4030);
-      mark.active=mark.awaiting=true;mark.age=mark.unseen=0;mark.life=.75;
-      mark.mesh.position.set(contact.x,contact.y,contact.z);mark.mesh.rotation.set(-Math.PI/2,0,0);mark.mesh.scale.setScalar(1.15);
+      mark.active=mark.awaiting=true;mark.age=mark.unseen=0;mark.life=1.5;
+      mark.mesh.position.set(contact.x,contact.y,contact.z);mark.mesh.rotation.set(-Math.PI/2,0,0);mark.mesh.scale.setScalar(1.12);
     }
     refresh();return result;
   }

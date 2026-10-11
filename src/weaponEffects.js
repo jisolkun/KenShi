@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { getWeapon } from './weapons.js';
+import { getHammerFeedback } from './hammerFeedback.js';
 
 // Local coordinates follow the combat convention: +Z forward, +X right.
 // Each silhouette is authored once, shared by all pooled instances.
@@ -63,24 +64,28 @@ export function createWeaponEffects(scene, baseEffects) {
     return geometries.get('great-hammer:core');
   }
   function updateHammerImpact(o,phase) {
-    const fade=(1-phase)*(1-phase),dummy=o.dummy;
+    const fade=(1-phase)*(1-phase),dummy=o.dummy,feedback=o.feedback;
     for(let i=0;i<o.dust.count;i++){
-      const angle=i/o.dust.count*Math.PI*2,travel=.055+o.age*(1.3+i%3*.22);
-      dummy.position.set(Math.sin(angle)*travel,Math.cos(angle)*travel*.62,.04+o.age*.65);
+      const angle=i/o.dust.count*Math.PI*2;
+      const spread=.045+o.age*(.85+i%3*.18)*feedback.dustSpread;
+      // The whole cluster faces the measured head velocity. Rising blows
+      // drive a narrow plume; the waist swing spreads a wider blunt fan.
+      dummy.position.set(Math.sin(angle)*spread,Math.cos(angle)*spread*.65,
+        .025+o.age*feedback.dustDrive*(.8+i%2*.25));
       dummy.rotation.set(i*.8,o.age*3,i*.4);
-      const size=(.045+i%3*.012)*(1+phase*.7)*Math.max(.08,1-phase);
-      dummy.scale.set(size,size*.65,size*1.35);dummy.updateMatrix();o.dust.setMatrixAt(i,dummy.matrix);
+      const size=(.037+i%3*.011)*(1+phase*.45)*Math.max(.08,1-phase);
+      dummy.scale.set(size,size*.62,size*(o.style===1?1.8:1.3));dummy.updateMatrix();o.dust.setMatrixAt(i,dummy.matrix);
     }
-    o.dust.instanceMatrix.needsUpdate=true;o.dust.material.opacity=.48*fade;
-    const coreFade=Math.max(0,1-o.age/(o.hammerFinisher?.065:.045));
-    o.core.material.opacity=.88*coreFade*coreFade;
-    o.core.scale.setScalar((o.hammerFinisher?.145:.105)*(1+phase*.18));
+    o.dust.instanceMatrix.needsUpdate=true;o.dust.material.opacity=.57*fade;
+    const coreFade=Math.max(0,1-o.age/feedback.flashLife);
+    o.core.material.opacity=.94*coreFade*coreFade;
+    o.core.scale.fromArray(feedback.coreScale).multiplyScalar(1+phase*.16);
   }
   function emitHammerImpact(pos,combo,power,headDirection) {
     const style=((combo%4)+4)%4,key=`great-hammer:impact:${style}`;
     let o=spare.get(key)?.pop();
     if(!o){
-      const group=new THREE.Group(),core=new THREE.Mesh(hammerCoreGeometry(),material(0xffedc6,.88));
+      const group=new THREE.Group(),core=new THREE.Mesh(hammerCoreGeometry(),material(0xffedc6,.94));
       core.name='hammer-blunt-core';core.renderOrder=3;
       const dust=new THREE.InstancedMesh(debrisGeometry(),material(0xbfa285,.48),style===3?8:6);
       dust.name='hammer-short-impact-dust';dust.instanceMatrix.setUsage(THREE.DynamicDrawUsage);dust.frustumCulled=false;
@@ -90,7 +95,8 @@ export function createWeaponEffects(scene, baseEffects) {
     const hammerIndices=live.map((entry,index)=>entry.hammerImpact?index:-1).filter(index=>index>=0);
     if(hammerIndices.length>=24)release(live.splice(hammerIndices[0],1)[0]);
     if(live.length>=MAX_LIVE)release(live.shift());
-    o.age=0;o.unseenAge=0;o.awaitingPresentation=true;o.life=o.hammerFinisher?.22:.16;
+    o.feedback=getHammerFeedback(style);o.style=style;
+    o.age=0;o.unseenAge=0;o.awaitingPresentation=true;o.life=o.feedback.impactLife;
     o.group.visible=true;o.group.position.copy(pos);o.group.quaternion.setFromUnitVectors(forward,headDirection);o.group.scale.setScalar(power);
     updateHammerImpact(o,0);scene.add(o.group);live.push(o);
   }
@@ -163,14 +169,14 @@ export function createWeaponEffects(scene, baseEffects) {
       const style=((combo%4)+4)%4;
       if(cutDirection?.isVector3&&Number.isFinite(cutDirection.lengthSq())&&cutDirection.lengthSq()>.0001)direction.copy(cutDirection).normalize();
       else {
-        direction.fromArray(id==='great-hammer'?[0,style===3?-1:-.15,style===3?.15:1]:greatCutDirections[style]).normalize();
+        direction.fromArray(id==='great-hammer'?getHammerFeedback(style).direction:greatCutDirections[style]).normalize();
         direction.applyAxisAngle(up,angle);
       }
     }
     lastImpact={sequence:++impactSequence,id,combo:((combo%4)+4)%4,critical,position:pos.toArray(),cutDirection:direction.toArray()};
     emit(id,pos,angle,combo,'impact',critical?(id==='great-dao'?1.25:1.35):1,direction);
     if(id==='great-hammer'){
-      baseEffects?.hammerImpact?.(pos,direction,combo===3?1.4:1,critical);
+      baseEffects?.hammerImpact?.(pos,direction,combo===3?1.4:1,critical,combo);
       return;
     }
     // Keep the authored combo index with the physical hit so the base effect

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { HAMMER_STEPS, GREAT_DAO_STEPS, getHeavyWeaponSteps, heavyWeaponStepDelta,
   heavyWeaponStepProgress, hammerStepDelta, greatDaoStepDelta, greatDaoStepProgress,
   greatDaoTargetGap, resolveGreatDaoStep } from '../src/greatDaoMovement.js';
+import {getReviewedAttack} from '../src/choreography/index.js';
 
 const close = (a, b) => assert.ok(Math.abs(a - b) < 1e-6, `${a} differs from ${b}`);
 function travel(combo, rate, { frozen = false, obstacles = [], targets = [] } = {}) {
@@ -20,21 +21,32 @@ function travel(combo, rate, { frozen = false, obstacles = [], targets = [] } = 
   return { position, path };
 }
 
-test('hammer chain advances with alternating sweep footwork and a straight strongest final stomp', () => {
+test('hammer chain uses a diagonal entry, compact uppercut, wide pivot and planted final stomp', () => {
   const positions = [0, 1, 2, 3].map(combo => travel(combo, 120).position);
-  for (const position of positions) assert.ok(position.z >= .3);
-  assert.ok(positions[0].x > .1 && positions[1].x < -.1 && positions[2].x > .1);
+  for (const position of positions) assert.ok(position.z > .05);
+  assert.ok(positions[0].x > .1 && positions[2].x < -.1,
+    'the diagonal entry and broad return sweep step to opposing sides');
+  close(positions[1].x, 0);
   close(positions[3].x, 0);
-  assert.ok(positions[3].z > Math.max(...positions.slice(0, 3).map(position => position.z)));
+  assert.ok(positions[1].z < positions[0].z && positions[1].z < positions[2].z,
+    'the rising follow-up stays compact instead of repeating the broad sweep step');
+  assert.ok(positions[2].z > positions[0].z && positions[2].z > positions[3].z,
+    'the body pivot has a visibly wider travel budget than the planted finisher');
 });
 
-test('hammer preparation, concentrated step and braking end before the rear foot plants', () => {
-  const preparation = hammerStepDelta(0, .06, .30).forward / .24;
-  const release = hammerStepDelta(0, .30, .63).forward / .33;
-  const brake = hammerStepDelta(0, .63, .76).forward / .13;
-  assert.ok(release > preparation * 2 && release > brake * 2);
-  assert.deepEqual(hammerStepDelta(3, .76, 1), { forward: 0, lateral: 0 });
-  assert.deepEqual(hammerStepDelta(3, 1, 1.5), { forward: 0, lateral: 0 });
+test('each hammer root step settles before its real head can damage an enemy', () => {
+  for (let combo = 0; combo < 4; combo++) {
+    const action = getReviewedAttack('great-hammer', combo);
+    const start = Math.min(...action.contacts.map(contact => contact.start));
+    const preparation = hammerStepDelta(combo, 0, start);
+    assert.ok(preparation.forward > .05, 'there is a visible step into the loaded attack');
+    close(preparation.forward, HAMMER_STEPS[combo].forward);
+    close(preparation.lateral, HAMMER_STEPS[combo].lateral);
+    const impact = hammerStepDelta(combo, start, 1), settled = hammerStepDelta(combo, 1, 1.5);
+    assert.ok(impact.forward === 0 && impact.lateral === 0,
+      'the hammer does not drag its planted feet forward during active impact');
+    assert.ok(settled.forward === 0 && settled.lateral === 0);
+  }
 });
 
 test('hammer root movement is consistent across sample rates and contact freezes', () => {
