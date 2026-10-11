@@ -2,18 +2,22 @@
 // Sweeps release one bounded fan; a slam requires confirmed floor contact.
 const profiles = [
   { direction: [-.94,-.06,.34], impactLife: .18, flashLife: .035, coreScale: [.150,.110,.180],
+    swingLife: .28, swingRadius: 1.95, swingSweep: 2.35, swingWidth: .30, swingHeight: 1.02,
     dustSpread: 1.20, dustDrive: 3.6, wakeLife: .105, wakeWidth: 4.20,
     airTone: 98, airDuration: .090, airVolume: .24, airFilter: 380,
     hitTone: 105, hitDuration: .11, hitFilter: 620, hitCrackTone: 174, cameraGain: 1.80, enemyStop: .012 },
   { direction: [-.32,-.84,.44], impactLife: .19, flashLife: .040, coreScale: [.155,.120,.180],
+    swingLife: .27, swingRadius: 1.86, swingSweep: 2.20, swingWidth: .34, swingHeight: .98,
     dustSpread: 1.60, dustDrive: 4.5, wakeLife: .100, wakeWidth: 4.60,
     airTone: 110, airDuration: .085, airVolume: .23, airFilter: 420,
     hitTone: 118, hitDuration: .12, hitFilter: 720, hitCrackTone: 184, cameraGain: 2.00, enemyStop: .014 },
   { direction: [.96,.02,.26], impactLife: .22, flashLife: .045, coreScale: [.170,.120,.180],
+    swingLife: .31, swingRadius: 2.18, swingSweep: 2.72, swingWidth: .40, swingHeight: .94,
     dustSpread: 1.50, dustDrive: 4.0, wakeLife: .115, wakeWidth: 4.80,
     airTone: 90, airDuration: .110, airVolume: .28, airFilter: 360,
     hitTone: 92, hitDuration: .13, hitFilter: 570, hitCrackTone: 168, cameraGain: 2.15, enemyStop: .018 },
   { direction: [.02,-.96,.28], impactLife: .24, flashLife: .055, coreScale: [.170,.120,.200],
+    swingLife: .36, swingRadius: 2.48, swingSweep: 3.02, swingWidth: .46, swingHeight: .88,
     dustSpread: 2.00, dustDrive: 5.5, wakeLife: .120, wakeWidth: 5.20,
     airTone: 76, airDuration: .130, airVolume: .32, airFilter: 310,
     hitTone: 70, hitDuration: .16, hitFilter: 440, hitCrackTone: 138, cameraGain: 2.70, enemyStop: .028 },
@@ -23,6 +27,10 @@ const profiles = [
 export function getHammerFeedback(combo = 0) {
   return profiles[((Math.trunc(combo) % 4) + 4) % 4] ?? profiles[0];
 }
+
+// The broad release arc is a presentation layer only. Damage still comes from
+// the measured head sweep below, so making this silhouette larger cannot widen
+// the hitbox or create an invisible hit behind the hammer.
 
 export function hammerReactionDirection(headDirection, fallback = { x: 0, z: 1 }) {
   // An almost vertical smash uses the enemy's radial escape direction.

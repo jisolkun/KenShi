@@ -1237,6 +1237,14 @@ function reviewedHammerStrike(phase, frames, action, preview=false) {
   const crossedRelease=phase>=action.swing[0]&&(!sameStroke||priorPhase<action.swing[0]);
   if(crossedRelease&&!hero.strokeContacts.has(0)) {
     hero.strokeContacts.add(0);
+    const releaseMotion=prior?.headCenter&&frame.headCenter
+      ? frame.headCenter.clone().sub(prior.headCenter) : null;
+    const releaseAngle=releaseMotion&&releaseMotion.lengthSq()>.0001
+      ? Math.atan2(releaseMotion.x,releaseMotion.z) : hero.angle;
+    // The broad release silhouette is presentation-only. The following
+    // contact loop still uses the measured head sweep, so the dramatic arc
+    // cannot add damage outside the physical hammer head.
+    weaponFx.hammerSwing?.(hero.pos,releaseAngle,hero.combo,hero.combo===3?1.15:1);
     safeAudio('weaponSlash',currentWeapon.id,hero.combo,'smash');
   }
   const fanPulse=(hero.combo===0||hero.combo===2)&&hammerPulseCrossed(action,phase,priorPhase)

@@ -37,6 +37,25 @@ test('hammer pressure fans show the actual bounded area and survive their first 
   fx.destroy();
 });
 
+test('hammer release emits a tall display-only arc that fades after presentation',()=>{
+  const scene=new THREE.Scene();let impacts=0;
+  const fx=createWeaponEffects(scene,{hammerImpact(){impacts++;}});
+  const origin=new THREE.Vector3(1,0,-2);
+  fx.hammerSwing(origin,.4,3,1.15);
+  assert.equal(impacts,0,'the release silhouette never substitutes for a physical hit');
+  assert.equal(fx.getState().activeHammerSwings,1);
+  const group=scene.children[0],outer=group.getObjectByName('hammer-release-outer-arc'),core=group.getObjectByName('hammer-release-white-core');
+  assert.ok(outer&&core);
+  outer.geometry.computeBoundingBox();
+  const span=outer.geometry.boundingBox.getSize(new THREE.Vector3());
+  assert.ok(span.y>span.x*.55&&span.y>1,'the hammer release reads as a broad vertical arc');
+  const opacity=outer.material.opacity;
+  fx.update(.2);assert.equal(outer.material.opacity,opacity,'unpresented preview keeps its initial silhouette');
+  fx.presented();fx.update(.08);assert.ok(outer.material.opacity<opacity);
+  fx.update(.4);assert.equal(fx.getState().activeHammerSwings,0);
+  fx.clear();fx.destroy();
+});
+
 test('hammer contact stays bounded, follows the actual head velocity and creates no sword or floor effects',()=>{
   const scene=new THREE.Scene(),point=new THREE.Vector3(2,1.3,-3),direction=new THREE.Vector3(.1,-.9,.3).normalize();
   let contacts=0;

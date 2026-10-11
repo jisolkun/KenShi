@@ -245,13 +245,19 @@ export function createEffects(scene, camera) {
     temp.crossVectors(direction,side).normalize();
     cameraRight.set(1,0,0).applyQuaternion(camera.quaternion);cameraUp.set(0,1,0).applyQuaternion(camera.quaternion);
     const angle=Math.atan2(direction.dot(cameraUp),direction.dot(cameraRight));
-    emit(flashes,position,zero,0xffedc6,feedback.flashLife,.22+weight*.050,.15+weight*.035,1,0,angle,true);
-    for(let i=0;i<(critical?8:5);i++){
+    const starSize=.30+weight*.075;
+    // Two directional layers match the reference heavy hit: a short warm
+    // core followed by a cooler, wider star. Both use the pooled flash pass,
+    // so a crowd of victims cannot allocate a new mesh per contact.
+    emit(flashes,position,zero,0xffedc6,feedback.flashLife,starSize,starSize*.62,1,0,angle,true);
+    emit(flashes,position,zero,critical?0x9edcff:0xd9b7e8,Math.min(.20,feedback.impactLife*.82),starSize*(critical?2.25:1.72),starSize*.20,1,0,angle+.58,true);
+    if(critical)emit(flashes,position,zero,0xffffff,Math.min(.16,feedback.impactLife*.68),starSize*1.9,starSize*.13,1,0,angle-Math.PI*.46,true);
+    for(let i=0;i<(critical?10:6);i++){
       velocity.copy(direction).multiplyScalar(feedback.dustDrive*(.5+Math.random()*.4))
         .addScaledVector(side,(Math.random()-.5)*feedback.dustSpread*2)
         .addScaledVector(temp,(Math.random()-.5)*feedback.dustSpread);
       emit(slivers,position,velocity,i%2?0xbda084:0xe6c7a0,.16+Math.random()*.08,
-        .10+Math.random()*.09,.070+Math.random()*.045,1,3,0,true);
+        .12+Math.random()*.11,.080+Math.random()*.055,1,3,0,true);
     }
     for(let i=0;i<(critical?6:3);i++){
       velocity.copy(direction).multiplyScalar(feedback.dustDrive*.45)

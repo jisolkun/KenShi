@@ -133,9 +133,12 @@ export function createAudio() {
     if(id==='great-hammer') {
       const feedback=getHammerFeedback(combo);
       // The quick rising beat, long waist swing and loaded slam move
-      // different amounts of air. Their release stays short and low.
+      // different amounts of air. A delayed low after-pulse makes the head
+      // feel like it keeps displacing the room after the first release.
       noise(feedback.airDuration,feedback.airVolume,feedback.airFilter,140,'lowpass',0,.004);
       tone(feedback.airTone,32,feedback.airDuration,combo===3?.070:.040,'sine',.003,.004);
+      noise(feedback.airDuration*.72,feedback.airVolume*.48,feedback.airFilter*.72,95,'lowpass',.045,.003);
+      if(combo===3)tone(58,28,.18,.055,'sine',.055,.004);
       return;
     }
     if(id==='great-dao') {
