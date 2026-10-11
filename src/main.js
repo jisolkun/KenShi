@@ -13,7 +13,8 @@ import { getReviewedAttack, sampleReviewedAttack } from "./choreography/index.js
 import { getHammerFeedback, hammerReactionDirection, hammerWakeActive, hammerContactAccent,
   getHammerArea, hammerAreaContains, hammerPulseCrossed } from "./hammerFeedback.js";
 import { isCombatTarget, attackDistances, chooseAttackTarget, attackCanTrack,
-  attackRecoveryPhase, attackChainPhase, segmentClear, planObstaclePath, projectWalkablePoint } from "./heroAI.js";
+  attackRecoveryPhase, attackChainPhase, choosePursuitTarget, pursuitTargetPoint,
+  segmentClear, planObstaclePath, projectWalkablePoint } from "./heroAI.js";
 import "./style.css";
 
 const isHeavyWeapon = id => id === 'great-dao' || id === 'great-hammer';
@@ -153,6 +154,10 @@ const hero = {
   stamina: 100,
   target: null,
   attackTarget: null,
+  // Automatic combat follows the source game's decision cadence: a short
+  // target lock prevents frame-to-frame thrashing while still reacquiring a
+  // better threat when the locked enemy dies or leaves the arena.
+  ai: { decisionTime: 0.1, lockTime: 0, target: null, previousTarget: null },
   navigation: null,
   attackEndRendered: false,
   destination: null,
@@ -369,11 +374,15 @@ function movementGoal() {
     }
     return routedMovement(hero.destination);
   }
-  if (isCombatTarget(hero.target, enemies)) {
-    const range = attackDistances(currentWeapon.moves[hero.combo], hero.target.radius,
+  const target = isCombatTarget(hero.target, enemies) ? hero.target
+    : isCombatTarget(hero.ai.target, enemies) ? hero.ai.target : null;
+  if (target) {
+    const range = attackDistances(currentWeapon.moves[hero.combo], target.radius,
       !!getReviewedAttack(currentWeapon.id, hero.combo));
-    const stoppingDistance = segmentClear(hero.pos, hero.target.pos, world.obstacles) ? range.stop : 0;
-    return routedMovement(hero.target.pos, stoppingDistance, `target:${hero.target.id}`);
+    const stoppingDistance = segmentClear(hero.pos, target.pos, world.obstacles) ? range.stop : 0;
+    const endpoint = hero.target ? target.pos : pursuitTargetPoint(target);
+    return routedMovement(endpoint ? new THREE.Vector3(endpoint.x, 0, endpoint.z) : target.pos,
+      stoppingDistance, `target:${target.id}`);
   }
   return null;
 }
@@ -499,6 +508,7 @@ function stateSnapshot() {
       attackPhase: hero.state === 'attack' ? Math.min(1, hero.elapsed / hero.duration) : 0,
       attackDuration: hero.state === 'attack' ? hero.duration : 0,
       target: hero.target?.id ?? null,
+      aiTarget: hero.ai.target?.id ?? null,
       attackTarget: hero.attackTarget?.id ?? null,
       gait: hero.gaitPhase,
       transition: { ...hero.transition },
@@ -647,6 +657,10 @@ function chooseWeapon(id = currentWeapon.id) {
   hero.duration = 0;
   hero.target = null;
   hero.attackTarget = null;
+  hero.ai.target = null;
+  hero.ai.previousTarget = null;
+  hero.ai.lockTime = 0;
+  hero.ai.decisionTime = .1;
   hero.navigation = null;
   hero.destination = null;
   hero.velocity.set(0, 0, 0);
@@ -715,6 +729,10 @@ function startGame(weaponId = currentWeapon.id) {
   hero.flash = 0;
   hero.target = null;
   hero.attackTarget = null;
+  hero.ai.target = null;
+  hero.ai.previousTarget = null;
+  hero.ai.lockTime = 0;
+  hero.ai.decisionTime = .1;
   hero.navigation = null;
   hero.destination = null;
   hero.disengage = 0;
@@ -963,11 +981,51 @@ function advanceHeavyWeaponStep(comboIndex, previousPhase, phase, dt, preview = 
   hero.turnLean *= Math.exp(-dt * 12);
 }
 function heroAttackCandidate(previousTarget = hero.attackTarget) {
-  return chooseAttackTarget({ position: hero.pos, enemies, manualTarget: hero.target,
+  const manualTarget = isCombatTarget(hero.target, enemies) ? hero.target : hero.ai.target;
+  return chooseAttackTarget({ position: hero.pos, enemies, manualTarget,
     previousTarget, move: currentWeapon.moves[hero.combo],
     reviewed: !!getReviewedAttack(currentWeapon.id, hero.combo),
     moving: !!hero.destination || keyboardDirection().lengthSq() > 0,
     disengage: hero.disengage, cooldown: hero.nextAttackIn, obstacles: world.obstacles });
+}
+
+function updateHeroDecision(dt) {
+  const ai = hero.ai;
+  const manual = isCombatTarget(hero.target, enemies) ? hero.target : null;
+  const keyboard = keyboardDirection();
+  // Taps, keyboard movement and rolls are explicit commands. They suspend
+  // automatic pursuit until the command finishes, matching the source game's
+  // input priority instead of fighting the player's direction every frame.
+  if (manual) {
+    ai.target = manual;
+    ai.previousTarget = manual;
+    ai.lockTime = 1.2;
+    ai.decisionTime = .5;
+    return;
+  }
+  if (hero.destination || keyboard.lengthSq() > 0 || hero.state === 'roll' ||
+      hero.state === 'hurt' || hero.state === 'dead' || hero.hp <= 0) {
+    ai.previousTarget = ai.target;
+    ai.target = null;
+    ai.lockTime = 0;
+    ai.decisionTime = .1;
+    return;
+  }
+  ai.lockTime = Math.max(0, ai.lockTime - dt);
+  ai.decisionTime -= dt;
+  if (ai.decisionTime > 0 && isCombatTarget(ai.target, enemies)) return;
+  while (ai.decisionTime <= 0) ai.decisionTime += .5;
+  const retained = ai.lockTime > 0 ? ai.target : null;
+  ai.previousTarget = ai.target;
+  ai.target = choosePursuitTarget({
+    position: hero.pos,
+    enemies,
+    currentTarget: retained,
+    previousTarget: ai.previousTarget,
+    obstacles: world.obstacles,
+    maxDistance: 24,
+  });
+  ai.lockTime = ai.target ? 1.2 : 0;
 }
 function hurtEnemy(
   e,
@@ -1065,6 +1123,7 @@ function hurtEnemy(
       slowScale = 0.5;
     }
     if (hero.target === e) { hero.target = null; hero.navigation = null; }
+    if (hero.ai.target === e) { hero.ai.previousTarget = e; hero.ai.target = null; hero.ai.lockTime = 0; }
     return true;
   }
   if (e.type === "boss") {
@@ -1362,6 +1421,10 @@ function commandTap(position, enemy = null) {
     : new THREE.Vector3(position.x, 0, position.z);
   clampPosition(p);
   hero.target = isCombatTarget(enemy, enemies) ? enemy : null;
+  hero.ai.previousTarget = hero.ai.target;
+  hero.ai.target = hero.target;
+  hero.ai.lockTime = hero.target ? 1.2 : 0;
+  hero.ai.decisionTime = .5;
   hero.destination = hero.target ? null : p;
   hero.navigation = null;
   hero.disengage = hero.target ? 0 : 0.12;
@@ -1413,6 +1476,10 @@ function roll(direction) {
   hero.disengage = 0.65;
   hero.target = null;
   hero.attackTarget = null;
+  hero.ai.previousTarget = hero.ai.target;
+  hero.ai.target = null;
+  hero.ai.lockTime = 0;
+  hero.ai.decisionTime = .1;
   hero.navigation = null;
   targetMarker.visible = false;
   hero.combo = 0;
@@ -1443,6 +1510,12 @@ function updateHero(frameDt) {
     targetMarker.visible = false;
   }
   if (hero.attackTarget && !isCombatTarget(hero.attackTarget, enemies)) hero.attackTarget = null;
+  if (hero.ai.target && !isCombatTarget(hero.ai.target, enemies)) {
+    hero.ai.previousTarget = hero.ai.target;
+    hero.ai.target = null;
+    hero.ai.lockTime = 0;
+  }
+  updateHeroDecision(dt);
   const maxSpeed = 5.8 * (0.88 + currentWeapon.stats.speed * 0.024);
   function navigate() {
     const goal = movementGoal();
@@ -2327,11 +2400,12 @@ function animate(now) {
         weaponFx.update(step);
       }
     }
-    targetMarker.visible = !!hero.target && hero.target.state !== "dead";
+    const markerTarget = hero.target || hero.ai.target;
+    targetMarker.visible = !!markerTarget && markerTarget.state !== "dead";
     if (targetMarker.visible) {
-      targetMarker.position.set(hero.target.pos.x, 0.05, hero.target.pos.z);
+      targetMarker.position.set(markerTarget.pos.x, 0.05, markerTarget.pos.z);
       targetMarker.scale.setScalar(
-        hero.target.type === "boss"
+        markerTarget.type === "boss"
           ? 1.65
           : 1 + Math.sin(globalTime * 5) * 0.03,
       );

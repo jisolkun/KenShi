@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { isCombatTarget, attackDistances, chooseAttackTarget, attackCanTrack,
-  attackRecoveryPhase, attackChainPhase, planObstaclePath, projectWalkablePoint, segmentClear } from '../src/heroAI.js';
+  attackRecoveryPhase, attackChainPhase, choosePursuitTarget, pursuitTargetPoint,
+  planObstaclePath, projectWalkablePoint, segmentClear } from '../src/heroAI.js';
 import { getWeapon } from '../src/weapons.js';
 import { getReviewedAttack } from '../src/choreography/index.js';
 import { createCharacter, poseCharacter } from '../src/characters.js';
@@ -157,4 +158,23 @@ test('commands beside edge lanterns stay inside the map and remain reachable', (
     assert.ok(path.length, 'the projected edge command has a valid route');
     assert.deepEqual(path.at(-1), endpoint);
   }
+});
+
+test('automatic pursuit keeps a short source-style target lock instead of thrashing', () => {
+  const archer = enemy(1, 0, 6); archer.type = 'archer'; archer.maxHp = archer.hp = 48;
+  const grunt = enemy(2, 1.2, 3); grunt.type = 'grunt'; grunt.maxHp = grunt.hp = 65;
+  const locked = choosePursuitTarget({ position: { x: 0, z: 0 }, enemies: [grunt, archer] });
+  assert.equal(locked, archer, 'the ranged threat gets a tactical priority over a slightly nearer grunt');
+  assert.equal(choosePursuitTarget({ position: { x: 0, z: 0 }, enemies: [grunt, archer], currentTarget: locked }), locked);
+  grunt.hp = 5;
+  assert.equal(choosePursuitTarget({ position: { x: 0, z: 0 }, enemies: [grunt, archer], currentTarget: null }), grunt,
+    'a nearly defeated enemy is selected when the decision cadence allows a retarget');
+});
+
+test('automatic pursuit leads a moving target without changing the target object', () => {
+  const target = enemy(1, 0, 6);
+  target.velocity = { x: 2, z: -1 };
+  const point = pursuitTargetPoint(target);
+  assert.deepEqual(point, { x: .36, z: 5.82 });
+  assert.deepEqual(target.pos, { x: 0, z: 6 });
 });

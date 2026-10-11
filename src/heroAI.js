@@ -109,6 +109,51 @@ export function chooseAttackTarget({ position, enemies, manualTarget = null,
   return best;
 }
 
+// Source AI_Enemy01 keeps a target direction between its half-second
+// decisions instead of selecting whichever actor happens to be closest on
+// every frame.  The player uses the same idea for automatic combat: retain a
+// useful target briefly, prefer threats that can be reached without a detour,
+// and only fall back to distance when the tactical score is equal.
+export function choosePursuitTarget({ position, enemies, currentTarget = null,
+  previousTarget = null, obstacles = [], maxDistance = Infinity }) {
+  const valid = enemy => isCombatTarget(enemy, enemies) &&
+    Number.isFinite(enemy.pos?.x) && Number.isFinite(enemy.pos?.z) &&
+    Math.hypot(enemy.pos.x - position.x, enemy.pos.z - position.z) <= maxDistance;
+  if (valid(currentTarget)) return currentTarget;
+  let best = null, bestScore = Infinity;
+  for (const enemy of enemies) {
+    if (!valid(enemy)) continue;
+    const dx = enemy.pos.x - position.x, dz = enemy.pos.z - position.z;
+    const distance = Math.hypot(dx, dz);
+    const clear = segmentClear(position, enemy.pos, obstacles, .5);
+    // Archers are the most dangerous when left unattended; a low-health
+    // target is a good finisher, while bosses remain a deliberate objective.
+    const threat = enemy.type === 'archer' ? -3 : enemy.type === 'boss' ? .8 : 0;
+    const health = Number.isFinite(enemy.maxHp) && enemy.maxHp > 0
+      ? Math.max(0, Math.min(1, enemy.hp / enemy.maxHp)) : .5;
+    const finish = health < .35 ? -1.1 : 0;
+    const blocked = clear ? 0 : 1.4;
+    const continuity = enemy === previousTarget ? -.45 : 0;
+    const score = distance * .8 + threat + finish + blocked + continuity;
+    if (score < bestScore - 1e-6 ||
+      Math.abs(score - bestScore) <= 1e-6 && (enemy.id ?? Infinity) < (best?.id ?? Infinity)) {
+      best = enemy;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+export function pursuitTargetPoint(target, leadTime = .18) {
+  if (!target?.pos) return null;
+  const point = { x: target.pos.x, z: target.pos.z };
+  if (target.velocity && Number.isFinite(target.velocity.x) && Number.isFinite(target.velocity.z)) {
+    point.x += Math.max(-.7, Math.min(.7, target.velocity.x * leadTime));
+    point.z += Math.max(-.7, Math.min(.7, target.velocity.z * leadTime));
+  }
+  return point;
+}
+
 export function attackCanTrack(phase, move, reviewedAttack = null) {
   const windows = reviewedAttack?.contacts?.map(contact => contact.window) || [move.active];
   const first = Math.min(...windows.map(window => window[0]));
