@@ -47,7 +47,7 @@ export function createUI(callbacks = {}, initialSelectedWeaponId = DEFAULT_WEAPO
         <div class="intro-copy"><span class="thin-rule"></span><p>荒寺钟声起，百鬼踏夜来。<br>双刀、砍刀、大刀与大锤，破阵震敌。</p></div>
         <div class="intro-level"><span>壹</span><div><small>今夜之战</small><b>荒寺 · 夜袭</b></div><i>三阵 / 三十六敌</i></div>
         <button class="primary-button start-button" data-action="start"><span>选择类型</span><i>→</i></button>
-        <div class="intro-controls"><span>点地行走</span><i>·</i><span>点敌追击</span><i>·</i><span>双击翻滚</span></div>
+        <div class="intro-controls"><span>点地行走</span><i>·</i><span>近身自动出招</span><i>·</i><span>双击翻滚</span></div>
       </section>
       <div class="intro-side"><span>风起荒寺</span><i></i><small>双刃出鞘 · 百鬼退散</small></div>
       <div class="intro-footer"><span>低多边形 · 国风动作</span><div><button class="text-button" data-action="sound" aria-label="切换声音">声音 · 开</button><button class="text-button" data-action="help">操作指引</button></div></div>
@@ -62,7 +62,7 @@ export function createUI(callbacks = {}, initialSelectedWeaponId = DEFAULT_WEAPO
     <div class="modal-layer is-hidden"><section class="game-modal" role="dialog" aria-modal="true" aria-label="战场菜单"></section></div>
     <div class="notification" role="status"><span></span></div>
     <div class="damage-layer" aria-hidden="true"></div>
-    <span class="game-version" aria-label="游戏版本">v0.12.0 · 震天破阵</span>
+    <span class="game-version" aria-label="游戏版本">v0.13.0 · 原式追身</span>
     <div class="orientation-notice" role="status"><div class="orientation-icon" aria-hidden="true">↻</div><b>请横屏游玩</b><span>将手机旋转至横向后继续</span><button class="orientation-retry" data-action="mobile-view-retry">重新尝试全屏与横屏</button></div>
   `;
   document.body.append(root);

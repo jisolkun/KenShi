@@ -1,10 +1,76 @@
-// Input and targeting decisions stay separate from animation and damage. These
-// rules approximate the original tap-to-chase / nearby automatic slash controls.
+// Input and targeting decisions stay separate from animation and damage. The
+// player-specific rules below mirror the reference ground input and trigger.
 export function isCombatTarget(enemy, enemies) {
   return !!enemy && enemy.state !== 'dead' && enemy.state !== 'spawn' &&
     (enemy.hp === undefined || enemy.hp > 0) &&
     Number.isFinite(enemy.pos?.x) && Number.isFinite(enemy.pos?.z) &&
     (!enemies || enemies.includes(enemy));
+}
+
+// The reference project does not pick a player target from a threat score.
+// Cha_Control exposes a small forward trigger (mycollider) and starts an
+// attack only when an enemy enters that volume.  These values are converted
+// from the source units (12.5 units per world unit) so the current scene can
+// use the same front-loaded trigger instead of a radial nearest-enemy query.
+// The reference map spans roughly twice the width of this scene (source
+// bounds are ±2.65*12.5, while this scene is ±17), so preserve the source
+// proportions while converting the trigger into current world units.
+const REFERENCE_SCENE_SCALE = .5;
+const REFERENCE_DIRECTION_DISTANCE = 2.5 * REFERENCE_SCENE_SCALE;
+export const REFERENCE_ATTACK_SENSOR_RULES = Object.freeze({
+  default: { radius: .13 * 12.5 * REFERENCE_SCENE_SCALE, forward: .17 * 12.5 * REFERENCE_SCENE_SCALE },
+  dual: { radius: .13 * 12.5 * REFERENCE_SCENE_SCALE, forward: .16 * 12.5 * REFERENCE_SCENE_SCALE },
+  spear: { radius: .15 * 12.5 * REFERENCE_SCENE_SCALE, forward: .20 * 12.5 * REFERENCE_SCENE_SCALE },
+  staff: { radius: .15 * 12.5 * REFERENCE_SCENE_SCALE, forward: .20 * 12.5 * REFERENCE_SCENE_SCALE },
+  ranged: { radius: .15 * 12.5 * REFERENCE_SCENE_SCALE, forward: .25 * 12.5 * REFERENCE_SCENE_SCALE },
+  runReady: { radius: .20 * 12.5 * REFERENCE_SCENE_SCALE, forward: .22 * 12.5 * REFERENCE_SCENE_SCALE },
+});
+
+function referenceWeaponFamily(weaponId = '') {
+  if (weaponId === 'dual-dao' || weaponId === 'dual') return 'dual';
+  if (['spear', 'halberd', 'staff'].includes(weaponId)) return weaponId;
+  if (['bow', 'crossbow', 'orb', 'magic'].includes(weaponId)) return 'ranged';
+  return 'default';
+}
+
+/**
+ * Return the source-style forward sensor contents and the first newly entered
+ * enemy. `previousInside` is intentionally stateful: the source uses
+ * OnTriggerEnter, so an enemy that remains in the volume must not retrigger a
+ * new attack every frame.
+ */
+export function referenceAttackSensorTargets({ position, angle = 0, enemies = [],
+  weaponId = 'dual-dao', runReady = false, previousInside = new Set() }) {
+  const family = referenceWeaponFamily(weaponId);
+  const rule = runReady ? REFERENCE_ATTACK_SENSOR_RULES.runReady
+    : REFERENCE_ATTACK_SENSOR_RULES[family] || REFERENCE_ATTACK_SENSOR_RULES.default;
+  const forward = { x: Math.sin(angle), z: Math.cos(angle) };
+  const center = { x: position.x + forward.x * rule.forward,
+    z: position.z + forward.z * rule.forward };
+  const near = enemies.filter(enemy => isCombatTarget(enemy, enemies)).filter(enemy => {
+    const radius = Math.max(0, Number(enemy.radius) || 0);
+    return Math.hypot(enemy.pos.x - center.x, enemy.pos.z - center.z) <=
+      rule.radius + radius + 1e-6;
+  }).sort((a, b) => {
+    const da = Math.hypot(a.pos.x - position.x, a.pos.z - position.z);
+    const db = Math.hypot(b.pos.x - position.x, b.pos.z - position.z);
+    return da - db || (a.id ?? 0) - (b.id ?? 0);
+  });
+  const inside = new Set(near.map(enemy => enemy.id));
+  const entered = near.find(enemy => !previousInside.has(enemy.id)) || null;
+  return { center, radius: rule.radius, near, inside, entered };
+}
+
+/** Match Cha_Control.AttackOn's movement-direction gate. */
+export function sourceAttackDirectionAllowed({ position, target, moveDirection = null }) {
+  if (!position || !target?.pos) return false;
+  const dx = target.pos.x - position.x, dz = target.pos.z - position.z;
+  const distance = Math.hypot(dx, dz);
+  if (distance < 1e-6) return true;
+  const direction = { x: dx / distance, z: dz / distance };
+  const movement = moveDirection || { x: 0, z: 0 };
+  const dot = direction.x * (movement.x || 0) + direction.z * (movement.z || 0);
+  return dot >= (distance > REFERENCE_DIRECTION_DISTANCE ? .5 : -.2);
 }
 
 export function attackDistances(move, radius = .45, reviewed = false) {
@@ -109,11 +175,9 @@ export function chooseAttackTarget({ position, enemies, manualTarget = null,
   return best;
 }
 
-// Source AI_Enemy01 keeps a target direction between its half-second
-// decisions instead of selecting whichever actor happens to be closest on
-// every frame.  The player uses the same idea for automatic combat: retain a
-// useful target briefly, prefer threats that can be reached without a detour,
-// and only fall back to distance when the tactical score is equal.
+// Kept for enemy-AI experiments and compatibility with older callers.  The
+// reference player never calls this scorer; its target comes from the forward
+// attack sensor above.
 export function choosePursuitTarget({ position, enemies, currentTarget = null,
   previousTarget = null, obstacles = [], maxDistance = Infinity }) {
   const valid = enemy => isCombatTarget(enemy, enemies) &&

@@ -12,8 +12,9 @@ import { getHeavyWeaponSteps, heavyWeaponStepDelta, greatDaoTargetGap, resolveGr
 import { getReviewedAttack, sampleReviewedAttack } from "./choreography/index.js";
 import { getHammerFeedback, hammerReactionDirection, hammerWakeActive, hammerContactAccent,
   getHammerArea, hammerAreaContains, hammerPulseCrossed } from "./hammerFeedback.js";
-import { isCombatTarget, attackDistances, chooseAttackTarget, attackCanTrack,
-  attackRecoveryPhase, attackChainPhase, choosePursuitTarget, pursuitTargetPoint,
+import { isCombatTarget, attackDistances, attackCanTrack,
+  attackRecoveryPhase, attackChainPhase, referenceAttackSensorTargets,
+  sourceAttackDirectionAllowed,
   segmentClear, planObstaclePath, projectWalkablePoint } from "./heroAI.js";
 import "./style.css";
 
@@ -119,6 +120,10 @@ const hero = {
   pos: new THREE.Vector3(0, 0, 4),
   velocity: new THREE.Vector3(), // External knockback, separate from locomotion.
   moveVelocity: new THREE.Vector3(),
+  // Direction sampled from the player's ground input.  The reference attack
+  // gate uses this input vector, rather than the current smoothed velocity.
+  inputDirection: new THREE.Vector3(),
+  speedFactor: 7,
   gaitPhase: 0,
   moveBlend: 0,
   turnLean: 0,
@@ -154,10 +159,9 @@ const hero = {
   stamina: 100,
   target: null,
   attackTarget: null,
-  // Automatic combat follows the source game's decision cadence: a short
-  // target lock prevents frame-to-frame thrashing while still reacquiring a
-  // better threat when the locked enemy dies or leaves the arena.
-  ai: { decisionTime: 0.1, lockTime: 0, target: null, previousTarget: null },
+  // The source player has no threat-scored target lock.  Automatic attacks
+  // come from a forward mycollider trigger (OnTriggerEnter) instead.
+  ai: { sensorEnabled: true, sensorInside: new Set(), target: null, previousTarget: null },
   navigation: null,
   attackEndRendered: false,
   destination: null,
@@ -296,7 +300,17 @@ function locomotion(
 ) {
   const remaining = Math.max(0, distance - stoppingDistance);
   const desired = direction?.clone().normalize() || new THREE.Vector3();
-  const speed = direction ? Math.min(maxSpeed, remaining / 0.09) : 0;
+  // Cha_Control's movement state starts at a run factor, decays at 2/s and
+  // crosses into walk before clearing.  Keep the existing collision-aware
+  // route, but use that source speed envelope instead of an AI-style
+  // exponential chase response.
+  let sourceSpeed = 0;
+  if (direction) {
+    if (hero.speedFactor > 4.5) sourceSpeed = maxSpeed;
+    else if (hero.speedFactor > .2) sourceSpeed = hero.speedFactor / 12 * 12.5;
+    hero.speedFactor = Math.max(0, hero.speedFactor - 2 * dt);
+  }
+  const speed = direction ? Math.min(sourceSpeed, remaining / 0.09) : 0;
   desired.multiplyScalar(speed);
   const response = speed > hero.moveVelocity.length() ? 24 : 27;
   hero.moveVelocity.lerp(desired, 1 - Math.exp(-dt * response));
@@ -355,6 +369,10 @@ function routedMovement(destination, stoppingDistance = 0, command = "ground") {
 function movementGoal() {
   const keyboard = keyboardDirection();
   if (keyboard.lengthSq() > 0) {
+    hero.inputDirection.copy(keyboard);
+    hero.speedFactor = 6.5;
+    hero.ai.sensorEnabled = true;
+    hero.ai.sensorInside.clear();
     hero.destination = null;
     hero.target = null;
     hero.navigation = null;
@@ -365,24 +383,15 @@ function movementGoal() {
   if (hero.destination) {
     const delta = hero.destination.clone().sub(hero.pos);
     const distance = delta.length();
-    if (distance < 0.035) {
-      hero.pos.copy(hero.destination);
+    if (distance < .625 || hero.speedFactor <= .2) {
+      if (distance < .035) hero.pos.copy(hero.destination);
       hero.destination = null;
       hero.moveVelocity.set(0, 0, 0);
+      hero.inputDirection.set(0, 0, 0);
       destinationMarker.visible = false;
       return null;
     }
     return routedMovement(hero.destination);
-  }
-  const target = isCombatTarget(hero.target, enemies) ? hero.target
-    : isCombatTarget(hero.ai.target, enemies) ? hero.ai.target : null;
-  if (target) {
-    const range = attackDistances(currentWeapon.moves[hero.combo], target.radius,
-      !!getReviewedAttack(currentWeapon.id, hero.combo));
-    const stoppingDistance = segmentClear(hero.pos, target.pos, world.obstacles) ? range.stop : 0;
-    const endpoint = hero.target ? target.pos : pursuitTargetPoint(target);
-    return routedMovement(endpoint ? new THREE.Vector3(endpoint.x, 0, endpoint.z) : target.pos,
-      stoppingDistance, `target:${target.id}`);
   }
   return null;
 }
@@ -659,12 +668,14 @@ function chooseWeapon(id = currentWeapon.id) {
   hero.attackTarget = null;
   hero.ai.target = null;
   hero.ai.previousTarget = null;
-  hero.ai.lockTime = 0;
-  hero.ai.decisionTime = .1;
+  hero.ai.sensorEnabled = true;
+  hero.ai.sensorInside.clear();
   hero.navigation = null;
   hero.destination = null;
   hero.velocity.set(0, 0, 0);
   hero.moveVelocity.set(0, 0, 0);
+  hero.inputDirection.set(0, 0, 0);
+  hero.speedFactor = 7;
   hero.moveBlend = 0;
   hero.attackCarry = 0;
   hero.flash = 0;
@@ -731,13 +742,15 @@ function startGame(weaponId = currentWeapon.id) {
   hero.attackTarget = null;
   hero.ai.target = null;
   hero.ai.previousTarget = null;
-  hero.ai.lockTime = 0;
-  hero.ai.decisionTime = .1;
+  hero.ai.sensorEnabled = true;
+  hero.ai.sensorInside.clear();
   hero.navigation = null;
   hero.destination = null;
   hero.disengage = 0;
   hero.velocity.set(0, 0, 0);
   hero.moveVelocity.set(0, 0, 0);
+  hero.inputDirection.set(0, 0, 0);
+  hero.speedFactor = 7;
   hero.gaitPhase = 0;
   hero.moveBlend = 0;
   hero.turnLean = 0;
@@ -943,6 +956,12 @@ function beginAttack(enemy) {
   if(getReviewedAttack(currentWeapon.id,hero.combo))hero.attackCarry=Math.min(1,hero.moveVelocity.length()/5.8);
   hero.attackTarget = enemy;
   if (isCombatTarget(enemy, enemies)) face(enemy.pos.clone().sub(hero.pos));
+  hero.inputDirection.set(Math.sin(hero.angle), 0, Math.cos(hero.angle));
+  hero.speedFactor = 5.2;
+  // Source disables mycollider for the whole attack and re-enables it only
+  // after the animation returns to locomotion.
+  hero.ai.sensorEnabled = false;
+  hero.ai.sensorInside.clear();
   hero.attackStep = isHeavyWeapon(currentWeapon.id) ? createHeavyWeaponStep(hero.combo) : null;
   hero.attackStepPhase = 0;
   destinationMarker.visible = !!hero.destination;
@@ -980,52 +999,40 @@ function advanceHeavyWeaponStep(comboIndex, previousPhase, phase, dt, preview = 
   hero.moveVelocity.copy(hero.pos).sub(start).multiplyScalar(1 / dt);
   hero.turnLean *= Math.exp(-dt * 12);
 }
-function heroAttackCandidate(previousTarget = hero.attackTarget) {
-  const manualTarget = isCombatTarget(hero.target, enemies) ? hero.target : hero.ai.target;
-  return chooseAttackTarget({ position: hero.pos, enemies, manualTarget,
-    previousTarget, move: currentWeapon.moves[hero.combo],
-    reviewed: !!getReviewedAttack(currentWeapon.id, hero.combo),
-    moving: !!hero.destination || keyboardDirection().lengthSq() > 0,
-    disengage: hero.disengage, cooldown: hero.nextAttackIn, obstacles: world.obstacles });
+function heroAttackCandidate() {
+  if (!hero.ai.sensorEnabled || hero.nextAttackIn > 0 || hero.disengage > 0 ||
+      hero.state === 'roll' || hero.state === 'hurt' || hero.state === 'dead' ||
+      hero.hp <= 0) return null;
+  const sensor = referenceAttackSensorTargets({
+    position: hero.pos,
+    angle: hero.angle,
+    enemies,
+    weaponId: currentWeapon.id,
+    previousInside: hero.ai.sensorInside,
+  });
+  hero.ai.sensorInside = sensor.inside;
+  const entered = sensor.entered;
+  if (!entered) return null;
+  // Cha_Control rejects an entered body when the input direction points away
+  // from it.  It disables the sensor until the next movement input instead
+  // of turning the hero around or pursuing the body.
+  if (!sourceAttackDirectionAllowed({
+    position: hero.pos,
+    target: entered,
+    moveDirection: { x: hero.inputDirection.x, z: hero.inputDirection.z },
+  })) {
+    hero.ai.sensorEnabled = false;
+    hero.ai.sensorInside.clear();
+    return null;
+  }
+  return entered;
 }
 
-function updateHeroDecision(dt) {
-  const ai = hero.ai;
-  const manual = isCombatTarget(hero.target, enemies) ? hero.target : null;
-  const keyboard = keyboardDirection();
-  // Taps, keyboard movement and rolls are explicit commands. They suspend
-  // automatic pursuit until the command finishes, matching the source game's
-  // input priority instead of fighting the player's direction every frame.
-  if (manual) {
-    ai.target = manual;
-    ai.previousTarget = manual;
-    ai.lockTime = 1.2;
-    ai.decisionTime = .5;
-    return;
-  }
-  if (hero.destination || keyboard.lengthSq() > 0 || hero.state === 'roll' ||
-      hero.state === 'hurt' || hero.state === 'dead' || hero.hp <= 0) {
-    ai.previousTarget = ai.target;
-    ai.target = null;
-    ai.lockTime = 0;
-    ai.decisionTime = .1;
-    return;
-  }
-  ai.lockTime = Math.max(0, ai.lockTime - dt);
-  ai.decisionTime -= dt;
-  if (ai.decisionTime > 0 && isCombatTarget(ai.target, enemies)) return;
-  while (ai.decisionTime <= 0) ai.decisionTime += .5;
-  const retained = ai.lockTime > 0 ? ai.target : null;
-  ai.previousTarget = ai.target;
-  ai.target = choosePursuitTarget({
-    position: hero.pos,
-    enemies,
-    currentTarget: retained,
-    previousTarget: ai.previousTarget,
-    obstacles: world.obstacles,
-    maxDistance: 24,
-  });
-  ai.lockTime = ai.target ? 1.2 : 0;
+// The original player has no periodic target decision loop.  Keep this
+// cleanup hook for save/debug state, but never select an enemy here.
+function updateHeroDecision() {
+  hero.ai.target = null;
+  hero.ai.previousTarget = null;
 }
 function hurtEnemy(
   e,
@@ -1123,7 +1130,7 @@ function hurtEnemy(
       slowScale = 0.5;
     }
     if (hero.target === e) { hero.target = null; hero.navigation = null; }
-    if (hero.ai.target === e) { hero.ai.previousTarget = e; hero.ai.target = null; hero.ai.lockTime = 0; }
+    if (hero.ai.target === e) { hero.ai.previousTarget = e; hero.ai.target = null; }
     return true;
   }
   if (e.type === "boss") {
@@ -1394,6 +1401,9 @@ function damageHero(amount, from) {
   hero.flash = 1;
   hero.invulnerable = 0.85;
   hero.state = "hurt";
+  hero.attackTarget = null;
+  hero.ai.sensorEnabled = true;
+  hero.ai.sensorInside.clear();
   hero.elapsed = 0;
   hero.duration = 0.24;
   hero.destination = null;
@@ -1420,7 +1430,7 @@ function damageHero(amount, from) {
   }
 }
 
-function commandTap(position, enemy = null) {
+function commandTap(position) {
   if (mode !== "playing" || hero.hp <= 0) return;
   metrics.taps++;
   audio.unlock?.();
@@ -1428,14 +1438,27 @@ function commandTap(position, enemy = null) {
     ? position.clone()
     : new THREE.Vector3(position.x, 0, position.z);
   clampPosition(p);
-  hero.target = isCombatTarget(enemy, enemies) ? enemy : null;
-  hero.ai.previousTarget = hero.ai.target;
-  hero.ai.target = hero.target;
-  hero.ai.lockTime = hero.target ? 1.2 : 0;
-  hero.ai.decisionTime = .5;
-  hero.destination = hero.target ? null : p;
+  const input = p.clone().sub(hero.pos);
+  input.y = 0;
+  if (input.length() > 1.0) {
+    hero.inputDirection.copy(input.normalize());
+    hero.speedFactor = 6.5;
+  } else if (input.length() < .625) {
+    hero.inputDirection.set(0, 0, 0);
+  }
+  // Cha_Control raycasts the ground and stores only the point.  A tap over an
+  // enemy is still a movement command; target selection is left to the
+  // forward attack sensor.
+  hero.target = null;
+  hero.ai.target = null;
+  hero.ai.previousTarget = null;
+  hero.ai.sensorEnabled = true;
+  hero.ai.sensorInside.clear();
+  // Source only replaces moveDirection when the sampled point is farther
+  // than 1.0 world unit; the .625–1.0 band retains the prior direction.
+  hero.destination = input.length() > 1.0 ? p : null;
   hero.navigation = null;
-  hero.disengage = hero.target ? 0 : 0.12;
+  hero.disengage = 0.12;
   if (
     hero.state === "attack" &&
     hero.hitDone &&
@@ -1447,14 +1470,10 @@ function commandTap(position, enemy = null) {
     hero.nextAttackIn = 0.12;
     locomotionState();
   }
-  destinationMarker.visible = !hero.target;
+  destinationMarker.visible = !!hero.destination;
   destinationMarker.position.set(p.x, 0.045, p.z);
   destinationMarker.scale.setScalar(1);
-  if (hero.target) {
-    targetMarker.visible = true;
-    updateEnemyBar(enemy);
-    targetMarker.position.set(enemy.pos.x, 0.05, enemy.pos.z);
-  } else targetMarker.visible = false;
+  targetMarker.visible = false;
 }
 function roll(direction) {
   if (
@@ -1475,6 +1494,7 @@ function roll(direction) {
   hero.state = "roll";
   hero.localHitStop = 0;
   hero.moveVelocity.set(0, 0, 0);
+  hero.inputDirection.set(0, 0, 0);
   hero.elapsed = 0;
   hero.duration = 0.43;
   hero.rollDirection.copy(d);
@@ -1486,8 +1506,8 @@ function roll(direction) {
   hero.attackTarget = null;
   hero.ai.previousTarget = hero.ai.target;
   hero.ai.target = null;
-  hero.ai.lockTime = 0;
-  hero.ai.decisionTime = .1;
+  hero.ai.sensorEnabled = true;
+  hero.ai.sensorInside.clear();
   hero.navigation = null;
   targetMarker.visible = false;
   hero.combo = 0;
@@ -1521,7 +1541,6 @@ function updateHero(frameDt) {
   if (hero.ai.target && !isCombatTarget(hero.ai.target, enemies)) {
     hero.ai.previousTarget = hero.ai.target;
     hero.ai.target = null;
-    hero.ai.lockTime = 0;
   }
   updateHeroDecision(dt);
   const maxSpeed = 5.8 * (0.88 + currentWeapon.stats.speed * 0.024);
@@ -1558,9 +1577,8 @@ function updateHero(frameDt) {
     const passing = isCombatTarget(hero.target, enemies) && hero.attackTarget !== hero.target &&
       hero.pos.distanceTo(hero.target.pos) > attackDistances(move, hero.target.radius, !!action).stop;
     const travelling = leaving || passing;
-    if (!hero.attackTarget && phase < move.active[0]) hero.attackTarget = heroAttackCandidate(null);
-    if (!travelling && canTrack && isCombatTarget(hero.attackTarget, enemies))
-      face(hero.attackTarget.pos.clone().sub(hero.pos), 1 - Math.exp(-dt * 24));
+    // The source captures facing when the sensor starts the attack.  It does
+    // not keep turning toward a moving victim during the wind-up.
     if (travelling) {
       hero.attackStep = null;
       hero.attackStepPhase = Math.min(1, phase);
@@ -1622,9 +1640,10 @@ function updateHero(frameDt) {
       (!isHeavyWeapon(currentWeapon.id) || hero.attackEndRendered)) {
       hero.combo = (hero.combo + 1) % 4;
       hero.comboTimer = 0;
-      const next = heroAttackCandidate();
-      if (next) beginAttack(next);
-      else navigate();
+      hero.attackTarget = null;
+      hero.ai.sensorEnabled = true;
+      hero.ai.sensorInside.clear();
+      navigate();
     }
   } else if (hero.state === "hurt" || hero.state === "dead") {
     hero.moveVelocity.multiplyScalar(Math.exp(-dt * 28));
@@ -1632,9 +1651,12 @@ function updateHero(frameDt) {
     if (hero.state === "dead" && hero.elapsed >= hero.duration)
       finishGame(false);
   } else {
+    // Movement is resolved first.  A newly entered sensor volume then starts
+    // the attack on this same simulation tick, matching OnTriggerEnter after
+    // player movement in the reference combat loop.
+    navigate();
     const enemy = heroAttackCandidate();
     if (enemy) beginAttack(enemy);
-    else navigate();
   }
   clampPosition(hero.pos);
   if (hero.state !== 'attack') hero.attackStep = null;
@@ -2108,33 +2130,6 @@ function pointFromEvent(event) {
   const point = new THREE.Vector3();
   return raycaster.ray.intersectPlane(ground, point) ? point : null;
 }
-function targetFromEvent(event) {
-  pointer.set(
-    (event.clientX / innerWidth) * 2 - 1,
-    (-event.clientY / innerHeight) * 2 + 1,
-  );
-  raycaster.setFromCamera(pointer, camera);
-  const result = raycaster.intersectObjects(
-    enemies.filter((e) => e.state !== "dead").map((e) => e.rig.group),
-    true,
-  );
-  if (result.length) {
-    const id = result[0].object.userData.enemyId;
-    return enemies.find((e) => e.id === id) || null;
-  }
-  let nearest = null,
-    best = event.pointerType === "touch" ? 34 : 23;
-  for (const e of enemies) {
-    if (e.state === "dead") continue;
-    const p = worldToScreen(e.pos.clone().add(new THREE.Vector3(0, 0.85, 0)));
-    const d = Math.hypot(p.x - event.clientX, p.y - event.clientY);
-    if (d < best) {
-      nearest = e;
-      best = d;
-    }
-  }
-  return nearest;
-}
 canvas.addEventListener("pointerdown", (event) => {
   if (event.button && event.button !== 0) return;
   audio.unlock?.();
@@ -2180,7 +2175,7 @@ canvas.addEventListener("pointerup", (event) => {
     roll(p.clone().sub(hero.pos));
     lastTap = null;
   } else {
-    commandTap(p, targetFromEvent(event));
+    commandTap(p);
     lastTap = { time: now, x: event.clientX, y: event.clientY };
   }
 });
@@ -2546,13 +2541,11 @@ if (new URLSearchParams(location.search).get("debug") === "1") {
             ),
       );
     },
-    commandTap(x, z, enemyId) {
-      const e = enemies.find((e) => e.id === enemyId);
+    commandTap(x, z) {
       commandTap(
         typeof x === "object"
           ? new THREE.Vector3(x.x, 0, x.z)
           : new THREE.Vector3(x, 0, z),
-        e,
       );
     },
     start: startGame,

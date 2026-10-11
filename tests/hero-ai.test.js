@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { isCombatTarget, attackDistances, chooseAttackTarget, attackCanTrack,
   attackRecoveryPhase, attackChainPhase, choosePursuitTarget, pursuitTargetPoint,
-  planObstaclePath, projectWalkablePoint, segmentClear } from '../src/heroAI.js';
+  planObstaclePath, projectWalkablePoint, segmentClear,
+  referenceAttackSensorTargets, sourceAttackDirectionAllowed } from '../src/heroAI.js';
 import { getWeapon } from '../src/weapons.js';
 import { getReviewedAttack } from '../src/choreography/index.js';
 import { createCharacter, poseCharacter } from '../src/characters.js';
@@ -177,4 +178,27 @@ test('automatic pursuit leads a moving target without changing the target object
   const point = pursuitTargetPoint(target);
   assert.deepEqual(point, { x: .36, z: 5.82 });
   assert.deepEqual(target.pos, { x: 0, z: 6 });
+});
+
+test('reference player sensor only reports a newly entered enemy in front', () => {
+  const front = enemy(1, 0, 2.2), side = enemy(2, 2.2, 0), rear = enemy(3, 0, -2.2);
+  const first = referenceAttackSensorTargets({
+    position: { x: 0, z: 0 }, angle: 0, enemies: [front, side, rear], weaponId: 'dual-dao',
+  });
+  assert.deepEqual(first.near.map(e => e.id), [1]);
+  assert.equal(first.entered, front);
+  const retained = referenceAttackSensorTargets({
+    position: { x: 0, z: 0 }, angle: 0, enemies: [front, side, rear], weaponId: 'dual-dao',
+    previousInside: first.inside,
+  });
+  assert.equal(retained.entered, null, 'a body inside the trigger does not retrigger every frame');
+});
+
+test('reference attack direction gate rejects a distant reverse input but allows a close body', () => {
+  const far = enemy(1, 0, 3);
+  assert.equal(sourceAttackDirectionAllowed({ position: { x: 0, z: 0 }, target: far,
+    moveDirection: { x: 0, z: -1 } }), false);
+  const close = enemy(2, 0, 1.1);
+  assert.equal(sourceAttackDirectionAllowed({ position: { x: 0, z: 0 }, target: close,
+    moveDirection: { x: 1, z: 0 } }), true);
 });
