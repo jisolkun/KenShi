@@ -955,6 +955,10 @@ function beginAttack(enemy) {
     : 0;
   if(getReviewedAttack(currentWeapon.id,hero.combo))hero.attackCarry=Math.min(1,hero.moveVelocity.length()/5.8);
   hero.attackTarget = enemy;
+  // Cha_Control writes a short post-start cooldown. The sensor is disabled
+  // during the animation, then the normal movement block may start the next
+  // attack from any body still overlapping the sensor.
+  hero.nextAttackIn = .05;
   if (isCombatTarget(enemy, enemies)) face(enemy.pos.clone().sub(hero.pos));
   hero.inputDirection.set(Math.sin(hero.angle), 0, Math.cos(hero.angle));
   hero.speedFactor = 5.2;
@@ -1011,7 +1015,11 @@ function heroAttackCandidate() {
     previousInside: hero.ai.sensorInside,
   });
   hero.ai.sensorInside = sensor.inside;
-  const entered = sensor.entered;
+  // The reference loop has two paths: OnTriggerEnter catches a newly
+  // entering body while the final player-movement block also checks the
+  // nearest body every frame. The latter is what keeps a close target's
+  // ordinary combo running after the first stroke.
+  const entered = sensor.entered || sensor.near[0];
   if (!entered) return null;
   // Cha_Control rejects an entered body when the input direction points away
   // from it.  It disables the sensor until the next movement input instead
