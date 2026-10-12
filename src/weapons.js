@@ -1,5 +1,7 @@
 // Weapon definitions share their authored motion and combat timings.
 import { getReviewedAttack } from './choreography/index.js';
+import { createSourceWeaponMoves } from './sourceMotion/catalogue.js';
+import { getSourceAttackRule } from './sourceMotion/combat.js';
 export const DEFAULT_WEAPON_ID = 'dual-dao';
 export const UNLOCKED_WEAPON_IDS = new Set(['dual-dao', 'tang-dao', 'great-dao', 'great-hammer']);
 export function isWeaponUnlocked(id) { return UNLOCKED_WEAPON_IDS.has(id); }
@@ -220,4 +222,24 @@ for(const weapon of WEAPONS){
   });
 }
 const weaponById = new Map(WEAPONS.map(weapon => [weapon.id, weapon]));
+const sourceNames = {
+ 'dual-dao':['交锋连斩','双锋回切','腾身撩刃','疾步破阵','双月旋杀'],
+ 'tang-dao':['转身横斩','反手撩切','踏步回斩','破阵直刺','腾身重斩'],
+ 'great-dao':['重刃开阵','回身撩刀','踏步大斩','蓄势突刺','腾身断阵'],
+ 'great-hammer':['横抡开阵','反手斜砸','回身上挑','腾身震地','回旋破阵'],
+};
+for (const weapon of WEAPONS) {
+ if(['tang-dao','great-dao'].includes(weapon.id))weapon.grip='single';
+ weapon.moves = createSourceWeaponMoves(weapon.id,weapon.moves).map((move,index)=>{
+  const rule=getSourceAttackRule(weapon.id,index,weapon.id==='dual-dao'?-.01:.02);
+  const start=Math.min(...rule.volumes.map(v=>v.delay+(v.type==='splash'?0:.05)));
+  const end=Math.max(...rule.volumes.map(v=>v.delay+(v.type==='splash'?.2:.15)));
+  return {...move,name:sourceNames[weapon.id][index],hitstop:0,
+   contact:start/move.duration,active:[start/move.duration,end/move.duration],
+   shape:rule.volumes.some(v=>v.type==='thrust')?'thrust':weapon.id==='great-hammer'?'crush':'arc'};
+ });
+ weapon.description=weapon.id==='great-hammer'
+  ?'踏步转腰带动五式抡锤，横扫接反砸、回身上挑与腾身震地，借全身惯性连续破阵。'
+  :'持械走跑随肩胯摆动，五式普攻由脚步、转腰、腾身与双臂共同发力，挥击与收势连续衔接。';
+}
 export function getWeapon(id) { return weaponById.get(id) || weaponById.get(DEFAULT_WEAPON_ID); }

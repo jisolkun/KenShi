@@ -3,204 +3,241 @@ import test from 'node:test';
 import * as THREE from 'three';
 import { createCharacter, poseCharacter } from '../src/characters.js';
 import { WEAPONS, DEFAULT_WEAPON_ID, getWeapon, isWeaponUnlocked, UNLOCKED_WEAPON_IDS } from '../src/weapons.js';
-import { WEAPON_COMBOS } from '../src/weaponMotion.js';
 import { getReviewedAttack } from '../src/choreography/index.js';
+import {
+  SOURCE_ATTACK_COUNT, getSourceAttackProfile, getSourceAttackTiming,
+  getSourceMotionProvenance,
+} from '../src/sourceMotion/catalogue.js';
+import { getSourceAttackRule } from '../src/sourceMotion/combat.js';
 
 const vector = () => new THREE.Vector3();
+const transforms = rig => rig.bind.map(({ node }) => [
+  ...node.position.toArray(), ...node.quaternion.toArray(), ...node.scale.toArray(),
+]);
+const signature = rig => [rig.body, rig.chest, rig.head,
+  ...rig.arms.flatMap(arm => [arm.shoulder, arm.elbow, arm.wrist]),
+  ...rig.legs.flatMap(leg => [leg.hip, leg.knee, leg.foot])]
+  .flatMap(node => [...node.position, ...node.quaternion]).map(n => n.toFixed(5)).join(',');
 const assertFinite = (rig, label) => {
   for (const { node } of rig.bind) {
     assert.ok([...node.position, ...node.quaternion, ...node.scale].every(Number.isFinite), `${label}: ${node.name}`);
+    assert.ok(Math.abs(node.quaternion.length() - 1) < 1e-7, `${label}: ${node.name} normalized rotation`);
   }
   for (const tip of rig.weaponTips()) assert.ok(tip.toArray().every(Number.isFinite), `${label}: tip`);
+  if (rig.sourcePose?.active) assert.ok(rig.sourcePose.footMinY >= -1e-7, `${label}: source shoes clear the floor`);
 };
-const signature = rig => [rig.body, rig.chest, ...rig.arms.flatMap(a => [a.shoulder, a.elbow, a.wrist])]
-  .flatMap(n => [...n.position, ...n.quaternion]).map(n => n.toFixed(5)).join(',');
 
-test('four weapon types expose sixteen valid basic attack contact windows', () => {
+test('four weapon types expose twenty valid source-timed ordinary attacks', () => {
   assert.equal(WEAPONS.length, 4);
-  assert.equal(new Set(WEAPONS.map(w => w.id)).size, 4);
+  assert.equal(new Set(WEAPONS.map(weapon => weapon.id)).size, 4);
+  assert.equal(WEAPONS.reduce((count, weapon) => count + weapon.moves.length, 0), 20);
   const shapes = new Set(['arc', 'thrust', 'crush', 'radial', 'chain', 'hook']);
   for (const weapon of WEAPONS) {
     assert.equal(getWeapon(weapon.id), weapon);
-    assert.equal(weapon.moves.length, 4);
+    assert.equal(weapon.moves.length, SOURCE_ATTACK_COUNT);
+    assert.equal(new Set(weapon.moves.map(move => move.name)).size, SOURCE_ATTACK_COUNT);
     assert.ok(!weapon.skillNames?.length, `${weapon.id}: no active skills`);
-    assert.equal(WEAPON_COMBOS[weapon.id].length, 4);
-    for (const move of weapon.moves) {
+    for (const [combo, move] of weapon.moves.entries()) {
+      const timing = getSourceAttackTiming(weapon.id, combo);
+      const rule = getSourceAttackRule(weapon.id, combo, timing.atkspd);
+      const firstContact = Math.min(...rule.volumes.map(volume => volume.delay + (volume.type === 'splash' ? 0 : .05)));
+      const lastContact = Math.max(...rule.volumes.map(volume => volume.delay + (volume.type === 'splash' ? .2 : .15)));
+      assert.equal(move.duration, timing.duration);
+      assert.equal(move.sourceAttackSeconds, timing.attackSeconds);
+      assert.equal(move.sourceRecoverySeconds, timing.recoverySeconds);
+      assert.equal(move.recoverAt, timing.recoverAt);
+      assert.equal(move.sourceHitDelay, timing.hitDelay);
+      assert.equal(move.sourceMotion, true);
+      assert.equal(move.sourceName, timing.profile.name);
+      assert.equal(move.sourceFamily, timing.family);
+      assert.equal(move.sourceFinisher, combo === SOURCE_ATTACK_COUNT - 1);
+      assert.equal(move.contact, firstContact / move.duration);
+      assert.deepEqual(move.active, [firstContact / move.duration, lastContact / move.duration]);
       assert.ok(move.duration > 0);
       assert.ok(move.active[0] >= 0 && move.active[1] <= 1 && move.active[0] < move.active[1]);
       assert.ok(move.contact >= move.active[0] && move.contact <= move.active[1], `${weapon.id}/${move.name}`);
       assert.ok(shapes.has(move.shape), move.shape);
       assert.ok([move.damage, move.reach, move.width, move.halfAngle].every(n => Number.isFinite(n) && n > 0));
+      assert.equal(move.hitstop, 0, `${weapon.id}: original playback continues through contacts`);
+      if (combo === SOURCE_ATTACK_COUNT - 1) {
+        assert.equal(move.recoverAt, 1);
+        assert.equal(move.sourceRecoverySeconds, 0);
+      } else assert.ok(move.sourceRecoverySeconds > 0);
     }
   }
 });
 
-test('each weapon has distinct sampled four-hit choreography and bounded new finishers', () => {
-  const weaponSignatures = new Set();
+test('source blades use a single grip, dual blades use both hands, and the authored hammer uses a joined shaft', () => {
+  const expected = {
+    'dual-dao': { grip: 'dual', family: 'dual', tips: 2 },
+    'tang-dao': { grip: 'single', family: 'blade', tips: 1 },
+    'great-dao': { grip: 'single', family: 'blade', tips: 1 },
+    'great-hammer': { grip: 'twohand', family: 'halberd', tips: 1 },
+  };
   for (const weapon of WEAPONS) {
     const rig = createCharacter();
     rig.setWeapon(weapon.id);
-    const hits = [];
-    for (let combo = 0; combo < 4; combo++) {
-      poseCharacter(rig, { state: 'attack', combo, phase: weapon.moves[combo].contact, time: .5, immediate: true });
-      hits.push(signature(rig));
-      if (weapon.id !== DEFAULT_WEAPON_ID) assert.ok(Math.abs(rig.body.rotation.y) < 1.5, `${weapon.id}: torso is bounded`);
+    const mapping = expected[weapon.id];
+    assert.equal(weapon.grip, mapping.grip);
+    assert.equal(rig.sourceMotionDebug.family, mapping.family);
+    assert.equal(rig.arms[0].weapon.visible, mapping.grip === 'dual');
+    assert.equal(rig.arms[1].weapon.visible, true);
+    assert.equal(rig.weaponTips().length, mapping.tips);
+    if (weapon.id === 'great-hammer') {
+      assert.ok(rig.offhandGrip?.isObject3D);
+      assert.equal(rig.sourceMotionDebug.authored, true);
+      assert.ok(rig.sourcePose.offhandGap < .005, 'support hand remains attached to the authored shaft');
+      assert.equal(getSourceMotionProvenance(weapon.id).fallback, true);
+      assert.match(getSourceMotionProvenance(weapon.id).provenance, /no hammer/);
+    } else {
+      assert.equal(rig.offhandGrip, null);
+      assert.equal(rig.sourceMotionDebug.authored, false);
+      assert.equal(getSourceMotionProvenance(weapon.id).fallback, false);
     }
-    assert.equal(new Set(hits).size, 4, `${weapon.id}: four distinct contacts`);
-    weaponSignatures.add(hits.join('|'));
   }
-  assert.equal(weaponSignatures.size, 4);
+  for (let combo = 0; combo < SOURCE_ATTACK_COUNT; combo++) {
+    assert.equal(getSourceAttackProfile('tang-dao', combo), getSourceAttackProfile('great-dao', combo),
+      'both blade models preserve the same original blade clips');
+  }
 });
 
-test('all equipped poses and four basic attacks keep finite body and tip transforms', () => {
+test('every weapon plays five distinct full-body attacks through the source runtime', () => {
   for (const weapon of WEAPONS) {
     const rig = createCharacter();
     rig.setWeapon(weapon.id);
-    for (const state of ['idle', 'guard', 'run', 'hurt', 'dodge', 'attack']) {
-      const count = state === 'attack' ? 4 : 1;
-      for (let action = 0; action < count; action++) {
-        for (let step = 0; step <= 10; step++) {
-          poseCharacter(rig, { state, combo: action, phase: step / 10, time: step / 10, immediate: true });
-          assertFinite(rig, `${weapon.id}/${state}/${action}/${step}`);
-        }
+    const attacks = [];
+    for (let combo = 0; combo < SOURCE_ATTACK_COUNT; combo++) {
+      const samples = [];
+      for (const phase of [.15, .45, .75]) {
+        poseCharacter(rig, { state: 'attack', combo, phase, dt: 1 / 60, immediate: true });
+        assert.equal(rig.sourcePose.profile, getSourceAttackProfile(weapon.id, combo));
+        assert.equal(rig.sourceMotionDebug.authored, weapon.id === 'great-hammer');
+        assert.equal(rig.reviewedAttackSample, null, 'ordinary source clips own the final pose');
+        assert.equal(rig.attackFootTargets, null, 'procedural foot targets do not overwrite source steps and jumps');
+        samples.push(signature(rig));
       }
+      assert.equal(new Set(samples).size, samples.length, `${weapon.id}: attack ${combo + 1} changes over time`);
+      attacks.push(samples.join('|'));
     }
-    // These are authored damaging marker positions, not a mesh collision test.
-    poseCharacter(rig, { state: 'idle', time: .4, immediate: true });
-    assert.ok(rig.weaponTips().every(tip => tip.y >= 0), `${weapon.id}: idle tip markers clear the floor`);
+    assert.equal(new Set(attacks).size, SOURCE_ATTACK_COUNT, `${weapon.id}: five distinct attacks`);
   }
 });
 
-test('legacy weapon attacks keep reachable ankles on the ground through all four contacts', () => {
-  for (const weapon of WEAPONS.filter(w => w.id !== DEFAULT_WEAPON_ID && !getReviewedAttack(w.id))) {
+test('all equipped states and five attacks retain finite body and weapon transforms', () => {
+  for (const weapon of WEAPONS) {
     const rig = createCharacter();
     rig.setWeapon(weapon.id);
-    for (let combo = 0; combo < 4; combo++) {
-      for (const phase of [0, .15, weapon.moves[combo].contact, .75, 1]) {
-        poseCharacter(rig, { state: 'attack', combo, phase, time: phase, immediate: true });
-        rig.group.updateMatrixWorld(true);
-        for (const leg of rig.legs) {
-          const ankle = leg.foot.getWorldPosition(vector());
-          const hip = leg.hip.getWorldPosition(vector());
-          assert.ok(Math.abs(ankle.y - .075) < 1e-6, `${weapon.id}: grounded ankle`);
-          assert.ok(hip.distanceTo(ankle) <= .806, `${weapon.id}: reachable leg`);
-        }
+    for (const state of ['idle', 'guard', 'walk', 'run', 'hurt', 'roll', 'attack']) {
+      const count = state === 'attack' ? SOURCE_ATTACK_COUNT : 1;
+      for (let action = 0; action < count; action++) for (let step = 0; step <= 10; step++) {
+        poseCharacter(rig, { state, combo: action, phase: step / 10, time: step / 10,
+          speedFactor: 7, dt: 1 / 60, immediate: true });
+        assertFinite(rig, `${weapon.id}/${state}/${action}/${step}`);
       }
     }
   }
 });
 
-test('two-hand grips remain joined throughout blended idle, run and attack transitions', () => {
-  for (const weapon of WEAPONS.filter(w => w.grip === 'twohand')) {
-    const rig = createCharacter();
-    rig.setWeapon(weapon.id);
-    assert.ok(rig.offhandGrip?.isObject3D);
-    assert.equal(rig.arms[0].weapon.visible, false, 'the support hand carries no duplicate weapon');
-    for (let frame = 0; frame < 100; frame++) {
-      const state = frame < 20 ? 'idle' : frame < 50 ? 'run' : 'attack';
-      poseCharacter(rig, { state, combo: 3, phase: Math.max(0, (frame - 50) / 50), time: frame / 60, dt: 1 / 60 });
+test('the custom hammer support hand remains joined during all five attacks and locomotion transitions', () => {
+  const rig = createCharacter();
+  rig.setWeapon('great-hammer');
+  for (const state of ['idle', 'walk', 'run', 'attack']) {
+    const actions = state === 'attack' ? SOURCE_ATTACK_COUNT : 1;
+    for (let combo = 0; combo < actions; combo++) for (let frame = 0; frame <= 30; frame++) {
+      poseCharacter(rig, { state, combo, phase: frame / 30, time: frame / 60, dt: 1 / 60, speedFactor: 7 });
       rig.group.updateMatrixWorld(true);
       const gap = rig.arms[0].wrist.getWorldPosition(vector()).distanceTo(rig.offhandGrip.getWorldPosition(vector()));
-      assert.ok(gap < 1e-8, `${weapon.id}/${frame}: grip gap ${gap}`);
+      assert.ok(gap < .005, `${state}/${combo}/${frame}: hammer support gap ${gap}`);
+      assertFinite(rig, `hammer/${state}/${combo}/${frame}`);
     }
   }
 });
 
-test('equip switches preserve wrist roots, replace tip nodes and reset motion safely', () => {
+test('equip switches preserve wrist roots, replace tip nodes and reset the source session to idle', () => {
   const rig = createCharacter();
-  const roots = rig.arms.map(a => a.weapon);
+  const roots = rig.arms.map(arm => arm.weapon);
   let previousTips = rig.weaponTipNodes;
   for (const weapon of [...WEAPONS, getWeapon(DEFAULT_WEAPON_ID)]) {
-    poseCharacter(rig, { state: 'attack', combo: 3, phase: .5, time: 1, dt: 1 / 60 });
+    poseCharacter(rig, { state: 'run', time: 1, dt: .2, speedFactor: 7 });
+    poseCharacter(rig, { state: 'run', time: 1.2, dt: .2, speedFactor: 7 });
+    poseCharacter(rig, { state: 'attack', combo: 4, phase: .5, time: 1.3, dt: 1 / 60 });
+    const previousRuntime = rig.sourceMotionState;
+    const previousClock = rig.sourceLocomotionClock;
     rig.setWeapon(weapon.id);
     assert.equal(rig.weaponId, weapon.id);
     assert.equal(rig.weaponDefinition, weapon);
-    assert.deepEqual(rig.arms.map(a => a.weapon), roots);
-    const expectedTips = weapon.id === 'emei-piercers' ? 4 : weapon.id === 'staff' ? 2 : weapon.grip === 'dual' ? 2 : 1;
-    assert.equal(rig.weaponTips().length, expectedTips, weapon.id);
+    assert.deepEqual(rig.arms.map(arm => arm.weapon), roots);
+    assert.equal(rig.weaponTips().length, weapon.grip === 'dual' ? 2 : 1, weapon.id);
     assert.notEqual(rig.weaponTipNodes, previousTips);
     assert.ok(previousTips.every(node => !rig.weaponTipNodes.includes(node)));
-    assert.equal(rig.motion.key, 'locomotion');
+    assert.notEqual(rig.sourceMotionState, previousRuntime);
+    assert.notEqual(rig.sourceLocomotionClock, previousClock);
+    assert.equal(rig.sourceMotionState.weaponId, weapon.id);
+    assert.equal(rig.sourceMotionDebug.state, 'idle');
+    assert.equal(rig.sourceMotionDebug.rawTime, 0);
+    assert.deepEqual(rig.sourceMotionDebug.locomotion.map(clip => clip.state), ['idle']);
     assertFinite(rig, weapon.id);
     previousTips = rig.weaponTipNodes;
   }
 });
 
-
-test('new weapon carries breathe, follow gait and let the free hand counterbalance its leg', () => {
-  const range = values => Math.max(...values) - Math.min(...values);
-  for (const weapon of WEAPONS.filter(w => w.id !== DEFAULT_WEAPON_ID)) {
+test('walk and run move the full body, and pause freezes every source carry and its clocks', () => {
+  for (const weapon of WEAPONS) for (const state of ['idle', 'walk', 'run']) {
     const rig = createCharacter();
     rig.setWeapon(weapon.id);
-    const breath = [];
-    for (let step = 0; step < 30; step++) {
-      poseCharacter(rig, { state: 'idle', time: step / 10, idleAge: 2, moveBlend: 0, immediate: true });
-      breath.push(signature(rig));
+    // Use an unchanged wall time to ensure movement comes from native clip
+    // clocks, rather than the old procedural time or distance-driven gait.
+    for (let frame = 0; frame < 8; frame++) poseCharacter(rig, { state, time: .5, dt: .05, speedFactor: 7 });
+    const nodes = [rig.body, rig.chest, rig.head,
+      ...rig.arms.map(arm => arm.wrist), ...rig.legs.map(leg => leg.foot)];
+    const samples = nodes.map(() => new Set());
+    for (let frame = 0; frame < 30; frame++) {
+      poseCharacter(rig, { state, time: .5, dt: .05, speedFactor: 7 });
+      rig.group.updateMatrixWorld(true);
+      nodes.forEach((node, index) => samples[index].add([
+        ...node.getWorldPosition(vector()), ...node.getWorldQuaternion(new THREE.Quaternion()),
+      ].map(value => value.toFixed(5)).join(',')));
     }
-    assert.ok(new Set(breath).size > 20, `${weapon.id}: relaxed carry breathes`);
-    const gaitSamples = [];
-    for (let step = 0; step < 60; step++) {
-      poseCharacter(rig, { state: 'run', time: .5, gaitPhase: step * Math.PI / 30, speed: 1, moveBlend: 1, immediate: true });
-      gaitSamples.push({
-        hand: rig.arms[0].wrist.getWorldPosition(vector()).z,
-        foot: rig.legs[0].foot.getWorldPosition(vector()).z,
-        wrist: rig.arms[1].wrist.rotation.z,
-      });
+    // Native idle clips hold their body pose; keep that authored stillness.
+    // The walking and running clips animate every measured body part.
+    if (state !== 'idle') nodes.forEach((node, index) => assert.ok(samples[index].size > 20,
+      `${weapon.id}/${state}: ${node.name} follows the source carry`));
+    assert.ok(rig.sourceMotionDebug.rawTime > 0, `${weapon.id}/${state}: native loop clock advances`);
+    const before = transforms(rig);
+    const debug = structuredClone(rig.sourceMotionDebug);
+    for (let frame = 0; frame < 5; frame++) {
+      poseCharacter(rig, { state: 'idle', time: 20 + frame, dt: 0, gaitPhase: frame * Math.PI });
+      assert.deepEqual(transforms(rig), before, `${weapon.id}/${state}: pause freezes joints`);
+      assert.deepEqual(rig.sourceMotionDebug, debug, `${weapon.id}/${state}: pause freezes source clocks`);
     }
-    assert.ok(range(gaitSamples.map(s => s.wrist)) > .01, `${weapon.id}: carry follows gait even with fixed time`);
-    if (weapon.grip === 'single') {
-      const mean = key => gaitSamples.reduce((sum, s) => sum + s[key], 0) / gaitSamples.length;
-      const handMean = mean('hand'), footMean = mean('foot');
-      const opposition = gaitSamples.reduce((sum, s) => sum + (s.hand - handMean) * (s.foot - footMean), 0);
-      assert.ok(range(gaitSamples.map(s => s.hand)) > .05, `${weapon.id}: free hand swings`);
-      assert.ok(opposition < 0, `${weapon.id}: free hand counterbalances its leg`);
-    }
-    const before = signature(rig);
-    poseCharacter(rig, { state: 'idle', time: 20, gaitPhase: 15, dt: 0 });
-    assert.equal(signature(rig), before, `${weapon.id}: pause freezes carry`);
   }
 });
 
-
-test('the four basic attack weapon types are available to choose', () => {
+test('the four ordinary attack weapon types are available and removed ids normalize to the default', () => {
   assert.deepEqual([...UNLOCKED_WEAPON_IDS], ['dual-dao', 'tang-dao', 'great-dao', 'great-hammer']);
-  assert.equal(WEAPONS.filter(w => isWeaponUnlocked(w.id)).length, 4);
-  assert.equal(isWeaponUnlocked('unknown'), false);
-  assert.equal(isWeaponUnlocked('ring-dao'), false);
-});
-
-test('dual dao uses the original attack timings and bypasses the replacement registry', () => {
-  const weapon = getWeapon('dual-dao');
-  assert.equal(getReviewedAttack('dual-dao'), null);
-  assert.deepEqual(weapon.moves.map(m => m.name), ['燕返', '交锋', '穿花', '双月']);
-  assert.deepEqual(weapon.moves.map(m => m.duration), [.31, .347, .291, .44]);
-  assert.deepEqual(weapon.moves.map(m => m.contact), [.43, .43, .47, .48]);
-  assert.ok(!weapon.skillNames?.length);
-});
-
-test('hammer attacks declare a bounded real head volume and finite combat reach', () => {
-  const weapon = getWeapon('great-hammer');
-  assert.equal(weapon.id, 'great-hammer');
-  assert.equal(weapon.grip, 'twohand');
-  for (let combo = 0; combo < 4; combo++) {
-    const action = getReviewedAttack(weapon.id, combo);
-    assert.equal(action.strikeVolume, 'hammer-head');
-    assert.equal(action.headLength, 1.25);
-    assert.ok(action.headRadius > 0 && action.headRadius <= .3, 'a visible head has a compact damaging radius');
-    assert.ok(Number.isFinite(weapon.moves[combo].reach) && weapon.moves[combo].reach > 0);
-  }
-});
-
-test('removed catalogue ids normalize to the default type and active skill registry is empty', () => {
   assert.deepEqual(WEAPONS.map(weapon => weapon.name), ['双刀', '砍刀', '大刀', '大锤']);
+  assert.equal(WEAPONS.filter(weapon => isWeaponUnlocked(weapon.id)).length, 4);
   for (const id of ['yanling-dao', 'miao-dao', 'ring-dao', 'war-hammer', 'unknown']) {
     assert.equal(getWeapon(id), getWeapon(DEFAULT_WEAPON_ID), `${id}: normalize old save`);
     assert.equal(isWeaponUnlocked(id), false, `${id}: unavailable`);
-    assert.equal(getReviewedAttack(id, 0), null, `${id}: removed runtime action`);
+    assert.equal(getSourceAttackProfile(id), null, `${id}: no source action binding`);
   }
-  for (const weapon of WEAPONS) {
-    for (let index = 0; index < 5; index++) {
-      assert.equal(getReviewedAttack(weapon.id, index, 'skill'), null, `${weapon.id}: no runtime skill ${index}`);
-    }
+  for (const weapon of WEAPONS) for (let index = 0; index < SOURCE_ATTACK_COUNT; index++) {
+    assert.equal(getReviewedAttack(weapon.id, index, 'skill'), null, `${weapon.id}: no runtime skill ${index}`);
+  }
+});
+
+test('dual dao retains all five original attack identities and native inventory speed', () => {
+  const weapon = getWeapon('dual-dao');
+  assert.deepEqual(weapon.moves.map(move => move.sourceName), [
+    'attack1_duel', 'attack2_duel', 'attack3_duel', 'attack4_duel', 'attack5_duel',
+  ]);
+  for (let combo = 0; combo < SOURCE_ATTACK_COUNT; combo++) {
+    const timing = getSourceAttackTiming(weapon.id, combo);
+    assert.equal(timing.atkspd, -.01);
+    assert.equal(timing.attackSpeed, Math.fround(Math.fround(.24) + Math.fround(-.01)));
+    assert.equal(timing.recoverySpeed, Math.fround(.24));
+    assert.equal(weapon.moves[combo].duration, timing.profile.attackRaw / timing.attackSpeed
+      + timing.profile.recoveryRaw / timing.recoverySpeed);
   }
 });

@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as THREE from 'three';
-import {createCharacter, poseCharacter} from '../src/characters.js';
-import {getReviewedAttack} from '../src/choreography/index.js';
-import {GREAT_DAO_STEPS, greatDaoStepDelta, resolveGreatDaoStep} from '../src/greatDaoMovement.js';
+import {createCharacter, poseCharacter} from '../../src/characters.js';
+import {getReviewedAttack} from '../../src/choreography/index.js';
+import {GREAT_DAO_STEPS, greatDaoStepDelta, resolveGreatDaoStep} from '../../src/greatDaoMovement.js';
 
 const EPSILON = 1e-5;
 const world = node => node.getWorldPosition(new THREE.Vector3());

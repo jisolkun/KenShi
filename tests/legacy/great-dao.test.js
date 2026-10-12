@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as THREE from 'three';
-import {createCharacter, poseCharacter} from '../src/characters.js';
-import {getWeapon, isWeaponUnlocked} from '../src/weapons.js';
-import {getReviewedAttack, sampleReviewedAttack} from '../src/choreography/index.js';
-import {bladeSweepContains} from '../src/weaponCombat.js';
+import {createCharacter, poseCharacter} from '../../src/characters.js';
+import {getWeapon, isWeaponUnlocked} from '../../src/weapons.js';
+import {getReviewedAttack, sampleReviewedAttack} from '../../src/choreography/index.js';
+import {bladeSweepContains} from '../../src/weaponCombat.js';
 
 const ID = 'great-dao';
 const EPSILON = 1e-5;

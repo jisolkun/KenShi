@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as THREE from 'three';
-import { createCharacter, poseCharacter } from '../src/characters.js';
-import { equipWeapon } from '../src/weaponModels.js';
-import { getReviewedAttack } from '../src/choreography/index.js';
-import { WEAPONS } from '../src/weapons.js';
+import { createCharacter, poseCharacter } from '../../src/characters.js';
+import { equipWeapon } from '../../src/weaponModels.js';
+import { getReviewedAttack } from '../../src/choreography/index.js';
+import { WEAPONS } from '../../src/weapons.js';
 
 const vector = () => new THREE.Vector3();
 const worldPosition = node => node.getWorldPosition(vector());

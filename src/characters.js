@@ -3,6 +3,7 @@ import { equipWeapon } from './weaponModels.js';
 import { DEFAULT_WEAPON_ID } from './weapons.js';
 import { applyWeaponPose, reconcileWeaponGrip, reconcileAttackFootwork } from './weaponMotion.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import {configureSourceHeroSkeleton,applySourceHeroPose,resetSourceHeroPose} from './sourceMotion/rig.js';
 const hasHeavyFootwork=id=>id==='great-dao'||id==='great-hammer';
 
 // All body parts share geometry; each character owns its palette for hit flashes.
@@ -280,6 +281,7 @@ export function createCharacter(type = 'hero') {
     }
   } else sword(arms[1].wrist,boss ? 1.30 : .87);
   if (heavy) for(const side of [-1,1]) mesh(arms[side===-1?0:1].shoulder,cone,'metal',[.06,.16,.07],[side*.06,.15,-.035],[0,0,-side*.35]);
+  if(hero)configureSourceHeroSkeleton({body,chest,head,arms,legs,cloths});
   mergeStaticParts(group, type, material);
   // Only the hero's rib armour expands. Head, shoulder joints and cape retain
   // their own anchors, so breathing never scales limbs or weapon reach.
@@ -308,6 +310,7 @@ export function createCharacter(type = 'hero') {
         }
       }
       rig.motion = undefined;
+      resetSourceHeroPose(rig);
       poseCharacter(rig,{state:'idle',time:0,phase:0,immediate:true});
     },
     setFlash(amount) {
@@ -334,7 +337,14 @@ function sample(p, keys) {
 
 export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,skill=0,dt,
   gaitPhase,moveBlend,turnLean=0,attackCarry=0,attackStep=null,hurtDirection=1,hurtStrength=1,hurtVertical=0,hurtBlunt=false,transition=true,immediate=false,
-  alertness=.35,idleAge,lookYaw} = {}) {
+  alertness=.35,idleAge,lookYaw,sourceAttack,sourceLocomotion,speedFactor} = {}) {
+  if(applySourceHeroPose(rig,{state,time,phase,combo,dt,immediate,sourceAttack,sourceLocomotion,speedFactor}))return;
+  const returningFromSource=Boolean(rig.sourceMotionState?.active);
+  if(returningFromSource){
+    rig.sourceMotionState.active=false;
+    if(rig.sourcePose)rig.sourcePose.active=false;
+    if(rig.sourceMotionDebug)rig.sourceMotionDebug.active=false;
+  }
   if(dt===0&&!immediate&&transition!==false&&rig.motion)return;
   const {body,chest,head,arms,legs,pony,cloths,type} = rig;
   const motion = rig.motion ??= {
@@ -346,6 +356,12 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
     secondary: [pony,...cloths].map(node=>({node,x:node.rotation.x,z:node.rotation.z,vx:0,vz:0})),
     from: rig.bind.map(({node}) => ({p:node.position.clone(),q:node.quaternion.clone(),s:node.scale.clone()})),
   };
+  // Start a reaction/roll transition from the last rendered source pose. The
+  // procedural transition owns only this later action, never source playback.
+  if(returningFromSource){
+    motion.key=`source:${rig.sourcePose?.state??'idle'}`;
+    motion.phase=0;motion.lastTime=time;motion.elapsed=1;
+  }
   const delta=clamp(dt ?? (time>motion.lastTime ? time-motion.lastTime : 1/60),0,.05);
   const locomotion=state==='idle'||state==='run';
   const key=locomotion?'locomotion':`${state}:${state==='attack'?combo:state==='skill'?skill:0}`;

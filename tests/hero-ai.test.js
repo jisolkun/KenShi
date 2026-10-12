@@ -4,10 +4,12 @@ import { isCombatTarget, attackDistances, chooseAttackTarget, attackCanTrack,
   attackRecoveryPhase, attackChainPhase, choosePursuitTarget, pursuitTargetPoint,
   planObstaclePath, projectWalkablePoint, segmentClear,
   referenceAttackSensorTargets, sourceAttackDirectionAllowed } from '../src/heroAI.js';
-import { getWeapon } from '../src/weapons.js';
+import { getWeapon, WEAPONS } from '../src/weapons.js';
 import { getReviewedAttack } from '../src/choreography/index.js';
-import { createCharacter, poseCharacter } from '../src/characters.js';
-import { bladeSweepContains, weaponStrikeContains } from '../src/weaponCombat.js';
+import { createCharacter } from '../src/characters.js';
+import { createSourceAttackVolumes, advanceSourceAttackVolumes,
+  sourceVolumeContains } from '../src/sourceMotion/combat.js';
+import { SOURCE_WEAPON_BINDINGS } from '../src/sourceMotion/catalogue.js';
 
 const enemy = (id, x, z, state = 'idle') => ({ id, pos: { x, z }, radius: .45, hp: 100, state });
 const weapon = getWeapon('dual-dao');
@@ -78,8 +80,8 @@ test('facing tracks the windup and remains fixed through every contact of a stro
   assert.equal(attackCanTrack(.48, move, twoContacts), false, 'root cannot pivot between two physical contacts');
 });
 
-test('great dao retains its authored recovery and completes each stroke before chaining', () => {
-  for (let combo = 0; combo < 4; combo++) {
+test('compatibility AI helpers retain explicit recovery boundaries and legacy chain gates', () => {
+  for (let combo = 0; combo < getWeapon('great-dao').moves.length; combo++) {
     const move = getWeapon('great-dao').moves[combo];
     assert.equal(attackRecoveryPhase(move, getReviewedAttack('great-dao', combo)), move.recoverAt);
     assert.equal(attackChainPhase('great-dao', combo), 1);
@@ -114,35 +116,29 @@ test('pursuit detours around consecutive pillars and reaches the command without
     'an impossible endpoint must not send the hero straight into the pillar');
 });
 
-test('AI attack distances place every equipped weapon inside its real damaging path', () => {
-  for (const id of ['dual-dao', 'tang-dao', 'great-dao']) {
+test('AI retain distances are reachable during the native collider clock of every equipped attack', () => {
+  for (const { id, moves } of WEAPONS) {
     const rig = createCharacter('hero');
     rig.setWeapon(id);
-    for (let combo = 0; combo < 4; combo++) {
-      const move = getWeapon(id).moves[combo], action = getReviewedAttack(id, combo);
+    for (const [combo, move] of moves.entries()) {
+      const action = getReviewedAttack(id, combo);
       const radius = .45, distances = attackDistances(move, radius, !!action);
-      const target = { x: 0, z: distances.retain, minY: .18, maxY: 1.85 };
-      if (!action) {
-        assert.ok(weaponStrikeContains(move, target.x, target.z, 0, radius), `${id} ${combo}: stopping range is hittable`);
-        continue;
-      }
-      let hit = false, previous = null;
-      for (let frame = 0; frame <= Math.ceil(move.duration * 60); frame++) {
-        const phase = Math.min(1, frame / (move.duration * 60));
-        poseCharacter(rig, { state: 'attack', combo, phase, speed: 0, attackCarry: 0,
-          time: 0, dt: 1 / 60, immediate: true, transition: false });
-        rig.group.updateMatrixWorld(true);
-        const blades = rig.weaponBlades();
-        for (const contact of action.contacts) {
-          if (phase < contact.window[0] || phase > contact.window[1]) continue;
-          const blade = blades.find(blade => blade.hand === contact.hand);
-          const prior = previous?.phase >= contact.window[0]
-            ? previous.blades.find(blade => blade.hand === contact.hand) : null;
-          hit ||= bladeSweepContains(blade, prior, target, radius, action.width * .5);
+      const target = { pos: { x: 0, y: 0, z: distances.retain }, radius, colliderHeight: .9 };
+      const volumes = createSourceAttackVolumes(id, combo, SOURCE_WEAPON_BINDINGS[id].atkspd);
+      let hit = false, collisionFrames = 0;
+      // Source emitters follow the actor root, independently of the weapon's
+      // physical tip and sampler phase. Advance their actual display clocks.
+      for (let frame = 0; frame < 120; frame++) {
+        const event = advanceSourceAttackVolumes(volumes, .02, rig.group);
+        collisionFrames += event.active.length;
+        for (const volume of event.active) {
+          assert.ok(volume.clock.visible && volume.clock.colliding);
+          hit ||= sourceVolumeContains(volume, target, rig.group);
         }
-        previous = { phase, blades };
+        if (event.finished) break;
       }
-      assert.ok(hit, `${id} ${combo}: AI must start inside the physical blade sweep`);
+      assert.ok(collisionFrames > 0, `${id} ${combo}: native emitter has damaging frames`);
+      assert.ok(hit, `${id} ${combo}: retain range is inside an active source emitter`);
     }
   }
 });

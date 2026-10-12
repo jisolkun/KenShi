@@ -2,8 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as THREE from 'three';
 import {createCharacter, poseCharacter} from '../src/characters.js';
-import {getReviewedAttack, sampleReviewedAttack} from '../src/choreography/index.js';
-import {GREAT_DAO_STEPS, greatDaoStepDelta} from '../src/greatDaoMovement.js';
+import {getWeapon} from '../src/weapons.js';
 
 // Test rendered palms and the entire elbow/forearm, rather than grip points or
 // blade clearance. A visible hand can still disappear inside opaque armour.
@@ -64,59 +63,40 @@ function pose(f, args) {
   poseCharacter(f.rig, {dt: 1 / 60, ...args});
   checkClearance(f, `${args.state} ${args.combo ?? 0}, phase ${(args.phase ?? 0).toFixed(4)}, time ${args.time.toFixed(3)}`);
 }
-for(let action=0;action<4;action++){
-  test(`great-dao attack ${action+1}: moving world-root footwork keeps real palms and forearms clear`,()=>{
-    const f=fixture('great-dao'),rig=f.rig,spec=getReviewedAttack('great-dao',action);
+for(let action=0;action<5;action++){
+  test(`great-dao source attack ${action+1}: moving and turning root keeps real palms and forearms clear`,()=>{
+    const f=fixture('great-dao'),rig=f.rig,spec=getWeapon('great-dao').moves[action];
     pose(f,{state:'idle',time:0,speed:0,immediate:true,transition:false});
-    const attackStep={start:{x:0,z:0},angle:0,startPhase:0,...GREAT_DAO_STEPS[action],
-      footStarts:rig.legs.map(leg=>leg.foot.getWorldPosition(new THREE.Vector3())),
-      footRotations:rig.legs.map(leg=>leg.foot.getWorldQuaternion(new THREE.Quaternion()))};
-    let previous=0;
     for(let frame=0;frame<=Math.ceil(spec.duration*120);frame++){
-      const phase=Math.min(1,frame/(spec.duration*120)),stride=greatDaoStepDelta(action,previous,phase);
-      rig.group.position.x+=stride.lateral;rig.group.position.z+=stride.forward;
-      pose(f,{state:'attack',combo:action,phase,time:frame/120,dt:1/120,attackStep,
-        attackCarry:.7,speed:.7,immediate:true,transition:false});
-      previous=phase;
+      const time=frame/120,phase=Math.min(1,time/spec.duration);
+      rig.group.position.set(.15*Math.sin(time*3),0,.6*time);
+      rig.group.rotation.y=.2*Math.sin(time*2);
+      pose(f,{state:'attack',combo:action,phase,time,dt:1/120,immediate:true});
     }
   });
 }
 for (const weaponId of ['tang-dao', 'great-dao']) for (const state of ['idle', 'run']) {
   test(`${weaponId} both palm and forearm volumes clear torso/head throughout ${state}`, () => {
     const f = fixture(weaponId);
-    // Cover a full breathing cycle and several running gait cycles.
+    // Advance the source idle/run clocks through complete gait cycles.
     for (let frame = 0; frame <= 240; frame += 2) pose(f, {state, time: frame / 60, speed: state === 'run' ? 1 : 0,
-      moveBlend: state === 'run' ? 1 : 0, gaitPhase: frame / 60 * Math.PI * 4, immediate: true, transition: false});
+      dt: 2/60,speedFactor:state==='run'?7:0,immediate:true});
   });
 }
-for (const weaponId of ['tang-dao', 'great-dao']) for (const state of ['attack']) for (let action = 0; action < 4; action++) {
-  test(`${weaponId} ${state} ${action + 1}: fine sampling exposes no hand trajectory seams`, () => {
-    // Normal frame sampling missed a 3.7cm projection jump during a high
-    // carry. Cover the whole path finely enough to distinguish fast motion
-    // from a positional discontinuity, including between contact windows.
-    let previous;
-    for (let frame = 0; frame <= 1920; frame++) {
-      const phase = frame / 1920, sample = sampleReviewedAttack(weaponId, action, phase, state);
-      if (previous) sample.hands.forEach((hand, side) => {
-        const distance = new THREE.Vector3(...hand.grip).distanceTo(new THREE.Vector3(...previous.hands[side].grip));
-        assert.ok(distance < .01, `hand ${side} jumps ${(distance * 100).toFixed(2)}cm at phase ${phase}`);
-      });
-      previous = sample;
-    }
-  });
+for (const weaponId of ['tang-dao', 'great-dao']) for (const state of ['attack']) for (let action = 0; action < 5; action++) {
   test(`${weaponId} ${state} ${action + 1}: both rendered hands/forearms clear torso/head`, () => {
-    const f = fixture(weaponId), spec = getReviewedAttack(weaponId, action, state);
-    const phases = new Set([0, 1, ...spec.contacts.flatMap(c => [c.start, c.phase, c.end])]);
+    const f = fixture(weaponId), spec = getWeapon(weaponId).moves[action];
+    const phases = new Set([0, 1, ...spec.active, spec.contact]);
     for (let frame = 0; frame <= Math.ceil(spec.duration * 60); frame++) phases.add(Math.min(1, frame / (spec.duration * 60)));
     for (const phase of [...phases].sort((a, b) => a - b)) pose(f, {state, combo: action, phase,
       time: phase * spec.duration, immediate: true, transition: false});
   });
   test(`${weaponId} ${state} ${action + 1}: entry and exit blends keep both hands/forearms clear`, () => {
-    const spec = getReviewedAttack(weaponId, action, state);
+    const spec = getWeapon(weaponId).moves[action];
     for (const locomotion of ['idle', 'run']) {
       const f = fixture(weaponId);
       let time = 0;
-      const locomotionArgs = {state: locomotion, speed: locomotion === 'run' ? 1 : 0, moveBlend: locomotion === 'run' ? 1 : 0};
+      const locomotionArgs = {state: locomotion, speedFactor: locomotion === 'run' ? 7 : 0};
       pose(f, {...locomotionArgs, time, immediate: true});
       // Execute through the real stateful transition path, including abrupt
       // cancellation mid-swing and ordinary recovery after the full action.

@@ -1,0 +1,27 @@
+{
+  "format": 1,
+  "source": "User-provided src.rar",
+  "retained": {
+    "families": [
+      "blade",
+      "dual",
+      "halberd"
+    ],
+    "actions": [
+      "idle",
+      "walk",
+      "run"
+    ],
+    "ordinaryCombosPerFamily": 5,
+    "profiles": 24,
+    "clips": 36
+  },
+  "sourceSha256": {
+    "reference-motion-data.js": "db954a4b98afd3efeac3e68e727cca98f2b4d2d5b0176ab4bce5e7b977e1decf",
+    "reference-curve-data.js": "b690088eff5f11ae95636a8396aef0186dcae2845e760aa1af8cc35f842c40f0",
+    "reference-curve-scale-data.js": "d81eb0153506ec7d1c23d938e52d74a2ecea6552535dfcbf517f8535977b6156",
+    "reference-curve-hermite.js": "4a4afa1750078d6ea84b5211b612354a79711465026c73fd0e84a43cc4afd8b1",
+    "reference-curve-motion.js": "601f980a7c1342933d8adba828346987395ffac5905846f78c10a7707a872cc1"
+  },
+  "archiveSha256": "d6fb93c5cf6811c94a536cd24887fb00510df867aa940f4c8dc12d81578f3ae1"
+}

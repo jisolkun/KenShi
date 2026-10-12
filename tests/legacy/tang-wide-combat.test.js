@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {createCharacter, poseCharacter} from '../src/characters.js';
-import {getReviewedAttack} from '../src/choreography/index.js';
-import {bladeSweepContains} from '../src/weaponCombat.js';
+import {createCharacter, poseCharacter} from '../../src/characters.js';
+import {getReviewedAttack} from '../../src/choreography/index.js';
+import {bladeSweepContains} from '../../src/weaponCombat.js';
 
 // Check actual rendered geometry against enemies spread across the front.
 // Metadata reach or a wide decorative effect cannot satisfy these checks.

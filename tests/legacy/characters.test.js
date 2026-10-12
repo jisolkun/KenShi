@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as THREE from 'three';
-import { createCharacter, poseCharacter } from '../src/characters.js';
+import { createCharacter, poseCharacter } from '../../src/characters.js';
 
 const range = values => Math.max(...values) - Math.min(...values);
 const snapshot = rig => rig.bind.map(({ node }) => [

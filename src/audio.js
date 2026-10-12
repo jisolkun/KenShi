@@ -4,15 +4,27 @@ import { getHammerFeedback } from './hammerFeedback.js';
 export function createAudio() {
   let context, master, noiseBuffer, wind, windGain;
   let enabled = true;
+  let paused = false, destroyed = false;
+  const voices = new Set();
   let ambientClock = 0;
   let lastSlash = 0;
   let lastEnemy = 0;
   let lastHit = -Infinity, lastHitWeight = 0, hitSide = 0;
   let lastFootstep = -Infinity, lastKill = -Infinity;
   let lastHammerGround = -Infinity;
+  let lastReady = -Infinity, lastLanding = -Infinity;
 
-  const ready = () => enabled && context?.state === 'running';
+  const playbackAllowed = () => enabled && !paused && !destroyed && !document.hidden;
+  const ready = () => playbackAllowed() && context?.state === 'running';
+  function syncPlayback() {
+    if (!context || destroyed || context.state === 'closed') return;
+    // AudioContext state changes settle asynchronously. Reconcile again once
+    // they finish, including a fast pause/resume or hide/show in one frame.
+    if (playbackAllowed() && context.state === 'suspended') context.resume().then(syncPlayback).catch(() => {});
+    else if (!playbackAllowed() && context.state === 'running') context.suspend().then(syncPlayback).catch(() => {});
+  }
   function unlock() {
+    if (destroyed) return;
     if (!context) {
       const AudioContext = window.AudioContext || window.webkitAudioContext;
       if (!AudioContext) return;
@@ -43,7 +55,28 @@ export function createAudio() {
       windGain.connect(master);
       wind.start();
     }
-    if (context.state === 'suspended' && !document.hidden) context.resume().catch(() => {});
+    syncPlayback();
+  }
+
+  function trackVoice(source, nodes) {
+    const voice = { source, nodes };
+    voices.add(voice);
+    source.onended = () => {
+      voices.delete(voice);
+      source.disconnect();
+      nodes.forEach(node => node.disconnect());
+    };
+  }
+
+  // Suspending a context freezes scheduled sound. Clear transient voices as
+  // well, so resuming cannot replay the tail of an old attack or victory cue.
+  function stopVoices() {
+    for (const { source, nodes } of voices) {
+      try { source.stop(); } catch {}
+      source.disconnect();
+      nodes.forEach(node => node.disconnect());
+    }
+    voices.clear();
   }
 
   function tone(frequency, endFrequency, duration, volume, type = 'sine', delay = 0, attack = 0.012) {
@@ -61,7 +94,7 @@ export function createAudio() {
     gain.connect(master);
     osc.start(now);
     osc.stop(now + duration + 0.02);
-    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+    trackVoice(osc, [gain]);
   }
 
   function noise(duration, volume, frequency, endFrequency = frequency, type = 'bandpass', delay = 0, attack = 0.02) {
@@ -83,7 +116,7 @@ export function createAudio() {
     gain.connect(master);
     source.start(now, Math.random() * 0.5);
     source.stop(now + duration + 0.02);
-    source.onended = () => { source.disconnect(); filter.disconnect(); gain.disconnect(); };
+    trackVoice(source, [filter, gain]);
   }
 
   function slash(combo = 0) {
@@ -123,39 +156,67 @@ export function createAudio() {
     'great-dao':[1280,780,1.8,'heavy-cut'],
     'great-hammer':[620,110,2.1,'blunt'],
   };
+  const strokeIndex = combo => ((Math.trunc(combo) % 5) + 5) % 5;
+  const fifthHammerVoice = {
+    airTone: 86, airDuration: .145, airVolume: .34, airFilter: 340,
+    hitTone: 82, hitDuration: .18, hitFilter: 500, hitCrackTone: 156,
+  };
+  const hammerVoice = index => index === 4 ? fifthHammerVoice : getHammerFeedback(index);
+
+  function weaponReady(id, combo = 0) {
+    if (!ready() || context.currentTime - lastReady < .075) return;
+    lastReady = context.currentTime;
+    const index = strokeIndex(combo), heavy = id === 'great-hammer' || id === 'great-dao';
+    const effort = [1, .86, 1.08, 1.14, 1.24][index];
+    // A quiet grip and cloth pull belongs to the loading pose; the audible
+    // air release is emitted separately at the measured weapon stroke.
+    noise(.055, .018 * effort, heavy ? 460 : 720, 210, 'bandpass', 0, .005);
+    noise(.022, heavy ? .009 : .006, 1500, 850, 'highpass', .008, .002);
+    if (heavy) tone(82 + index * 3, 48, .07, .018 * effort, 'sine', .006, .009);
+    else tone(id === 'dual-dao' ? 840 : 680, 360, .036, .008, 'triangle', .004, .003);
+  }
+
   function weaponSlash(id, combo = 0, technique = null) {
     if (!ready() || context.currentTime - lastSlash < 0.06) return;
     lastSlash = context.currentTime;
     const [air, metal, weight, kind] = weaponVoices[id] || weaponVoices['tang-dao'];
-    const pitch = [1.04,0.94,1.12,0.86][Math.abs(combo)%4];
+    const index = strokeIndex(combo), finisher = index === 4;
+    // Slight variations in release speed avoid an identical sample-like
+    // repetition while keeping each of the five strokes recognizable.
+    const pitch = [1.04,.94,1.12,1,.86][index] * (.975 + Math.random() * .05);
+    const level = .96 + Math.random() * .08;
     const shape=technique === 'thrust' ? 'thrust' : technique === 'chop' ? 'crush'
-      : technique === 'cut' ? 'arc' : getWeapon(id).moves[((combo%4)+4)%4].shape;
+      : technique === 'cut' ? 'arc' : getWeapon(id).moves[index].shape;
     if(id==='great-hammer') {
-      const feedback=getHammerFeedback(combo);
+      const feedback=hammerVoice(index);
       // The quick rising beat, long waist swing and loaded slam move
       // different amounts of air. A delayed low after-pulse makes the head
       // feel like it keeps displacing the room after the first release.
-      noise(feedback.airDuration,feedback.airVolume,feedback.airFilter,140,'lowpass',0,.004);
-      tone(feedback.airTone,32,feedback.airDuration,combo===3?.070:.040,'sine',.003,.004);
-      noise(feedback.airDuration*.72,feedback.airVolume*.48,feedback.airFilter*.72,95,'lowpass',.045,.003);
-      if(combo===3)tone(58,28,.18,.055,'sine',.055,.004);
+      noise(feedback.airDuration,feedback.airVolume*level,feedback.airFilter,140,'lowpass',0,.004);
+      tone(feedback.airTone,32,feedback.airDuration,index===3?.070:finisher?.058:.040,'sine',.003,.004);
+      noise(feedback.airDuration*.72,feedback.airVolume*.48,feedback.airFilter*.72,95,'lowpass',finisher?.060:.045,.003);
+      if(index===3)tone(58,28,.18,.055,'sine',.055,.004);
+      if(finisher)tone(68,30,.13,.052,'sine',.075,.004);
       return;
     }
     if(id==='great-dao') {
-      const heavy=shape==='crush',stage=[.94,1.04,1.16,1.32][((combo%4)+4)%4];
+      const heavy=shape==='crush'||finisher,stage=[.94,1.04,1.16,1.12,1.32][index]*level;
       // The wind surges abruptly with the released blade, then ends cleanly
       // before the next cut; a high edge transient keeps the low rush sharp.
-      noise(heavy?.13:.105,.24*stage,410,1420*pitch,'bandpass',0,.004);
-      noise(heavy?.085:.065,.10*stage,3200*pitch,950,'highpass',.003,.002);
+      noise(shape==='thrust'?.072:heavy?.13:.105,.24*stage,410,1420*pitch,'bandpass',0,.004);
+      noise(shape==='thrust'?.044:heavy?.085:.065,.10*stage,3200*pitch,950,'highpass',.003,.002);
       tone(heavy?110:145,heavy?36:50,heavy?.115:.09,heavy?.085:.052,'triangle',.002,.003);
       tone(metal*pitch,metal*.46,heavy?.095:.075,.031,'triangle',.005,.003);
+      tone(metal*1.51*pitch,metal*1.48*pitch,.065,finisher?.024:.014,'sine',.007,.002);
       return;
     }
-    const duration = (0.085 + weight * 0.035)*(shape==='thrust'?0.72:shape==='radial'?1.3:1);
+    const stage = [.92,1.02,.88,1.10,1.26][index];
+    const duration = (0.085 + weight * 0.035)*(shape==='thrust'?.72:shape==='radial'||finisher?1.3:1)*stage;
     if(shape==='crush')tone(110,37,0.14,0.065,'sine',0.015,0.005);
     if(shape==='thrust')noise(0.045,0.09,air*1.3,air*0.8,'highpass',0,0.002);
-    noise(duration,0.19+weight*0.04,air*pitch,air*0.32,weight>1.5?'bandpass':'highpass',0,0.006);
+    noise(duration,(.19+weight*.04)*stage*level,air*pitch,air*.32,weight>1.5?'bandpass':'highpass',0,.006);
     tone(metal*pitch,metal*0.45,duration,0.025,'triangle',0.005,0.003);
+    tone(metal*1.49*pitch,metal*1.45*pitch,finisher?.11:.060,finisher?.022:.012,'sine',.009,.002);
     if (kind.includes('double') && !technique) {
       noise(duration*0.75,0.16,air/pitch,air*0.4,'highpass',0.037,0.004);
       tone(metal*1.2,metal*0.6,0.09,0.018,'triangle',0.04,0.003);
@@ -166,19 +227,20 @@ export function createAudio() {
     if (!ready()) return;
     const [air,metal,weight,kind] = weaponVoices[id] || weaponVoices['tang-dao'];
     const force=Math.min(2,Math.max(0.45,typeof strength==='number'?strength:1));
-    if(context.currentTime-lastHit<0.035 && force<=lastHitWeight*1.3)return;
+    if(context.currentTime-lastHit<0.05)return;
     lastHit=context.currentTime;lastHitWeight=force;
-    const pitch=combo%2?0.94:1.06, mass=Math.min(2.2,weight*force);
+    const index=strokeIndex(combo),finisher=index===4||technique==='chop';
+    const pitch=[1.06,.94,1.10,.97,.89][index]*(.985+Math.random()*.03),mass=Math.min(2.2,weight*force);
     if(id==='great-hammer') {
-      const feedback=getHammerFeedback(combo),heavy=((combo%4)+4)%4===3;
+      const feedback=hammerVoice(index),heavy=finisher;
       tone(feedback.hitTone*pitch,27,feedback.hitDuration,.34+mass*.070,'sine',0,.001);
       noise(heavy?.095:.060,.30+mass*.045,feedback.hitFilter,85,'lowpass',0,.001);
       noise(.022,.13+mass*.025,2400,800,'highpass',0,.001);
       tone(feedback.hitCrackTone*pitch,45,heavy?.075:.045,.065,'triangle',.001,.0015);
+      if(heavy)noise(.095,.11,285,80,'lowpass',.016,.003);
       return;
     }
     if(id==='great-dao') {
-      const finisher=((combo%4)+4)%4===3||technique==='chop';
       // A tight low strike plus a brief edge crack carries force without a
       // long bass tail masking the increasingly fast follow-up swings.
       tone((finisher?102:132)*pitch,31,finisher?.14:.105,.26+mass*.055,'sine',0,.002);
@@ -186,11 +248,15 @@ export function createAudio() {
       noise(.028,finisher?.15:.105,3200*pitch,1300,'highpass',.001,.001);
       tone(metal*pitch,metal*.42,finisher?.085:.058,finisher?.065:.047,'triangle',.002,.002);
       tone(finisher?57:83,28,finisher?.155:.085,finisher?.16:.05,'sine',.002,.002);
+      tone(metal*1.51*pitch,metal*1.48*pitch,.075,finisher?.030:.017,'sine',.003,.002);
       return;
     }
-    tone((90+weight*30)*pitch,32,0.09+mass*0.045,0.2+mass*0.075,'sine',0,0.002);
-    noise(0.035+mass*0.016,0.19+mass*0.055,kind==='wood'?820:air,220,'lowpass',0,0.002);
-    tone(metal*pitch,metal*0.62,0.095,0.05,'triangle',0,0.002);
+    tone((90+weight*30)*pitch,32,.09+mass*.045,(.2+mass*.075)*(finisher?1.12:1),'sine',0,.002);
+    noise(.035+mass*.016,.19+mass*.055,air,220,'lowpass',0,.002);
+    noise(.018,finisher?.115:.085,3400*pitch,1300,'highpass',.001,.001);
+    tone(metal*pitch,metal*.62,finisher?.105:.075,.05,'triangle',0,.002);
+    tone(metal*1.49*pitch,metal*1.46*pitch,finisher?.13:.085,finisher?.030:.020,'sine',.003,.002);
+    if(finisher)tone(74,30,.13,.078,'sine',.003,.002);
   }
   function roll() {
     noise(0.24, 0.3, 800, 180, 'bandpass');
@@ -212,8 +278,19 @@ export function createAudio() {
     if (!ready() || context.currentTime - lastFootstep < 0.13) return;
     lastFootstep = context.currentTime;
     const volume = Math.min(1.5, Math.max(0.3, weight));
-    noise(0.038, 0.034 * volume, 620, 140, 'lowpass', 0, 0.003);
-    tone(90, 47, 0.045, 0.021 * volume, 'sine', 0, 0.003);
+    const pitch = .92 + Math.random() * .16;
+    noise(.038,.034*volume,620*pitch,140,'lowpass',0,.003);
+    noise(.017,.011*volume,1700*pitch,800,'highpass',.005,.002);
+    tone(90*pitch,47,.045,.021*volume,'sine',0,.003);
+  }
+
+  function landing(weight = 1) {
+    if (!ready() || context.currentTime - lastLanding < .15) return;
+    lastLanding = context.currentTime;
+    const mass = Math.min(2, Math.max(.4, weight));
+    tone(108,38,.095,.065*mass,'sine',0,.002);
+    noise(.052,.080*mass,880,140,'lowpass',0,.002);
+    noise(.020,.026*mass,2200,900,'highpass',.004,.002);
   }
 
   function kill() {
@@ -240,10 +317,23 @@ export function createAudio() {
 
   function setEnabled(value) {
     enabled = Boolean(value);
+    if (!enabled) stopVoices();
     if (master) {
       master.gain.cancelScheduledValues(context.currentTime);
       master.gain.setTargetAtTime(enabled ? 0.32 : 0, context.currentTime, 0.03);
     }
+    if (enabled) unlock();
+    else syncPlayback();
+  }
+
+  function pause() {
+    paused = true;
+    stopVoices();
+    syncPlayback();
+  }
+
+  function resume() {
+    paused = false;
     if (enabled) unlock();
   }
 
@@ -260,11 +350,19 @@ export function createAudio() {
   }
   const visibility = () => {
     if (!context) return;
-    if (document.hidden) context.suspend().catch(() => {});
-    else if (enabled) context.resume().catch(() => {});
+    if (document.hidden) {
+      stopVoices();
+    }
+    syncPlayback();
   };
   document.addEventListener('visibilitychange', visibility);
-  return { unlock, slash, hit, weaponSlash, weaponHit, weaponGround, roll, footstep, kill, enemy, win, setEnabled, update,
-    destroy() { document.removeEventListener('visibilitychange', visibility); wind?.stop(); context?.close(); },
+  return { unlock, slash, hit, weaponReady, weaponSlash, weaponHit, weaponGround, roll, footstep, landing, kill, enemy, win, setEnabled, pause, resume, update,
+    destroy() {
+      destroyed = true;
+      document.removeEventListener('visibilitychange', visibility);
+      stopVoices();
+      try { wind?.stop(); } catch {}
+      context?.close().catch(() => {});
+    },
   };
 }
