@@ -15,7 +15,7 @@ import { getHammerFeedback, hammerReactionDirection, hammerWakeActive, hammerCon
 import { isCombatTarget, attackDistances, attackCanTrack,
   attackRecoveryPhase, attackChainPhase, referenceAttackSensorTargets,
   sourceAttackDirectionAllowed,
-  segmentClear, planObstaclePath, projectWalkablePoint } from "./heroAI.js";
+  projectWalkablePoint } from "./heroAI.js";
 import "./style.css";
 
 const isHeavyWeapon = id => id === 'great-dao' || id === 'great-hammer';
@@ -297,6 +297,7 @@ function locomotion(
   maxSpeed = 5.8,
   stoppingDistance = 0,
   turn = true,
+  sourceMode = false,
 ) {
   const remaining = Math.max(0, distance - stoppingDistance);
   const desired = direction?.clone().normalize() || new THREE.Vector3();
@@ -310,14 +311,21 @@ function locomotion(
     else if (hero.speedFactor > .2) sourceSpeed = hero.speedFactor / 12 * 12.5;
     hero.speedFactor = Math.max(0, hero.speedFactor - 2 * dt);
   }
-  const speed = direction ? Math.min(sourceSpeed, remaining / 0.09) : 0;
+  const approachSpeed = sourceMode && Number.isFinite(distance) && distance < 1
+    ? Math.min(sourceSpeed, distance / .2)
+    : sourceSpeed;
+  const speed = direction && sourceMode ? approachSpeed
+    : direction ? Math.min(sourceSpeed, remaining / 0.09) : 0;
   desired.multiplyScalar(speed);
-  const response = speed > hero.moveVelocity.length() ? 24 : 27;
-  hero.moveVelocity.lerp(desired, 1 - Math.exp(-dt * response));
+  if (sourceMode) hero.moveVelocity.copy(desired);
+  else {
+    const response = speed > hero.moveVelocity.length() ? 24 : 27;
+    hero.moveVelocity.lerp(desired, 1 - Math.exp(-dt * response));
+  }
   if (hero.moveVelocity.lengthSq() < 0.0025 && speed === 0)
     hero.moveVelocity.set(0, 0, 0);
   const displacement = hero.moveVelocity.clone().multiplyScalar(dt);
-  if (direction && distance < Infinity && displacement.length() > remaining) {
+  if (!sourceMode && direction && distance < Infinity && displacement.length() > remaining) {
     displacement.copy(direction).normalize().multiplyScalar(remaining);
     hero.moveVelocity.copy(displacement).multiplyScalar(dt > 0 ? 1 / dt : 0);
   }
@@ -335,36 +343,6 @@ function locomotion(
     );
     face(direction, 1 - Math.exp(-dt * 24));
   } else hero.turnLean *= Math.exp(-dt * 12);
-}
-function routedMovement(destination, stoppingDistance = 0, command = "ground") {
-  const delta = destination.clone().sub(hero.pos);
-  const distance = delta.length();
-  const direction = delta.clone().normalize();
-  const direct = { direction, distance, stoppingDistance };
-  if (distance <= stoppingDistance) return direct;
-  const endpoint = destination.clone().addScaledVector(direction, -stoppingDistance);
-  clampPosition(endpoint);
-  const endpointDelta = endpoint.clone().sub(hero.pos);
-  const obstacles = world.obstacles || [];
-  if (segmentClear(hero.pos, endpoint, obstacles, .5)) {
-    hero.navigation = null;
-    return { direction: endpointDelta.clone().normalize(), distance: endpointDelta.length(), stoppingDistance: 0 };
-  }
-  let navigation = hero.navigation;
-  if (!navigation || navigation.command !== command ||
-    navigation.endpoint.distanceTo(endpoint) > .35 ||
-    (!navigation.path.length && globalTime >= navigation.retryAt) ||
-    (navigation.path.length && !segmentClear(hero.pos, navigation.path[0], obstacles, .5))) {
-    navigation = hero.navigation = { command, endpoint: endpoint.clone(),
-      path: planObstaclePath(hero.pos, endpoint, obstacles, .5, world.bounds), retryAt: globalTime + .35 };
-  }
-  while (navigation.path.length > 1 &&
-    Math.hypot(navigation.path[0].x - hero.pos.x, navigation.path[0].z - hero.pos.z) < .1 &&
-    segmentClear(hero.pos, navigation.path[1], obstacles, .5)) navigation.path.shift();
-  const waypoint = navigation.path[0];
-  if (!waypoint) return null;
-  const detour = new THREE.Vector3(waypoint.x - hero.pos.x, 0, waypoint.z - hero.pos.z);
-  return { direction: detour.clone().normalize(), distance: detour.length(), stoppingDistance: 0 };
 }
 function movementGoal() {
   const keyboard = keyboardDirection();
@@ -391,7 +369,15 @@ function movementGoal() {
       destinationMarker.visible = false;
       return null;
     }
-    return routedMovement(hero.destination);
+    // Cha_Control samples the same ground point every update. Far from it,
+    // each sample restores the run factor; inside the final one-unit band it
+    // keeps the old direction while the factor decays into a slow walk.
+    if (distance > 1.0) {
+      hero.inputDirection.copy(delta.normalize());
+      hero.speedFactor = 6.5;
+    }
+    return { direction: hero.inputDirection.clone(), distance, stoppingDistance: 0,
+      source: true };
   }
   return null;
 }
@@ -1467,7 +1453,7 @@ function commandTap(position) {
   // than 1.0 world unit; the .625–1.0 band retains the prior direction.
   hero.destination = inputDistance > 1.0 ? p : null;
   hero.navigation = null;
-  hero.disengage = 0.12;
+  hero.disengage = 0;
   if (
     hero.state === "attack" &&
     hero.hitDone &&
@@ -1561,6 +1547,8 @@ function updateHero(frameDt) {
       goal?.distance ?? Infinity,
       maxSpeed,
       goal?.stoppingDistance || 0,
+      true,
+      !!goal?.source,
     );
     locomotionState();
   }
@@ -1602,6 +1590,7 @@ function updateHero(frameDt) {
         maxSpeed * carry,
         goal?.stoppingDistance || 0,
         canTrack,
+        !!goal?.source,
       );
       hero.attackCarry = THREE.MathUtils.clamp(
         hero.moveVelocity.length() / maxSpeed,
