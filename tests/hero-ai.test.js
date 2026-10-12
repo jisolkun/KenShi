@@ -202,3 +202,12 @@ test('reference attack direction gate rejects a distant reverse input but allows
   assert.equal(sourceAttackDirectionAllowed({ position: { x: 0, z: 0 }, target: close,
     moveDirection: { x: 1, z: 0 } }), true);
 });
+
+test('a stationary hero accepts the scene melee gap within the source direction gate', () => {
+  for (const distance of [1.55, 2.2, 2.5]) {
+    assert.equal(sourceAttackDirectionAllowed({ position: { x: 0, z: 0 },
+      target: enemy(1, 0, distance), moveDirection: { x: 0, z: 0 } }), true);
+  }
+  assert.equal(sourceAttackDirectionAllowed({ position: { x: 0, z: 0 },
+    target: enemy(1, 0, 2.501), moveDirection: { x: 0, z: 0 } }), false);
+});

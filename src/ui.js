@@ -39,7 +39,7 @@ export function createUI(callbacks = {}, initialSelectedWeaponId = DEFAULT_WEAPO
       <div class="stage-panel"><div class="stage-heading"><span>荒寺 · 夜袭</span><button class="pause-button" data-action="pause" aria-label="暂停游戏"><i></i><i></i></button></div><div class="stage-steps"><span>STAGE</span>${[1, 2, 3].map(n => `<i data-wave="${n}">${String(n).padStart(2, '0')}</i>`).join('')}</div><div class="stage-details"><span class="kill-count">斩敌 0 / 36</span><span class="battle-time">00:00</span></div></div>
       <div class="boss-panel is-hidden"><span>镇寺鬼将</span><div class="boss-track"><i></i></div></div>
       <div class="combo-panel is-hidden"><strong>0</strong><span>连斩 <small>COMBO</small></span></div>
-      <div class="battle-footer"><span class="objective">肃清荒寺中的亡灵</span><span class="control-hint">点击移动 / 锁敌 · 双击翻滚</span></div>
+      <div class="battle-footer"><span class="objective">肃清荒寺中的亡灵</span><span class="control-hint">点按定向 · 按住移动 · 双击翻滚</span></div>
     </div>
     <div class="screen-layer" data-screen="start">
       <section class="intro-panel"><div class="chapter-caption"><i></i><span>第一卷 · 寺影</span><small>CHAPTER I</small></div>
@@ -47,7 +47,7 @@ export function createUI(callbacks = {}, initialSelectedWeaponId = DEFAULT_WEAPO
         <div class="intro-copy"><span class="thin-rule"></span><p>荒寺钟声起，百鬼踏夜来。<br>双刀、砍刀、大刀与大锤，破阵震敌。</p></div>
         <div class="intro-level"><span>壹</span><div><small>今夜之战</small><b>荒寺 · 夜袭</b></div><i>三阵 / 三十六敌</i></div>
         <button class="primary-button start-button" data-action="start"><span>选择类型</span><i>→</i></button>
-        <div class="intro-controls"><span>点地行走</span><i>·</i><span>近身自动出招</span><i>·</i><span>双击翻滚</span></div>
+        <div class="intro-controls"><span>按住定向</span><i>·</i><span>前方接敌出招</span><i>·</i><span>双击翻滚</span></div>
       </section>
       <div class="intro-side"><span>风起荒寺</span><i></i><small>双刃出鞘 · 百鬼退散</small></div>
       <div class="intro-footer"><span>低多边形 · 国风动作</span><div><button class="text-button" data-action="sound" aria-label="切换声音">声音 · 开</button><button class="text-button" data-action="help">操作指引</button></div></div>
@@ -62,7 +62,7 @@ export function createUI(callbacks = {}, initialSelectedWeaponId = DEFAULT_WEAPO
     <div class="modal-layer is-hidden"><section class="game-modal" role="dialog" aria-modal="true" aria-label="战场菜单"></section></div>
     <div class="notification" role="status"><span></span></div>
     <div class="damage-layer" aria-hidden="true"></div>
-    <span class="game-version" aria-label="游戏版本">v0.13.3 · 原式追身</span>
+    <span class="game-version" aria-label="游戏版本">v0.13.3 · 原式控制</span>
     <div class="orientation-notice" role="status"><div class="orientation-icon" aria-hidden="true">↻</div><b>请横屏游玩</b><span>将手机旋转至横向后继续</span><button class="orientation-retry" data-action="mobile-view-retry">重新尝试全屏与横屏</button></div>
   `;
   document.body.append(root);
@@ -205,7 +205,7 @@ export function createUI(callbacks = {}, initialSelectedWeaponId = DEFAULT_WEAPO
     if (next === 'pause') {
       content = `<span class="modal-eyebrow">刀锋暂歇</span><h2>休战</h2><p class="modal-description">战场已暂停，待君再入阵。</p><button class="primary-button" data-action="resume"><span>继续战斗</span><i>→</i></button><button class="secondary-button" data-action="retry">重新入阵</button><button class="text-button change-weapon" data-action="choose-weapon">换类型 · 重整出战</button>${controls}`;
     } else if (next === 'help') {
-      content = `<span class="modal-eyebrow">兵法 · 操作</span><h2>${typeName(getWeapon(selectedWeaponId))}破阵</h2><div class="help-list"><p><b>点击地面</b><span>移动至目标，近敌自动挥刃</span></p><p><b>点击敌人</b><span>锁定追击，直至敌人倒下</span></p><p><b>双击 / 空格</b><span>翻滚闪避，消耗蓝色体力</span></p><p><b>WASD / 方向键</b><span>移动；P / Esc 暂停或继续</span></p><p><b>三枚星印</b><span>全灭敌人 · 三分钟内 · 受击≤2</span></p></div><button class="primary-button" data-action="close-help"><span>知晓</span><i>→</i></button>`;
+      content = `<span class="modal-eyebrow">兵法 · 操作</span><h2>${typeName(getWeapon(selectedWeaponId))}破阵</h2><div class="help-list"><p><b>点击地面 / 敌人</b><span>朝落点方向移动，前方接敌自动出招</span></p><p><b>按住 / 拖动</b><span>持续调整方向，松手后速度逐渐衰减</span></p><p><b>双击 / 空格</b><span>翻滚闪避，消耗蓝色体力</span></p><p><b>WASD / 方向键</b><span>移动；P / Esc 暂停或继续</span></p><p><b>三枚星印</b><span>全灭敌人 · 三分钟内 · 受击≤2</span></p></div><button class="primary-button" data-action="close-help"><span>知晓</span><i>→</i></button>`;
     } else {
       const victory = next === 'win';
       const stars = Math.max(0, Math.min(3, data.stars ?? (victory ? 1 : 0)));
@@ -225,7 +225,7 @@ export function createUI(callbacks = {}, initialSelectedWeaponId = DEFAULT_WEAPO
       const selected = item.id === selectedWeaponId;
       return `<button class="weapon-card ${selected ? 'selected' : ''}" data-weapon="${item.id}" aria-pressed="${selected}">${weaponSilhouette(item)}<b>${typeName(item)}</b><small>${item.id === 'dual-dao' ? '双刃交替' : item.id==='great-hammer'?'大幅横抡 · 震地碎石':item.id==='great-dao'?'重刃横扫 · 踏地重劈':'双手挥砍'}</small><span class="weapon-selected">${selected ? '已选' : '选择'}</span></button>`;
     }).join('');
-    $('.weapon-detail').innerHTML = `<div class="weapon-detail-heading"><span>所选类型</span>${weaponSilhouette(weapon)}<h3>${typeName(weapon)}</h3><b>四式普攻 · 近敌自动施展</b></div><p class="weapon-description">${weapon.id === 'dual-dao' ? '左右双刃交替挥斩，接续四式普攻。' : ['great-dao','great-hammer'].includes(weapon.id)?weapon.description:'双手持刀，衔接斜斩、横斩、上撩与落劈。'}<br>点击敌人锁定追击，移动与翻滚调整位置。</p><div class="weapon-moves"><span>普攻动作</span><ol>${weapon.moves.map(move => `<li>${typeof move === 'string' ? move : move.name}</li>`).join('')}</ol></div><button class="primary-button" data-action="armory-confirm"><span>以${typeName(weapon)}入阵</span><i>→</i></button><small class="weapon-preview-note">左侧选类型 · 中央观看普攻</small>`;
+    $('.weapon-detail').innerHTML = `<div class="weapon-detail-heading"><span>所选类型</span>${weaponSilhouette(weapon)}<h3>${typeName(weapon)}</h3><b>四式普攻 · 前方接敌施展</b></div><p class="weapon-description">${weapon.id === 'dual-dao' ? '左右双刃交替挥斩，接续四式普攻。' : ['great-dao','great-hammer'].includes(weapon.id)?weapon.description:'双手持刀，衔接斜斩、横斩、上撩与落劈。'}<br>点按地面或敌人定向，按住持续调整方向，松手后减速。</p><div class="weapon-moves"><span>普攻动作</span><ol>${weapon.moves.map(move => `<li>${typeof move === 'string' ? move : move.name}</li>`).join('')}</ol></div><button class="primary-button" data-action="armory-confirm"><span>以${typeName(weapon)}入阵</span><i>→</i></button><small class="weapon-preview-note">左侧选类型 · 中央观看普攻</small>`;
   }
 
   function setWeapon(id) {

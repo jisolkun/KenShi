@@ -16,7 +16,10 @@ export function isCombatTarget(enemy, enemies) {
 // bounds are ±2.65*12.5, while this scene is ±17), so preserve the source
 // proportions while converting the trigger into current world units.
 const REFERENCE_SCENE_SCALE = .5;
-const REFERENCE_DIRECTION_DISTANCE = 2.5 * REFERENCE_SCENE_SCALE;
+// Direction gates use the uploaded controller's world distances, like its
+// .625/1.0 input band. Scaling this gate with the sensor mesh would reject a
+// stationary player's ordinary 1.55-unit melee contact in this scene.
+const REFERENCE_DIRECTION_DISTANCE = 2.5;
 export const REFERENCE_ATTACK_SENSOR_RULES = Object.freeze({
   default: { radius: .13 * 12.5 * REFERENCE_SCENE_SCALE, forward: .17 * 12.5 * REFERENCE_SCENE_SCALE },
   dual: { radius: .13 * 12.5 * REFERENCE_SCENE_SCALE, forward: .16 * 12.5 * REFERENCE_SCENE_SCALE },
