@@ -424,7 +424,10 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
     sampleLocomotion(rig,gait,movement,speed,turnLean,time);
     sampleIdle(rig,motion.idleClock,Math.pow(1-movement,3)*motion.idleLayer,alertness,lookYaw===undefined?undefined:motion.lookYaw,time);
   } else if(state==='attack' || state==='charge') {
-    const c=((combo%4)+4)%4;
+    // The source ordinary cursor is five-wide. Keep the procedural fallback
+    // on the same index so a failed source sample cannot silently replay the
+    // opener for the fifth stroke.
+    const c=((combo%5)+5)%5;
     const wind=sample(p,[[0,0],[.23,1],[.37,1],[.62,0],[1,0]]);
     const cut=sample(p,[[0,0],[.30,0],[.57,1],[.70,1],[1,0]]);
     const exert=pulse(p,.30,.79);
@@ -837,6 +840,26 @@ function sampleHeroAttack(rig,p,combo,gait,carry,turn) {
     legs[0].hip.rotation.y=-spin;
     legs[0].foot.rotation.y=.12*drive;
     legs[1].hip.rotation.y=-spin*.70;
+  } else if(combo===4){
+    // Fifth fallback: a returning rotary cut. The source path normally owns
+    // this clip; this bounded pose keeps the shaft/body silhouette distinct
+    // when a caller intentionally disables source motion.
+    const spin=sample(p,[[0,0],[.25,-.62],[.36,-.62],[.78,TAU-.18],[1,TAU]]);
+    body.rotation.y=spin;
+    body.position.y-=.045*drive;
+    body.position.z+=.08*drive;
+    chest.rotation.y=-.24*wind+.18*cut;
+    chest.rotation.x=-.02+.16*drive;
+    head.rotation.y=-body.rotation.y*.24-chest.rotation.y*.40;
+    for(const arm of arms){
+      arm.shoulder.rotation.x=-.72*cut+.20*wind;
+      arm.shoulder.rotation.y=arm.side*(.24-.18*cut);
+      arm.shoulder.rotation.z=arm.side*(.34+.62*drive);
+      arm.elbow.rotation.x=-.62+.20*cut;
+      arm.wrist.rotation.z=arm.side*.16;
+    }
+    legs[0].hip.rotation.y=-.18*drive;legs[1].hip.rotation.y=.18*drive;
+    legs[1].hip.rotation.x=.16*drive-.15;
   }
   body.rotation.z-=clamp(turn,-1,1)*.02;
   pony.rotation.set(.13+.25*drive,0,-dir*.27*drive);

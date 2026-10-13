@@ -10,18 +10,21 @@ const ready=hand([.17,.08,.44],1.08,-.52);
 const carries=[ready,
  hand([-.13,.18,.47],-1.62,-.12),
  hand([.04,.30,.49],.22,-.69),
- hand([.10,.41,.42],.65,.98),ready];
+ hand([.10,.41,.42],.65,.98),
+ hand([-.03,.51,.34],-1.18,.34),ready];
 const bodies=[
  [.05,-.02,-.06,.025,0,.86,0,.06,-.025],
  [-.72,-.26,.12,-.04,.15,.78,.03,-.10,.05],
  [.25,.08,.22,.015,.16,.72,.12,.04,-.03],
  [.70,.23,-.13,.04,.08,.81,-.025,.10,-.05],
+ [.05,-.02,-.06,.025,0,.86,0,.06,-.025],
  [.05,-.02,-.06,.025,0,.86,0,.06,-.025]];
 const feet=[
  [[-.27,.075,.12],[.27,.075,-.15]],
  [[-.34,.075,.30],[.30,.075,-.14]],
  [[-.34,.075,.30],[.32,.075,.17]],
  [[-.34,.075,.29],[.32,.075,.17]],
+ [[-.27,.075,.12],[.27,.075,-.15]],
  [[-.27,.075,.12],[.27,.075,-.15]]];
 const techniques=[
  {name:'横抡开阵',duration:.48,release:.16,contact:.43,finish:.76,brake:.90,step:0,
@@ -61,7 +64,15 @@ const techniques=[
    {p:.46,values:[0,0,.07,0,.11,.78,.06,0,0]},
    {p:.64,values:[0,0,.24,0,.15,.72,.10,0,0],stop:true},
    {p:.78,values:[0,0,.20,0,.16,.72,.10,0,0]},
-   {p:.87,values:[.025,0,.16,.005,.12,.74,.065,0,0],stop:true}]}];
+   {p:.87,values:[.025,0,.16,.005,.12,.74,.065,0,0],stop:true}]},
+ {name:'回旋破阵',duration:.62,release:.18,contact:.48,finish:.82,brake:.93,step:0,
+  footwork:{lead:[.02,.29],rear:[.80,.97],width:.34,leadZ:.30,rearZ:-.12,lift:.10},
+  hands:[{p:.18,...hand([.16,.38,.39],-2.70,.24)},
+   {p:.48,...hand([.01,.25,.52],2.72,-.12)},
+   {p:.82,...carries[5],stop:true}],
+  body:[{p:.18,values:[-.82,-.28,.04,-.04,.08,.80,-.02,-.10,.05]},
+   {p:.48,values:[.12,.04,.17,0,.17,.74,.08,.05,-.03]},
+   {p:.82,values:[.94,.28,.04,.04,.13,.80,.01,.12,-.06],stop:true}]}];
 const stance=values=>({yaw:0,load:0,pelvisYaw:values[0],chestYaw:values[1],pitch:values[2],shiftX:values[3],advance:values[4],bodyHeight:values[5],bodyPitch:values[6],bodyRoll:values[7],chestRoll:values[8]});
 function endpointHands(pose,body){
  const inverse=authoredChestTransform(stance(body)).q.invert();
@@ -71,8 +82,8 @@ function endpointHands(pose,body){
 }
 export function getHammerAttack(id,combo=0,state='attack'){
  if(id!=='great-hammer'||state!=='attack')return null;
- const index=((combo%4)+4)%4,t=techniques[index],start=[.285,.305,.295,.35][index],end=t.finish-.025;
- return {...t,index,weaponId:id,kind:'smash',strikeVolume:'hammer-head',reach:[1.95,1.90,2.04,1.92][index],halfAngle:[1.72,1.05,1.95,.85][index],
+ const index=((combo%5)+5)%5,t=techniques[index],start=[.285,.305,.295,.35,.31][index],end=t.finish-.025;
+ return {...t,index,weaponId:id,kind:'smash',strikeVolume:'hammer-head',reach:[1.95,1.90,2.04,1.92,2.12][index],halfAngle:[1.72,1.05,1.95,.85,2.08][index],
   active:[start,end],swing:[t.release,t.finish],contacts:[{hand:1,kind:'smash',phase:t.contact,start,end,window:[start,end]}],
   ...HAMMER_GRIP,headLength:HAMMER_HEAD.length,headRadius:.27,headHalfExtents:HAMMER_HEAD.halfExtents,
   width:.38,midLength:HAMMER_HEAD.length,tipLength:1.44,tipOffset:[0,-1.44,0],rootFrame:true,minTilt:-.86,

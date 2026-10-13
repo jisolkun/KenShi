@@ -124,8 +124,9 @@ export function createAudio() {
     const now = context.currentTime;
     if (now - lastSlash < 0.065) return;
     lastSlash = now;
-    const variation = [1.07, 0.92, 1.14, 0.84][Math.abs(combo) % 4];
-    noise(combo === 3 ? 0.16 : 0.11, 0.36, 2200 * variation, 900, 'highpass', 0, 0.007);
+    const index = ((Math.trunc(combo) % 5) + 5) % 5;
+    const variation = [1.07, 0.92, 1.14, 0.84, 1.20][index];
+    noise(index >= 3 ? 0.16 : 0.11, 0.36, 2200 * variation, 900, 'highpass', 0, 0.007);
     tone(1450 * variation, 470 * variation, 0.1, 0.045, 'triangle', 0.009, 0.004);
     tone(3000 * variation, 1600, 0.075, 0.023, 'sine', 0, 0.003);
   }

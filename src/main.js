@@ -1542,7 +1542,7 @@ function updateEnemies(dt) {
             : e.state,
       time: globalTime,
       phase: e.duration ? Math.min(1, e.elapsed / e.duration) : 0,
-      combo: e.combo % 4,
+      combo: ((e.combo % 5) + 5) % 5,
       speed,
       skill: e.attackKind,
       dt: tickDt,

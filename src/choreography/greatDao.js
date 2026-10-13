@@ -10,6 +10,7 @@ const carries = [ready,
   hand([-.19,.20,.36], [-.96,-.16,.23]),
   hand([.25,.27,.37], [.91,.28,.29]),
   hand([-.24,.35,.30], [-.94,.18,-.29]),
+  hand([.16,.46,.34], [.72,-.18,-.66]),
   ready,
 ];
 // pelvis yaw, chest yaw, chest pitch, root x/z/height, pelvis pitch/roll,
@@ -20,12 +21,14 @@ const bodies = [
   [.58,.18,.08,-.04,.14,.80,.05,-.13,.05],
   [-.72,-.25,.09,.045,.15,.79,.07,.14,-.045],
   [0,0,-.06,0,0,.875,0,0,0],
+  [0,0,-.06,0,0,.875,0,0,0],
 ];
 const feet = [
   [[-.21,.075,.12],[.21,.075,-.12]],
   [[-.24,.075,.38],[.21,.075,-.12]],
   [[-.24,.075,.38],[.25,.075,.19]],
   [[-.25,.075,.08],[.25,.075,.19]],
+  [[-.21,.075,.12],[.21,.075,-.12]],
   [[-.21,.075,.12],[.21,.075,-.12]],
 ];
 const techniques = [
@@ -51,6 +54,9 @@ const techniques = [
     // the hero's toes, so the final silhouette has a clean, decisive finish.
     chamber:hand([.13,.61,.40],[.10,.94,.33]), cross:hand([.03,.34,.48],[0,.10,.995]),
     exit:hand([.15,.13,.42],[.08,-.60,.80]), turn:[.72,-.56], step:1, reach:2.18 },
+  { name:'回旋断阵', kind:'chop', duration:.72, contact:.63, window:[.49,.84], wind:.45, brake:.92,
+    chamber:hand([.18,.48,.34],[.70,.20,-.68]), cross:hand([.02,.28,.51],[0,.06,1]),
+    exit:hand([-.16,.16,.38],[-.72,-.18,-.68]), turn:[1.30,-1.38], step:0, reach:2.32 },
 ];
 const stance = values => ({ yaw:0, load:0, pelvisYaw:values[0], chestYaw:values[1], pitch:values[2],
   shiftX:values[3], advance:values[4], bodyHeight:values[5], bodyPitch:values[6], bodyRoll:values[7], chestRoll:values[8] });
@@ -62,7 +68,7 @@ function orientationHands(pose, body) {
 }
 export function getGreatAttack(id, combo=0, state='attack') {
   if (id !== 'great-dao' || state !== 'attack') return null;
-  const index=((combo%4)+4)%4, technique=techniques[index];
+  const index=((combo%5)+5)%5, technique=techniques[index];
   const [release,finish]=technique.window, start=release+.035, end=finish-.05;
   return { ...technique, weaponId:id, index, active:[start,end], swing:[release,finish],
     contacts:[{hand:1,kind:technique.kind,phase:technique.contact,start,end,window:[start,end],edgeWindow:true}],

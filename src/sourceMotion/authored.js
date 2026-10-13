@@ -124,21 +124,31 @@ function constrainGrip(primary,axis,shoulders,minimumY=-Infinity) {
 export function sampleSourceStyledWeapon(weaponId,combo,profile,phase,sampled) {
  if(weaponId!=='great-hammer')return sampled;
  const frame=Float64Array.from(sampled.frame),attachments=Float64Array.from(sampled.attachments);
- const index=((combo%5)+5)%5,row=profile.loop?null:poseAt(index,profile,phase);
+ // The native catalogue clamps out-of-range requests to the first/last
+ // source clip. Use the profile's baked combo id when present so the authored
+ // hammer keys stay on the same five-clock selection (negative replay values
+ // must not wrap to the fifth pose while the clock is playing attack1).
+ const requested=Number.isFinite(combo)?Math.floor(combo):0;
+ const index=Number.isInteger(profile.combo)
+   ? profile.combo : Math.max(0,Math.min(4,requested));
+ const row=profile.loop?null:poseAt(index,profile,phase);
  const hips=new THREE.Vector3().fromArray(frame),chestQ=new THREE.Quaternion().fromArray(frame,7).normalize();
- if(row) {
-  // Waist/shoulder accents follow the continuous shaft trajectory. Native
-  // pelvis, stepping legs, head rotations and clocks remain untouched.
-  chestQ.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(row[6],row[5],row[7],'YXZ'))).normalize();
-  chestQ.toArray(frame,7);
- }
+ // Keep the native source torso orientation.  The shaft is solved against
+ // this joint frame below; rotating the chest again from the hammer track
+ // makes the shoulder parent disagree with the source spine and is the
+ // deformation that used to pull the arms through the body.
  const shoulders=[67,70].map(offset=>new THREE.Vector3().fromArray(frame,offset).applyQuaternion(chestQ).add(hips));
  let primary;
  if(profile.loop) {
   const upper=new THREE.Quaternion().fromArray(frame,27),fore=new THREE.Quaternion().fromArray(frame,31);
   primary=shoulders[1].clone().add(new THREE.Vector3(0,-.39,0).applyQuaternion(upper))
    .add(new THREE.Vector3(0,-.35,.015).applyQuaternion(fore));
- } else primary=new THREE.Vector3(...row.slice(0,3)).add(hips);
+ } else {
+  // Attack keys stay in the source character frame.  The shoulders below
+  // use the same pelvis/chest frame, while the two-bone solve absorbs the
+  // torso turn without warping the authored swing path.
+  primary=new THREE.Vector3(...row.slice(0,3)).add(hips);
+ }
  const weaponQ=row?quaternion(row):new THREE.Quaternion().fromArray(frame,63).normalize(),axis=new THREE.Vector3(0,1,0).applyQuaternion(weaponQ);
  // A differentiable clearance envelope raises the paired grip instead of
  // abruptly changing shaft angle at floor contact. The authored low point

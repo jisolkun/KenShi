@@ -5,14 +5,19 @@ export const GREAT_DAO_STEPS = [
   { forward: .50, lateral: -.22 },
   { forward: .60, lateral: .28 },
   { forward: .72, lateral: -.10 },
+  // Fifth source-style stroke returns through the opposite lane after the
+  // pivot; keep a short lateral catch so its fallback choreography has a
+  // real root step instead of reusing the opener.
+  { forward: .58, lateral: .14 },
 ];
 export const HAMMER_STEPS = [
   { forward: .46, lateral: .20 },
   { forward: .28, lateral: -.12 },
   { forward: .54, lateral: -.24 },
   { forward: .30, lateral: 0 },
+  { forward: .42, lateral: .18 },
 ];
-const hammerPlants = [[.01,.25],[.01,.27],[.01,.26],[.01,.32]];
+const hammerPlants = [[.01,.25],[.01,.27],[.01,.26],[.01,.32],[.01,.29]];
 const clamp = (value, low = 0, high = 1) => Math.max(low, Math.min(high, value));
 const smooth = value => { const t = clamp(value); return t * t * (3 - 2 * t); };
 
@@ -24,7 +29,7 @@ export function greatDaoStepProgress(phase) {
 }
 
 export function greatDaoStepDelta(combo, previousPhase, phase) {
-  const step = GREAT_DAO_STEPS[((combo % 4) + 4) % 4];
+  const step = GREAT_DAO_STEPS[((combo % GREAT_DAO_STEPS.length) + GREAT_DAO_STEPS.length) % GREAT_DAO_STEPS.length];
   const distance = Math.max(0, greatDaoStepProgress(phase) - greatDaoStepProgress(previousPhase));
   return { forward: step.forward * distance, lateral: step.lateral * distance };
 }
@@ -32,12 +37,12 @@ export function greatDaoStepDelta(combo, previousPhase, phase) {
 export function hammerStepProgress(phase, combo = 0) {
   // Weight is caught before the damaging stroke. The torso and head can
   // accelerate above grounded feet without the old continuous forward skate.
-  const [start,plant] = hammerPlants[((combo % 4) + 4) % 4];
+  const [start,plant] = hammerPlants[((combo % hammerPlants.length) + hammerPlants.length) % hammerPlants.length];
   return smooth((phase - start) / (plant - start));
 }
 
 export function hammerStepDelta(combo, previousPhase, phase) {
-  const step = HAMMER_STEPS[((combo % 4) + 4) % 4];
+  const step = HAMMER_STEPS[((combo % HAMMER_STEPS.length) + HAMMER_STEPS.length) % HAMMER_STEPS.length];
   const distance = Math.max(0, hammerStepProgress(phase, combo) - hammerStepProgress(previousPhase, combo));
   return { forward: step.forward * distance, lateral: step.lateral * distance };
 }
