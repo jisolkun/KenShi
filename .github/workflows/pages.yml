@@ -36,7 +36,9 @@ jobs:
           path: dist
 
   deploy:
-    if: github.ref == 'refs/heads/Undead-Slayer2'
+    # GitHub Pages protects this environment for the main deployment ref.
+    # Build the selected source_ref above, then publish from main.
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
     permissions:
