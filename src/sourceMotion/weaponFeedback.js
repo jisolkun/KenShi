@@ -2,11 +2,14 @@ import * as THREE from 'three';
 
 // Combat owns the source clocks. These renderers observe them and sample the
 // real weapon, so a visual trail can never add a hit or cancel another volume.
-const LIMIT = 32, HISTORY = 18, Y = new THREE.Vector3(0, 1, 0);
+const LIMIT = 32, HISTORY = 18, BLADE_HISTORY = 48, Y = new THREE.Vector3(0, 1, 0);
 const STYLES = Object.freeze({
-  'dual-dao': { name: 'paired-edge-paths', color: 0x83b9e7, offColor: 0x66ddd0, width: .023, trail: .085, tail: .13, glow: .62 },
-  'tang-dao': { name: 'precise-edge-path', color: 0xb7d8f0, width: .019, trail: .095, tail: .14, glow: .72 },
-  'great-dao': { name: 'heavy-steel-cut', color: 0x6c99bf, width: .071, trail: .13, tail: .18, glow: .56 },
+  'dual-dao': { name: 'paired-edge-paths', color: 0x83b9e7, offColor: 0x66ddd0, width: .023,
+    inner: .34, outer: 1.24, trail: .10, tail: .18, glow: .62, edgeWidth: .022, halo: .11 },
+  'tang-dao': { name: 'precise-edge-path', color: 0xb7d8f0, width: .019,
+    inner: .24, outer: 1.32, trail: .14, tail: .21, glow: .72, edgeWidth: .027, halo: .13 },
+  'great-dao': { name: 'heavy-steel-cut', color: 0x6c99bf, width: .071,
+    inner: .12, outer: 1.40, trail: .18, tail: .24, glow: .56, edgeWidth: .046, halo: .18 },
   'great-hammer': { name: 'forged-head-pressure', color: 0xc89a54, trail: .075, tail: .14, glow: .25 },
 });
 
@@ -27,14 +30,17 @@ function effectMaterial(color, instanced = false, additive = false) {
   });
 }
 
-function trailGeometry() {
+function trailGeometry(sections = 2) {
   const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(HISTORY * 2 * 3), 3).setUsage(THREE.DynamicDrawUsage));
-  geometry.setAttribute('effectAlpha', new THREE.BufferAttribute(new Float32Array(HISTORY * 2), 1).setUsage(THREE.DynamicDrawUsage));
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(BLADE_HISTORY * sections * 3), 3).setUsage(THREE.DynamicDrawUsage));
+  geometry.setAttribute('effectAlpha', new THREE.BufferAttribute(new Float32Array(BLADE_HISTORY * sections), 1).setUsage(THREE.DynamicDrawUsage));
   const indices = [];
-  for (let i = 0; i < HISTORY - 1; i++) indices.push(i * 2, i * 2 + 1, i * 2 + 2, i * 2 + 1, i * 2 + 3, i * 2 + 2);
+  for (let i = 0; i < BLADE_HISTORY - 1; i++) for (let j = 0; j < sections - 1; j++) {
+    const p = i * sections + j, next = p + sections;
+    indices.push(p, p + 1, next, p + 1, next + 1, next);
+  }
   geometry.setIndex(indices); geometry.setDrawRange(0, 0);
-  geometry.userData.effectGeometry = 'physical-edge-path';
+  geometry.userData.effectGeometry = 'physical-blade-sweep'; geometry.userData.sections = sections;
   return geometry;
 }
 
@@ -79,13 +85,22 @@ export function createWeaponFeedback(scene) {
     const entry = { kind, group, ownedGeometry: [], materials: [], history: [], points: [], cursor: 0, count: 0,
       scratch: { tip: new THREE.Vector3(), heel: new THREE.Vector3(), edge: new THREE.Vector3(), head: new THREE.Vector3(),
         quaternion: new THREE.Quaternion(), extents: new THREE.Vector3(), bottom: new THREE.Vector3() } };
-    for (let i = 0; i < HISTORY; i++) entry.history.push({ position: new THREE.Vector3(), edge: new THREE.Vector3(),
+    for (let i = 0; i < (kind === 'blade' ? BLADE_HISTORY : HISTORY); i++) entry.history.push({ position: new THREE.Vector3(),
+      heel: new THREE.Vector3(), edge: new THREE.Vector3(),
       quaternion: new THREE.Quaternion(), extents: new THREE.Vector3(), age: -100 });
     for (let i = 0; i < 20; i++) entry.points.push({ p: new THREE.Vector3(), velocity: new THREE.Vector3(), size: .02, age: -100 });
     if (kind === 'blade') {
-      const geo = trailGeometry(), mat = effectMaterial(0xffffff, false, true), mesh = new THREE.Mesh(geo, mat);
+      const geo = trailGeometry(4), mat = effectMaterial(0xffffff, false, true), mesh = new THREE.Mesh(geo, mat);
       mesh.frustumCulled = false; mesh.renderOrder = 5; mesh.name = 'physical-blade-path'; group.add(mesh);
       entry.trail = mesh; entry.ownedGeometry.push(geo); entry.materials.push(mat);
+      const haloGeo = trailGeometry(4), haloMat = effectMaterial(0xffffff, false, true);
+      entry.halo = new THREE.Mesh(haloGeo, haloMat); entry.halo.name = 'blade-outer-glow';
+      entry.halo.frustumCulled = false; entry.halo.renderOrder = 4; group.add(entry.halo);
+      entry.ownedGeometry.push(haloGeo); entry.materials.push(haloMat);
+      const edgeGeo = trailGeometry(), edgeMat = effectMaterial(0xffffff, false, true);
+      entry.brightEdge = new THREE.Mesh(edgeGeo, edgeMat); entry.brightEdge.name = 'blade-bright-edge';
+      entry.brightEdge.frustumCulled = false; entry.brightEdge.renderOrder = 6; group.add(entry.brightEdge);
+      entry.ownedGeometry.push(edgeGeo); entry.materials.push(edgeMat);
       const glintGeometry = geometry('edge-glint', () => new THREE.BoxGeometry(1, 1, 1));
       const glintMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: .55, depthWrite: false,
         blending: THREE.AdditiveBlending, toneMapped: false });
@@ -150,7 +165,7 @@ export function createWeaponFeedback(scene) {
     const entry = acquire(kind), group = entry.group, style = STYLES[weaponId];
     Object.assign(entry, { root, rig, volume, descriptor, weaponId, style, hand, key, inUse: true, age: 0,
       tailAge: 0, started: false, snapped: false, cursor: 0, count: 0, impactSeen: false, sampleSeen: false,
-      contactAge: -100, showAge: 0, order: sequence++ });
+      contactAge: -100, showAge: 0, sweepWidth: 0, tipExtension: 0, order: sequence++ });
     for (const h of entry.history) h.age = -100;
     for (const p of entry.points) p.age = -100;
     group.position.set(0, 0, 0); group.quaternion.identity(); group.scale.set(1, 1, 1); group.visible = false;
@@ -161,6 +176,10 @@ export function createWeaponFeedback(scene) {
     if (kind === 'blade') {
       const color = weaponId === 'dual-dao' && hand === 0 ? style.offColor : style.color;
       entry.trail.material.uniforms.tint.value.setHex(color); entry.glint.material.color.setHex(color);
+      entry.halo.material.uniforms.tint.value.setHex(color); entry.brightEdge.material.uniforms.tint.value.setHex(color);
+      entry.trail.geometry.userData.radialRange = [style.inner, style.outer];
+      entry.halo.geometry.userData.radialRange = [Math.max(0, style.inner - style.halo), style.outer + style.halo];
+      for (const mesh of [entry.halo, entry.brightEdge, entry.weightLine]) mesh.geometry.setDrawRange(0, 0);
       entry.weightLine.visible = weaponId === 'great-dao'; entry.trail.geometry.setDrawRange(0, 0); entry.glint.visible = false;
     }
     group.cancel = () => release(entry); // Visual ownership never reaches into collision ownership.
@@ -187,9 +206,9 @@ export function createWeaponFeedback(scene) {
   }
   function remember(entry) {
     const h = entry.history[entry.cursor], s = entry.scratch;
-    h.position.copy(entry.kind === 'hammer' ? s.head : s.tip); h.edge.copy(s.edge);
+    h.position.copy(entry.kind === 'hammer' ? s.head : s.tip); h.heel.copy(s.heel); h.edge.copy(s.edge);
     h.quaternion.copy(s.quaternion); h.extents.copy(s.extents); h.age = entry.age;
-    entry.cursor = (entry.cursor + 1) % HISTORY; entry.count = Math.min(HISTORY, entry.count + 1);
+    entry.cursor = (entry.cursor + 1) % entry.history.length; entry.count = Math.min(entry.history.length, entry.count + 1);
   }
   function writeInstance(mesh, index, p, q, size, alpha) {
     matrix.compose(p, q, size); mesh.setMatrixAt(index, matrix);
@@ -201,24 +220,43 @@ export function createWeaponFeedback(scene) {
   function blade(entry, showing) {
     const { style, trail, scratch: s } = entry;
     if (showing && entry.sampleSeen) remember(entry);
-    const positions = trail.geometry.attributes.position, alphas = trail.geometry.attributes.effectAlpha;
-    const goldPositions = entry.weightLine.geometry.attributes.position, goldAlphas = entry.weightLine.geometry.attributes.effectAlpha;
+    // Each section spans the real heel-to-tip direction, rather than a thin
+    // ribbon centered at the tip. Successive posed blades create the arc; no
+    // root-centered crescent is invented when the weapon changes direction.
+    const writeBand = (mesh, index, h, inner, outer, opacity, broad = false) => {
+      const positions = mesh.geometry.attributes.position, alphas = mesh.geometry.attributes.effectAlpha;
+      const sections = broad ? 4 : 2, span = outer - inner;
+      for (let radial = 0; radial < sections; radial++) {
+        const ratio = broad ? (radial === 0 ? 0 : radial === 1 ? .25 : radial === 2 ? .83 : 1) : radial;
+        const along = inner + span * ratio, p = index * sections + radial;
+        positions.setXYZ(p, h.heel.x + (h.position.x - h.heel.x) * along,
+          h.heel.y + (h.position.y - h.heel.y) * along, h.heel.z + (h.position.z - h.heel.z) * along);
+        const radialAlpha = broad ? (radial === 0 || radial === 3 ? 0 : radial === 1 ? .36 : .62) : 1;
+        alphas.setX(p, opacity * radialAlpha);
+      }
+    };
     let count = 0;
     for (let i = 0; i < entry.count; i++) {
-      const h = entry.history[(entry.cursor - entry.count + i + HISTORY) % HISTORY], age = entry.age - h.age;
+      const h = entry.history[(entry.cursor - entry.count + i + BLADE_HISTORY) % BLADE_HISTORY], age = entry.age - h.age;
       if (age > style.trail + style.tail) continue;
-      const opacity = style.glow * Math.max(0, 1 - age / (style.trail + style.tail)) ** 1.5;
-      const width = style.width * Math.max(.2, 1 - age / (style.trail + style.tail));
-      positions.setXYZ(count * 2, h.position.x - h.edge.x * width, h.position.y - h.edge.y * width, h.position.z - h.edge.z * width);
-      positions.setXYZ(count * 2 + 1, h.position.x + h.edge.x * width, h.position.y + h.edge.y * width, h.position.z + h.edge.z * width);
-      alphas.setX(count * 2, opacity); alphas.setX(count * 2 + 1, opacity); count++;
-      goldPositions.setXYZ((count - 1) * 2, h.position.x - h.edge.x * width * .19, h.position.y - h.edge.y * width * .19, h.position.z - h.edge.z * width * .19);
-      goldPositions.setXYZ((count - 1) * 2 + 1, h.position.x + h.edge.x * width * .19, h.position.y + h.edge.y * width * .19, h.position.z + h.edge.z * width * .19);
-      goldAlphas.setX((count - 1) * 2, opacity); goldAlphas.setX((count - 1) * 2 + 1, opacity);
+      const opacity = style.glow * Math.max(0, 1 - age / (style.trail + style.tail)) ** 1.25;
+      const length = h.position.distanceTo(h.heel), edgeWidth = style.edgeWidth / Math.max(.001, length);
+      writeBand(trail, count, h, style.inner, style.outer, opacity, true);
+      writeBand(entry.halo, count, h, Math.max(0, style.inner - style.halo), style.outer + style.halo, opacity * .26, true);
+      writeBand(entry.brightEdge, count, h, style.outer - edgeWidth * 1.5,
+        style.outer - edgeWidth * .5, opacity * .72);
+      writeBand(entry.weightLine, count, h, style.outer - .13 - edgeWidth * .5,
+        style.outer - .13 + edgeWidth * .5, opacity);
+      count++;
     }
-    positions.needsUpdate = alphas.needsUpdate = true; trail.geometry.setDrawRange(0, Math.max(0, count - 1) * 6);
-    goldPositions.needsUpdate = goldAlphas.needsUpdate = true; entry.weightLine.geometry.setDrawRange(0, Math.max(0, count - 1) * 6);
-    entry.weightLine.material.uniforms.fade.value = .32;
+    const tailFade = entry.volume.clock.finished ? Math.max(0, 1 - entry.tailAge / style.tail) : 1;
+    for (const mesh of [trail, entry.halo, entry.brightEdge, entry.weightLine]) {
+      mesh.geometry.attributes.position.needsUpdate = mesh.geometry.attributes.effectAlpha.needsUpdate = true;
+      mesh.geometry.setDrawRange(0, Math.max(0, count - 1) * (mesh.geometry.userData.sections - 1) * 6);
+      mesh.material.uniforms.fade.value = tailFade * (mesh === entry.weightLine ? .42 : 1);
+    }
+    entry.sweepWidth = s.tip.distanceTo(s.heel) * (style.outer - style.inner);
+    entry.tipExtension = s.tip.distanceTo(s.heel) * (style.outer - 1);
     entry.glint.visible = showing && entry.sampleSeen;
     if (entry.glint.visible) {
       direction.subVectors(s.tip, s.heel); const length = direction.length();
@@ -333,6 +371,10 @@ export function createWeaponFeedback(scene) {
         emitter: entry.descriptor.emitter, hand: entry.hand, sampleHand: entry.sampleHand, visible: entry.group.visible,
         collision: entry.group.userData.collisionActive, frame: entry.volume.clock.frame, attachment: entry.group.userData.attachment,
         tail: entry.volume.clock.finished, samples: entry.count, snapped: entry.snapped,
+        sweepWidth: entry.kind === 'blade' ? entry.sweepWidth : null,
+        tipExtension: entry.kind === 'blade' ? entry.tipExtension : null,
+        radialRange: entry.kind === 'blade' ? [entry.style.inner, entry.style.outer] : null,
+        visualTail: entry.style.tail,
         sample: entry.sampleSeen ? entry.scratch.tip.toArray() : null,
         headCenter: entry.sampleSeen && entry.kind !== 'blade' ? entry.scratch.head.toArray() : null,
         floorContact: entry.snapped ? entry.group.position.toArray() : null })) };

@@ -70,6 +70,24 @@ test('both grounding hammer strikes emit radial floor dust and cracks at the rea
   }
 });
 
+test('a fast descending hammer anchors its floor crossing identically at different sample rates',()=>{
+  const contacts=[];
+  for(const rate of [30,60,120]) {
+    const fx=fixture();let previous=frame(-2,1.8,-1,1.6),contact;
+    for(let i=1;i<=rate&&!contact;i++) {
+      const t=i/rate;
+      const current=frame(-2+12*t,1.8-3.1*t,-1+6*t,1.6-3.1*t);
+      contact=fx.feedbackStrike(strike(current,previous,3)).groundContact;
+      previous=current;
+    }
+    assert.ok(contact,'a visible step crossing the floor band still emits the physical ground impact');
+    contacts.push(contact);
+    assert.equal(fx.getCombatState().groundHits,1);
+  }
+  for(const contact of contacts)assert.ok(contact.distanceTo(contacts[0])<1e-9,
+    'dust and cracks attach to the swept floor entry, rather than the first rendered point past it');
+});
+
 test('the floor crack has a broad bounded footprint and the finishing crater reads larger than the follow-up',()=>{
   const widths=[];
   for(const combo of [1,3]){

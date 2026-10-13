@@ -326,6 +326,17 @@ export function createWorldCombat(parent, { props = [], random = Math.random } =
     if((combo===1||combo===3)&&!record.ground&&low&&low.headBottom>=groundY-.035&&low.headBottom<=groundY+.025){
       record.ground=true;stats.groundHits++;
       const contact={x:low.headCenter.x,y:groundY+.018,z:low.headCenter.z};
+      // A broad, fast downswing can travel far in one combat substep. Anchor
+      // its dust/crack at the first real corner entering the floor band, so
+      // presentation cadence does not move the same impact across the paving.
+      const floorBand=groundY+.025;
+      if(previous?.headCenter&&Number.isFinite(previous.headBottom)&&Number.isFinite(current.headBottom)
+        &&Number.isFinite(previous.headCenter.x)&&Number.isFinite(previous.headCenter.z)
+        &&previous.headBottom>floorBand&&current.headBottom<=floorBand) {
+        const crossed=(previous.headBottom-floorBand)/(previous.headBottom-current.headBottom);
+        contact.x=THREE.MathUtils.lerp(previous.headCenter.x,current.headCenter.x,crossed);
+        contact.z=THREE.MathUtils.lerp(previous.headCenter.z,current.headCenter.z,crossed);
+      }
       record.dust=true;stats.dustSweeps++;lastDust={...contact};
       result.groundContact=new THREE.Vector3(contact.x,contact.y,contact.z);lastGround={...contact};
       const area=getHammerArea(combo,contact),heavy=combo===3;

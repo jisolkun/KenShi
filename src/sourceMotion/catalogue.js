@@ -23,7 +23,7 @@ export const SOURCE_WEAPON_BINDINGS = Object.freeze(Object.fromEntries(
     atkspd: family === 'dual' ? -.01 : .02,
     fallback: id === 'great-hammer',
     provenance: id === 'great-hammer'
-      ? 'The supplied source has no hammer animation family. New hammer shaft paths are paired with the original halberd full-body curves and native attack clocks.'
+      ? 'The supplied source has no hammer animation family. Continuous authored hammer swings and torso accents use the original halberd pelvis, head and leg curves with native attack clocks.'
       : `Original ${family} clips from the supplied source.`,
   })]),
 ));

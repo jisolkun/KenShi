@@ -143,7 +143,7 @@ test('authored hammer keeps both hands on its shaft and the solid head above the
   }
 });
 
-test('hammer authoring retains source spine and legs without altering the shared evaluator cache', () => {
+test('hammer waist accents retain native pelvis, head and legs without altering the evaluator cache', () => {
   const rig = createCharacter('hero');
   rig.setWeapon('great-hammer');
   for (let combo = 0; combo < 5; combo++) for (const phase of [.13, .4, .67, .91]) {
@@ -153,10 +153,13 @@ test('hammer authoring retains source spine and legs without altering the shared
     poseCharacter(rig, { state: 'attack', combo, phase, dt: 1 / 60, immediate: true });
     assert.deepEqual(cached.frame, frame, 'authored hands must not mutate cached source frames');
     assert.deepEqual(cached.attachments, attachments, 'authored shaft must not mutate cached source mounts');
-    for (const i of [0, 1, 2, 9, 10, 11, 12, 13, 14]) {
+    for (const i of [0, 2, 9, 10, 11, 12, 13, 14]) {
       const expected = new THREE.Quaternion().fromArray(frame, 3 + i * 4).normalize();
       assert.ok(expected.angleTo(rig.sourcePose.world[i]) < 1e-6,
-        `hammer attack ${combo + 1}: authored shaft changes native spine or legs`);
+        `hammer attack ${combo + 1}: authored shaft changes native pelvis, head or legs`);
     }
+    const nativeChest = new THREE.Quaternion().fromArray(frame, 7).normalize();
+    assert.ok(nativeChest.angleTo(rig.sourcePose.world[1]) < .5,
+      'the hammer accent adds a bounded shoulder turn to the original full-body pose');
   }
 });
