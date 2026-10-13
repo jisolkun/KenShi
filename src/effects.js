@@ -197,14 +197,14 @@ export function createEffects(scene, camera) {
     const angle=Math.atan2(direction.dot(cameraUp),direction.dot(cameraRight)),size=0.22+weight*0.1;
     emit(flashes,position,zero,0xfff9df,0.06+(critical?0.015:0),size,size*0.75,1,0,angle,true);
     emit(flashes,position,zero,0xd3a8ef,critical?0.16:0.12,size*(critical?2.2:1.65),size*0.66,1,0,angle+0.6);
-    if (critical && style === 3) {
+    if (critical && style >= 3) {
       // The reference heavy swing is a cold steel-blue outer edge with a
       // white core. Keep the flash wide and directional, but let the actual
       // blade trail remain the source of the motion rather than a screen-sized
       // hit billboard.
       emit(flashes,position,zero,0x38b9ff,0.18,size*3.8,size*0.18,1,0,angle+Math.PI*.5,true);
       const crescentPoint = position.clone(); crescentPoint.y = 0;
-      arc(crescentPoint, Math.atan2(direction.x,direction.z), 1.48 + weight*.24, 3, 0x5caecb);
+      arc(crescentPoint, Math.atan2(direction.x,direction.z), 1.48 + weight*.24, style, 0x5caecb);
       ring(crescentPoint, 1.34 + weight*.20, 0x4b9fb8, .34);
     }
     for(let i=0,count=critical?8:Math.round(4+weight);i<count;i++){
@@ -276,25 +276,28 @@ export function createEffects(scene, camera) {
     }
   }
   function arcGeometry(combo,core=false) {
-    const sweep=combo===3?2.05:combo===2?1.1:1.45,vertices=[],segments=24,tilt=combo%2?-0.3:0.3;
+    const style=((Math.trunc(combo)%5)+5)%5;
+    // Styles 3 and 4 are the two heavy source strikes: retain the broad
+    // crescent on the legacy fourth hit and give the fifth its wider finish.
+    const sweep=style===4?2.28:style===3?2.05:style===2?1.1:1.45,vertices=[],segments=24,tilt=style%2?-0.3:0.3;
     for(let i=0;i<segments;i++){
       const values=[];
       for(const index of [i,i+1]){
-        const t=index/segments,angle=(t-0.5)*sweep,width=Math.sin(t*Math.PI)*(core?0.024:combo===3?0.17:0.105);
-        for(const r of [1-width,1])values.push([Math.sin(angle)*r,Math.sin(angle)*tilt+(combo===2?Math.cos(angle)*0.15:0),Math.cos(angle)*r]);
+        const t=index/segments,angle=(t-0.5)*sweep,width=Math.sin(t*Math.PI)*(core?0.024:style>=3?0.17:0.105);
+        for(const r of [1-width,1])values.push([Math.sin(angle)*r,Math.sin(angle)*tilt+(style===2?Math.cos(angle)*0.15:0),Math.cos(angle)*r]);
       }
       for(const index of [0,1,2,2,1,3])vertices.push(...values[index]);
     }
     const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));return geometry;
   }
   function arc(position,angle,radius=2,combo=0,color=0xb9a9f1) {
-    const style=((combo%4)+4)%4;
+    const style=((Math.trunc(combo)%5)+5)%5;
     const group=acquire(`arc-${style}`,()=>{
       const g=new THREE.Group();g.add(new THREE.Mesh(cachedGeometry(`arc-outer-${style}`,()=>arcGeometry(style)),additive(color,0.3)),new THREE.Mesh(cachedGeometry(`arc-core-${style}`,()=>arcGeometry(style,true)),additive(0xfff2ff,0.52)));return g;
     });
     group.children[0].material.color.setHex(color);group.children[0].material.opacity=0.3;group.children[1].material.opacity=0.52;
     group.position.copy(position);group.position.y+=style===2?1.2:1.03;group.rotation.y=angle+(style%2?0.12:-0.12);group.scale.set(radius,1,radius);
-    return add(group,style===3?0.145:0.115,(o,p)=>{
+    return add(group,style>=3?0.145:0.115,(o,p)=>{
       o.rotation.y=angle+(style%2?1:-1)*(0.12+p*0.22);o.children[0].material.opacity=0.3*Math.pow(1-p,1.6);o.children[1].material.opacity=0.52*Math.pow(1-p,2);
     });
   }

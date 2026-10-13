@@ -21,11 +21,24 @@ const profiles = [
     dustSpread: 2.00, dustDrive: 5.5, wakeLife: .120, wakeWidth: 5.20,
     airTone: 76, airDuration: .130, airVolume: .32, airFilter: 310,
     hitTone: 70, hitDuration: .16, hitFilter: 440, hitCrackTone: 138, cameraGain: 2.70, enemyStop: .028 },
+  // Fifth source strike: a returning rotary sweep. Keep it a forward fan so
+  // the visual pressure and collision volume follow the measured head path;
+  // reserve the radial pulses for the authored ground smashes (styles 1/3).
+  { direction: [.48,-.16,-.86], impactLife: .25, flashLife: .060, coreScale: [.180,.125,.205],
+    swingLife: .39, swingRadius: 2.62, swingSweep: 3.18, swingWidth: .49, swingHeight: .96,
+    dustSpread: 1.90, dustDrive: 5.2, wakeLife: .125, wakeWidth: 5.35,
+    airTone: 84, airDuration: .135, airVolume: .34, airFilter: 325,
+    hitTone: 78, hitDuration: .17, hitFilter: 460, hitCrackTone: 144, cameraGain: 2.85, enemyStop: .030 },
 ].map(profile => Object.freeze({ ...profile,
   direction: Object.freeze(profile.direction), coreScale: Object.freeze(profile.coreScale) }));
 
 export function getHammerFeedback(combo = 0) {
-  return profiles[((Math.trunc(combo) % 4) + 4) % 4] ?? profiles[0];
+  const raw = Math.trunc(combo);
+  // Source attacks use indices 0..4. Preserve the legacy four-slot wrapping
+  // for out-of-range callers (old replay data can still send -1/5), while
+  // keeping the fifth authored strike distinct in its native range.
+  const index = raw >= 0 && raw < 5 ? raw : ((raw % 4) + 4) % 4;
+  return profiles[index] ?? profiles[0];
 }
 
 // The broad release arc is a presentation layer only. Damage still comes from
@@ -51,11 +64,11 @@ export function hammerContactAccent(hitstop, alreadyAccented = false) {
 }
 
 export function getHammerArea(combo, origin, angle=0) {
-  const index=((Math.trunc(combo)%4)+4)%4;
+  const index=((Math.trunc(combo)%5)+5)%5;
   const ground=index===1||index===3;
   return { kind:ground?'radial':'fan', origin:{x:origin?.x,y:origin?.y??0,z:origin?.z}, angle,
-    radius:[2.65,2.20,3.00,3.20][index], halfAngle:ground?Math.PI:[1.70,0,1.92,0][index],
-    minY:ground?(origin?.y??0)-.05:.10, maxY:(ground?(origin?.y??0):0)+[2.25,1.60,2.25,2.00][index] };
+    radius:[2.65,2.20,3.00,3.20,3.35][index], halfAngle:ground?Math.PI:[1.70,0,1.92,0,2.08][index],
+    minY:ground?(origin?.y??0)-.05:.10, maxY:(ground?(origin?.y??0):0)+[2.25,1.60,2.25,2.00,2.30][index] };
 }
 
 export function hammerAreaContains(area, target, enemyRadius=0) {

@@ -7,7 +7,7 @@ import { getHammerFeedback } from './hammerFeedback.js';
 export function createWeaponEffects(scene, baseEffects) {
   const geometries = new Map(), spare = new Map(), all = new Set(), live = [];
   const direction = new THREE.Vector3(), forward = new THREE.Vector3(0,0,1), up = new THREE.Vector3(0,1,0);
-  const greatCutDirections=[[-.98,-.06,.18],[.78,-.62,.18],[-.96,.10,.22],[.06,-.92,.38]];
+  const greatCutDirections=[[-.98,-.06,.18],[.78,-.62,.18],[-.96,.10,.22],[.06,-.92,.38],[.56,-.18,-.82]];
   let destroyed = false, lastImpact = null, impactSequence = 0;
   const MAX_LIVE = 72, MAX_GREAT_IMPACTS = 24, MAX_HAMMER_SWINGS = 8, FIRST_PRESENTATION_TIMEOUT = .5;
   const arc = (radius, start, end, y = 0, x = 0, z = 0, count = 18) => Array.from({length:count+1}, (_, i) => {
@@ -141,7 +141,7 @@ export function createWeaponEffects(scene, baseEffects) {
     if(destroyed||area?.kind!=='fan'||![area.radius,area.halfAngle,area.angle,
       area.origin?.x,area.origin?.y,area.origin?.z].every(Number.isFinite)
       ||area.radius<=0||area.halfAngle<=0||area.halfAngle>Math.PI)return;
-    const style=((combo%4)+4)%4,key=`great-hammer:fan:${style}:${area.halfAngle.toFixed(4)}`;
+    const style=((Math.trunc(combo)%5)+5)%5,key=`great-hammer:fan:${style}:${area.halfAngle.toFixed(4)}`;
     let o=spare.get(key)?.pop();
     if(!o) {
       const group=new THREE.Group(),pressure=new THREE.Mesh(hammerFanGeometry(key,area.halfAngle),material(0xb18c55,.46));
@@ -167,7 +167,7 @@ export function createWeaponEffects(scene, baseEffects) {
   }
   function hammerSwing(pos,angle,combo=0,power=1) {
     if(destroyed||!pos||![pos.x,pos.y,pos.z,angle,power].every(Number.isFinite)||power<=0)return;
-    const style=((combo%4)+4)%4,feedback=getHammerFeedback(style),key=`great-hammer:swing:${style}`;
+    const style=((Math.trunc(combo)%5)+5)%5,feedback=getHammerFeedback(style),key=`great-hammer:swing:${style}`;
     let o=spare.get(key)?.pop();
     if(!o) {
       const group=new THREE.Group(),outer=new THREE.Mesh(hammerSwingGeometry(key,feedback),material(0x5c78ae,.38)),core=new THREE.Mesh(hammerSwingGeometry(key,feedback,true),material(0xffdda4,.82));
@@ -178,8 +178,8 @@ export function createWeaponEffects(scene, baseEffects) {
     if(swings.length>=MAX_HAMMER_SWINGS)release(live.splice(swings[0],1)[0]);
     if(live.length>=MAX_LIVE)release(live.shift());
     o.feedback=feedback;o.angle=angle;o.spin=style%2?-0.18:.14;o.power=power;o.age=0;o.unseenAge=0;o.awaitingPresentation=true;o.life=feedback.swingLife;
-    o.outer.material.color.setHex(style===3?0x9b7ed1:0x6f8fbd);
-    o.core.material.color.setHex(style===3?0xfff5df:0xffdda4);
+    o.outer.material.color.setHex(style>=3?0x9b7ed1:0x6f8fbd);
+    o.core.material.color.setHex(style>=3?0xfff5df:0xffdda4);
     o.group.visible=true;o.group.position.set(pos.x,pos.y+.92+feedback.swingRadius*.24,pos.z);o.group.rotation.set(0,angle,0);updateHammerSwing(o,0);scene.add(o.group);live.push(o);
   }
   function updateHammerImpact(o,phase) {
@@ -203,14 +203,14 @@ export function createWeaponEffects(scene, baseEffects) {
     if(o.ripple){o.ripple.material.opacity=.52*fade;o.ripple.scale.setScalar(.35+phase*(o.hammerFinisher?1.65:1.15));}
   }
   function emitHammerImpact(pos,combo,power,headDirection) {
-    const style=((combo%4)+4)%4,key=`great-hammer:impact:${style}`;
+    const style=((Math.trunc(combo)%5)+5)%5,key=`great-hammer:impact:${style}`;
     let o=spare.get(key)?.pop();
     if(!o){
       const group=new THREE.Group(),core=new THREE.Mesh(hammerCoreGeometry(),material(0xffedc6,.94));
       core.name='hammer-blunt-core';core.renderOrder=3;
-      const dust=new THREE.InstancedMesh(debrisGeometry(),material(0xbfa285,.48),style===3?8:6);
+      const dust=new THREE.InstancedMesh(debrisGeometry(),material(0xbfa285,.48),style>=3?8:6);
       dust.name='hammer-short-impact-dust';dust.instanceMatrix.setUsage(THREE.DynamicDrawUsage);dust.frustumCulled=false;
-      const finisher=style===3,star=new THREE.Mesh(hammerBurstGeometry(key,finisher),material(finisher?0x9edcff:0xfff1d0,.92));
+      const finisher=style>=3,star=new THREE.Mesh(hammerBurstGeometry(key,finisher),material(finisher?0x9edcff:0xfff1d0,.92));
       star.name='hammer-directional-star';star.renderOrder=4;
       const ripple=new THREE.Mesh(hammerRippleGeometry(key),material(finisher?0x76b6d5:0xd1a76d,.52));
       ripple.name='hammer-impact-ripple';ripple.rotation.x=Math.PI/2;ripple.renderOrder=2;
@@ -233,9 +233,9 @@ export function createWeaponEffects(scene, baseEffects) {
       if(mode==='impact')emitHammerImpact(pos,combo,power,cutDirection);
       return;
     }
-    const style=((combo%4)+4)%4;
+    const style=((Math.trunc(combo)%5)+5)%5;
     const weapon=getWeapon(id), move=weapon.moves[style], key=`${id}:${mode}:${style}`;
-    const greatImpact=id==='great-dao'&&mode==='impact',greatFinisher=greatImpact&&style===3;
+    const greatImpact=id==='great-dao'&&mode==='impact',greatFinisher=greatImpact&&style>=3;
     const greatSwing=id==='great-dao'&&mode==='attack';
     const authored=cuts[id]||cuts['tang-dao'];
     const reach=move.reach,shapeKind=move.shape;
@@ -277,9 +277,9 @@ export function createWeaponEffects(scene, baseEffects) {
     if(live.length>=MAX_LIVE)release(live.shift());
     o.age=0;o.unseenAge=0;o.awaitingPresentation=greatImpact;o.group.visible=true;o.life=greatFinisher?.25:greatImpact?.19:mode==='impact'?.14:.16;o.angle=angle;o.spin=(combo%2?-1:1)*(shapeKind==='thrust'||shapeKind==='crush'?0:mode==='impact'?0.12:0.32);o.scale=power;
     o.group.position.copy(pos);o.group.position.y+=greatImpact?0:mode==='impact'?.22:1.02;if(mode==='impact'&&shapeKind==='crush'&&id!=='great-dao')o.group.position.y=0.07;
-    o.group.rotation.set(0,angle,mode==='impact'||shapeKind==='thrust'||shapeKind==='crush'?0:[0.12,-0.12,0.35,-0.3][combo%4]);
+    o.group.rotation.set(0,angle,mode==='impact'||shapeKind==='thrust'||shapeKind==='crush'?0:[0.12,-0.12,0.35,-0.3,0.18][style]);
     if(greatImpact)o.group.quaternion.setFromUnitVectors(forward,cutDirection);
-    o.mirror=greatImpact?1:combo%2?-1:1;o.group.scale.set(power*o.mirror,power,power);
+    o.mirror=greatImpact?1:style%2?-1:1;o.group.scale.set(power*o.mirror,power,power);
     o.group.children[0].material.color.setHex(greatFinisher?0x5caecb:(greatSwing||greatImpact)?0x7898d0:(weapon?.effectColor??0xc9ae7b));o.group.children[1].material.color.setHex(greatFinisher?0x9fe9ff:(greatSwing||greatImpact)?0xe8f2ff:(weapon?.effectAccent??0xffe4ac));
     o.group.children[0].material.opacity=greatImpact?.56:mode==='impact'?.46:.24;o.group.children[1].material.opacity=greatImpact?.80:.6;
     if(o.flash){o.flash.material.opacity=.84;o.flash.scale.setScalar(greatFinisher?1.45:1);}
@@ -291,24 +291,24 @@ export function createWeaponEffects(scene, baseEffects) {
     if(destroyed)return;
     direction.set(Math.sin(angle),0,Math.cos(angle));
     if(id==='great-dao'||id==='great-hammer') {
-      const style=((combo%4)+4)%4;
+      const style=((Math.trunc(combo)%5)+5)%5;
       if(cutDirection?.isVector3&&Number.isFinite(cutDirection.lengthSq())&&cutDirection.lengthSq()>.0001)direction.copy(cutDirection).normalize();
       else {
         direction.fromArray(id==='great-hammer'?getHammerFeedback(style).direction:greatCutDirections[style]).normalize();
         direction.applyAxisAngle(up,angle);
       }
     }
-    lastImpact={sequence:++impactSequence,id,combo:((combo%4)+4)%4,critical,position:pos.toArray(),cutDirection:direction.toArray()};
+    lastImpact={sequence:++impactSequence,id,combo:((Math.trunc(combo)%5)+5)%5,critical,position:pos.toArray(),cutDirection:direction.toArray()};
     emit(id,pos,angle,combo,'impact',critical?(id==='great-dao'?1.25:1.35):1,direction);
     if(id==='great-hammer'){
-      baseEffects?.hammerImpact?.(pos,direction,combo===3?1.4:1,critical,combo);
+      baseEffects?.hammerImpact?.(pos,direction,combo>=3?1.4:1,critical,combo);
       return;
     }
     // Keep the authored combo index with the physical hit so the base effect
     // can reserve the wide crescent and ground flare for the final great-dao
     // chop.  Older callers accept the original four arguments, therefore the
     // optional fifth value remains backwards compatible.
-    baseEffects?.impact(pos,direction,id==='great-dao'?(combo===3?1.55:1.08):.75,critical,combo);
+    baseEffects?.impact(pos,direction,id==='great-dao'?(combo>=3?1.55:1.08):.75,critical,combo);
   }
   function updateDebris(o,p) {
     const {mesh,dummy}=o.debris;
