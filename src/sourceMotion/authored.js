@@ -2,40 +2,52 @@ import * as THREE from 'three';
 
 // The source has no hammer clips. Keep its pelvis/leg curves and five clocks,
 // but drive a weighted two-handed shaft through continuous, broad attacks.
-const scale=.9, support=.249/scale;
+const scale=.9, support=.249/scale, armReach=.69;
 const down=new THREE.Vector3(0,-1,0), foreAxis=new THREE.Vector3(0,-.35,.015).normalize();
+// A hammer grip is authored as a centre point plus a shaft direction.  These
+// five carries are deliberately different: the first exits to the left, the
+// second loads over the right shoulder, the third rises through the centre,
+// the fourth drops from a true overhead chamber, and the fifth finishes in a
+// wide returning circle.  The last carry is exactly the first one so a queued
+// sixth clock can never teleport at the combo boundary.
 const carries=[
- [.18,.25,.41,1.25,-.12],[-.16,.28,.43,-1.70,.10],
- [.13,.22,.46,.45,-.40],[.10,.43,.34,2.15,.66],
- [-.03,.51,.34,-1.18,.34],[.18,.25,.41,1.25,-.12],
+ [.16,.39,.52, 1.18,-.10], // ready: low guard, head forward-left
+ [-.18,.46,.45,-1.56, .06], // after horizontal sweep, opposite shoulder
+ [.14,.42,.50, 0.36,-.38], // after diagonal smash, lifted inside guard
+ [.08,.48,.52, 2.03, .58], // after rising return, rear shoulder
+ [-.03,.53,.42,-1.13, .30], // after overhead drop, low outside guard
+ [.16,.39,.52, 1.18,-.10],
 ].map(row=>[...row,0,0,0]);
+// Each load is a recognisable silhouette rather than a small variation of the
+// same swing.  The first/third/fifth are horizontal power circles; the second
+// and fourth deliberately travel through a tall vertical plane.
 const loads=[
- [.22,.42,.34,2.70,.25,.22,-.06,-.08],
- [-.07,.64,.26,-1.35,1.43,-.14,-.16,-.10],
- [-.20,.22,.33,-2.55,-.08,-.25,.08,.08],
- [.10,.64,.23,.95,1.46,.18,-.16,.08],
- [.17,.42,.29,-2.93,.22,.28,-.07,-.10],
+ [.33,.72,.41, 2.45, .16,.18,-.08,-.10], // shoulder-high wind-up, left sweep
+ [-.07,.64,.26,-1.35, 1.43,-.14,-.16,-.10], // high right chamber
+ [-.32,.33,.46,-2.42,-.18,-.26, .10, .10], // low reverse scoop
+ [.10,.67,.38, .95, 1.46, .18,-.16, .08], // overhead chamber
+ [.25,.65,.46,-2.72, .16,-.31, .03, .11], // coiled spin
 ];
 const contacts=[
- [.04,.30,.52,.05,-.03,-.18,.10,.08],
- [.09,.41,.46,.22,-.66,.12,-.12,.07],
- [.02,.36,.47,.03,.36,.18,-.10,-.08],
- [-.01,.46,.49,-.12,-.88,-.16,.24,-.10],
- [.00,.30,.51,-.13,.02,-.24,.12,.12],
+ [.10,.42,.53, .18,-.08,-.14, .10, .08], // broad horizontal impact
+ [.09,.41,.46, .22,-.66, .12,-.12, .07], // diagonal ground impact
+ [.06,.38,.52, .02, .50, .17,-.10,-.08], // rising backhand impact
+ [-.01,.46,.49,-.12,-.88,-.16, .24,-.10], // overhead ground impact
+ [.08,.43,.54,-.16, .08,-.24, .10, .11], // returning horizontal impact
 ];
 const followThrough=[
- [-.17,.28,.39,-1.92,.08,-.24,.03,.06],
- [.05,.48,.42,.70,-.30,.18,-.08,.06],
- [.18,.43,.29,2.15,.66,.22,-.16,-.10],
- [-.19,.47,.36,-.62,-.56,-.25,.18,-.12],
- [-.19,.31,.37,2.70,.12,-.35,.04,.10],
+ [-.24,.45,.42,-1.82, .10,-.21, .02, .06],
+ [.05,.48,.42, .70,-.30, .18,-.08, .06],
+ [.23,.45,.40, 2.02, .60, .19,-.15,-.10],
+ [-.19,.47,.36,-.62,-.56,-.25, .18,-.12],
+ [-.22,.48,.43, 2.54, .14,-.33, .03, .10],
 ];
 const rebounds=[
- [-.10,.32,.39,-1.96,.17,-.12,-.02,.03],
- [.08,.51,.35,1.15,.35,.08,-.02,0],
- [.09,.42,.35,1.92,.71,.08,-.10,-.03],
- [-.03,.51,.34,-1.18,.34,-.12,-.03,0],
- [-.06,.36,.36,2.46,.22,-.13,-.02,.03],
+ [-.13,.44,.42,-1.88, .17,-.10,-.02, .03],
+ [.08,.51,.35, 1.15, .35, .08,-.02, 0],
+ [.10,.47,.40, 1.86, .69, .08,-.10,-.03],
+ [-.03,.51,.34,-1.18, .34,-.12,-.03, 0],
+ [-.08,.47,.43, 2.34, .20,-.12,-.02, .03],
 ];
 
 // Shape-preserving Hermite tangents carry momentum through the contact key.
@@ -83,15 +95,39 @@ function poseAt(index,profile,phase) {
  }
  return samplePath(keys,phase);
 }
-function writeArm(frame,index,shoulder,target,chestQ,weaponQ) {
- const vector=target.clone().sub(shoulder),length=THREE.MathUtils.clamp(vector.length(),.025,.7399);
+function torsoScore(point,hips,chestQ) {
+ const local=point.clone().sub(hips).applyQuaternion(chestQ.clone().invert());
+ const dx=local.x/.34,dy=(local.y-.30)/.42,dz=local.z/.225;
+ return dx*dx+dy*dy+dz*dz;
+}
+function writeArm(frame,index,shoulder,target,chestQ,weaponQ,hips,maxReach=armReach) {
+ const vector=target.clone().sub(shoulder),length=THREE.MathUtils.clamp(vector.length(),.025,maxReach);
  const axis=vector.normalize();
- const pole=new THREE.Vector3(index===0?-.7:.7,-.05,.5).applyQuaternion(chestQ);
- pole.addScaledVector(axis,-pole.dot(axis)).normalize();
- const along=(.39**2+length**2-.35**2)/(2*length);
- const elbow=axis.clone().multiplyScalar(along).addScaledVector(pole,Math.sqrt(Math.max(0,.39**2-along**2)));
- const upperQ=new THREE.Quaternion().setFromUnitVectors(down,elbow.clone().normalize());
- const fore=target.clone().sub(shoulder).sub(elbow).normalize();
+ const side=index===0?-1:1;
+ const candidates=[-.05,.22].flatMap(y=>[.48,.82,1.18].flatMap(z=>[
+  new THREE.Vector3(side*.7,y,z),new THREE.Vector3(side*1.35,y,z*.72)]));
+ let elbow,best=-Infinity;
+ for(const localPole of candidates) {
+  const pole=localPole.applyQuaternion(chestQ);
+  pole.addScaledVector(axis,-pole.dot(axis));
+  if(pole.lengthSq()<1e-8)continue;
+  pole.normalize();
+  const along=(.39**2+length**2-.35**2)/(2*length);
+  const candidate=axis.clone().multiplyScalar(along)
+   .addScaledVector(pole,Math.sqrt(Math.max(0,.39**2-along**2))).add(shoulder);
+  const localElbow=candidate.clone().sub(hips).applyQuaternion(chestQ.clone().invert());
+  const sideClear=torsoScore(candidate,hips,chestQ), handSide=(index===0?-1:1)*localElbow.x;
+  // Keep the elbow on its anatomical side and slightly in front of the
+  // torso. A mathematically valid elbow on the centreline is the source of
+  // the old forearm-through-abdomen silhouette.
+  const score=sideClear+Math.max(0,handSide)*1.1+Math.max(0,localElbow.z)*.8;
+  if(score>best){best=score;elbow=candidate;}
+ }
+ // Fallback is unreachable for normal source poses, but keeps malformed input finite.
+ if(!elbow)elbow=shoulder.clone().add(axis.clone().multiplyScalar((.39**2+length**2-.35**2)/(2*length)));
+ const elbowOffset=elbow.clone().sub(shoulder);
+ const upperQ=new THREE.Quaternion().setFromUnitVectors(down,elbowOffset.clone().normalize());
+ const fore=target.clone().sub(elbow).normalize();
  const foreQ=new THREE.Quaternion().setFromUnitVectors(foreAxis,fore);
  const bone=index===0?3:6;
  upperQ.toArray(frame,3+bone*4);foreQ.toArray(frame,3+(bone+1)*4);weaponQ.toArray(frame,3+(bone+2)*4);
@@ -101,25 +137,51 @@ function headMinimum(primary,q) {
  const x=new THREE.Vector3(1,0,0).applyQuaternion(q),z=new THREE.Vector3(0,0,1).applyQuaternion(q);
  return primary.y*scale+axis.y*1.221-Math.abs(x.y)*.27-Math.abs(axis.y)*.19-Math.abs(z.y)*.19;
 }
-function constrainGrip(primary,axis,shoulders,minimumY=-Infinity) {
+function constrainGrip(primary,axis,shoulders,minimumY=-Infinity,maxReach=armReach) {
  for(let pass=0;pass<20;pass++) {
   let corrected=false;
   for(let side=0;side<2;side++) {
    const hand=primary.clone().addScaledVector(axis,side===0?-support:0);
    const delta=hand.sub(shoulders[side]),distance=delta.length();
-   if(distance>.73){
-    if(Number.isFinite(minimumY)&&primary.y-delta.y+delta.y*.73/distance<minimumY) {
+   if(distance<.072) {
+    const push=delta.lengthSq()>.000001?delta.normalize():new THREE.Vector3(side===0?-.7:.7,0,.7);
+    primary.addScaledVector(push,.072-distance);
+    corrected=true;
+   } else if(distance>maxReach){
+    if(Number.isFinite(minimumY)&&primary.y-delta.y+delta.y*maxReach/distance<minimumY) {
      primary.y=minimumY;
      const center=shoulders[side].clone().addScaledVector(axis,side===0?support:0);
-     const radius=Math.sqrt(Math.max(.00001,.73**2-(primary.y-center.y)**2));
+     const radius=Math.sqrt(Math.max(.00001,maxReach**2-(primary.y-center.y)**2));
      const horizontal=new THREE.Vector3(primary.x-center.x,0,primary.z-center.z),length=horizontal.length();
      if(length>radius)primary.addScaledVector(horizontal,-(length-radius)/length);
-    } else primary.addScaledVector(delta,-(distance-.73)/distance);
+    } else primary.addScaledVector(delta,-(distance-maxReach)/distance);
     corrected=true;
    }
   }
   if(!corrected)break;
  }
+}
+function constrainTorsoEnvelope(primary,axis,hips,chestQ,strength=1) {
+ const inverse=chestQ.clone().invert(),center=new THREE.Vector3(0,.30,0);
+ const radii=new THREE.Vector3(.34,.42,.225), targetScore=1.16;
+ let bestCorrection=null,bestWeight=0;
+ for(const offset of [0,-support]) {
+  const world=primary.clone().addScaledVector(axis,offset);
+  const local=world.clone().sub(hips).applyQuaternion(inverse).sub(center);
+  const normalized=new THREE.Vector3(local.x/radii.x,local.y/radii.y,local.z/radii.z);
+  const radius=Math.max(normalized.length(),1e-4),u=THREE.MathUtils.clamp((1.25-radius)/.25,0,1);
+  // Start the lift before contact with the envelope and ease it to a
+  // predictable 16% margin. This keeps the wrist outside the torso without
+  // introducing a derivative jump at the old hard projection boundary.
+  const smooth=u*u*(3-2*u),desiredRadius=1+.16*smooth;
+  if(radius>=desiredRadius)continue;
+  const scale=desiredRadius/radius;
+  const desired=center.clone().add(new THREE.Vector3(local.x*scale,local.y*scale,local.z*scale));
+  const localCorrection=desired.sub(world.clone().sub(hips).applyQuaternion(inverse));
+  const weight=desiredRadius-radius;
+  if(weight>bestWeight){bestWeight=weight;bestCorrection=localCorrection.applyQuaternion(chestQ);}
+ }
+ if(bestCorrection)primary.addScaledVector(bestCorrection,.92*strength);
 }
 export function sampleSourceStyledWeapon(weaponId,combo,profile,phase,sampled) {
  if(weaponId!=='great-hammer')return sampled;
@@ -132,6 +194,7 @@ export function sampleSourceStyledWeapon(weaponId,combo,profile,phase,sampled) {
  const index=Number.isInteger(profile.combo)
    ? profile.combo : Math.max(0,Math.min(4,requested));
  const row=profile.loop?null:poseAt(index,profile,phase);
+ const attackEnd=profile.clipBoundaries?.[0]?.phase??1;
  const hips=new THREE.Vector3().fromArray(frame),chestQ=new THREE.Quaternion().fromArray(frame,7).normalize();
  // Keep the native source torso orientation.  The shaft is solved against
  // this joint frame below; rotating the chest again from the hammer track
@@ -148,6 +211,8 @@ export function sampleSourceStyledWeapon(weaponId,combo,profile,phase,sampled) {
   // use the same pelvis/chest frame, while the two-bone solve absorbs the
   // torso turn without warping the authored swing path.
   primary=new THREE.Vector3(...row.slice(0,3)).add(hips);
+  if(index===3){const u=THREE.MathUtils.clamp((phase-attackEnd)/(1-attackEnd),0,1),amount=.25*u*u*(3-2*u);primary.z+=amount;}
+  if(index===3){const a=THREE.MathUtils.clamp((phase-.18)/.24,0,1),b=THREE.MathUtils.clamp((attackEnd-phase)/.24,0,1),smooth=x=>x*x*(3-2*x);primary.z+=.50*smooth(a)*smooth(b);}
  }
  const weaponQ=row?quaternion(row):new THREE.Quaternion().fromArray(frame,63).normalize(),axis=new THREE.Vector3(0,1,0).applyQuaternion(weaponQ);
  // A differentiable clearance envelope raises the paired grip instead of
@@ -156,10 +221,27 @@ export function sampleSourceStyledWeapon(weaponId,combo,profile,phase,sampled) {
  const gap=row?(.028-headMinimum(primary,weaponQ))/scale:0;
  const minimumY=row?primary.y+gap:-Infinity;
  if(row)primary.y+=.5*(gap+Math.sqrt(gap*gap+.028**2));
- constrainGrip(primary,axis,shoulders,minimumY);
+ // The fourth (overhead) clock already clears the torso on its native
+ // vertical plane. Leaving that plane untouched preserves its smooth release
+ // velocity; the other four paths use the soft envelope guard above.
+ const torsoStart=THREE.MathUtils.clamp(phase/.08,0,1);
+ // Keep the carry endpoint exact for combo chaining, then resume the guard
+ // through recovery and ease it out again only at the final frame.
+ const torsoEnd=phase<=attackEnd
+  ? THREE.MathUtils.clamp((attackEnd-phase)/.08,0,1)
+  : THREE.MathUtils.clamp((1-phase)/.08,0,1);
+ const torsoBlend=(torsoStart*torsoStart*(3-2*torsoStart))*(torsoEnd*torsoEnd*(3-2*torsoEnd));
+ if(index!==3&&torsoBlend>0)constrainTorsoEnvelope(primary,axis,hips,chestQ,torsoBlend);
+ if(index===3){
+  const guardIn=THREE.MathUtils.clamp(phase/.10,0,1),guardOut=THREE.MathUtils.clamp((.42-phase)/.10,0,1);
+  const guard=(guardIn*guardIn*(3-2*guardIn))*(guardOut*guardOut*(3-2*guardOut));
+  if(guard>0)constrainTorsoEnvelope(primary,axis,hips,chestQ,.72*guard);
+ }
+ const reach=(index===2||index===3)?.72:armReach;
+ constrainGrip(primary,axis,shoulders,minimumY,reach);
  const secondary=primary.clone().addScaledVector(axis,-support);
- writeArm(frame,0,shoulders[0],secondary,chestQ,weaponQ);
- writeArm(frame,1,shoulders[1],primary,chestQ,weaponQ);
+ writeArm(frame,0,shoulders[0],secondary,chestQ,weaponQ,hips,reach);
+ writeArm(frame,1,shoulders[1],primary,chestQ,weaponQ,hips,reach);
  weaponQ.toArray(frame,63);attachments.fill(0,0,3);
  return {...sampled,frame,attachments,authored:true};
 }
