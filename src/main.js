@@ -11,8 +11,11 @@ import { resolveGreatDaoStep } from "./greatDaoMovement.js";
 import { getSourceAttackProfile, getSourceAttackTiming } from "./sourceMotion/catalogue.js";
 import { createSourceAttackClock, advanceSourceAttackClock, sampleSourceAttackClock } from "./sourceMotion/clock.js";
 import { getSourceAttackRule, createSourceAttackVolumes, advanceSourceAttackVolumes, sourceVolumeContains, sourceForceTravel } from "./sourceMotion/combat.js";
-import { createSourceFeedback } from "./sourceMotion/feedback.js";
-import { createSourceImpactFeedback, getSourceCameraImpulse, lerpSourceCameraOffset } from "./sourceMotion/impact.js";
+import { createWeaponFeedback } from "./sourceMotion/weaponFeedback.js";
+import { createWeaponImpact } from "./sourceMotion/weaponImpact.js";
+import { getSourceCameraImpulse, lerpSourceCameraOffset } from "./sourceMotion/impact.js";
+import { sampleWeaponContact } from "./sourceMotion/contact.js";
+import { createEnemyFinishers } from "./enemyFinishers.js";
 import { isCombatTarget, referenceAttackSensorTargets,
   sourceAttackDirectionAllowed,
   projectWalkablePoint } from "./heroAI.js";
@@ -112,8 +115,9 @@ document.addEventListener('pointerdown',()=>audio.unlock?.(),{capture:true,passi
 document.addEventListener('keydown',()=>audio.unlock?.(),{capture:true});
 const fx = createEffects(scene, camera);
 const weaponFx = createWeaponEffects(scene, fx);
-const sourceFx = createSourceFeedback(scene);
-const sourceImpact = createSourceImpactFeedback(scene);
+const sourceFx = createWeaponFeedback(scene);
+const sourceImpact = createWeaponImpact(scene);
+const enemyFinishers = createEnemyFinishers(scene);
 const sourceCameraOffset = new THREE.Vector3();
 let sourceStrokes = [], sourceForces = [], sourceHitParity = 0, sourceStrokeSerial = 0;
 let storedWeaponId = DEFAULT_WEAPON_ID;
@@ -546,6 +550,7 @@ function clearDynamic() {
   weaponFx.clear();
   sourceFx.clear();
   sourceImpact.clear();
+  enemyFinishers.clear();
   sourceStrokes = []; sourceForces = [];
   sourceCameraOffset.set(0,0,0);
   hero.sourceClock = null; hero.previewClock = null; hero.previewIndex = 0; hero.sourceStepTimes = new Map(); hero.sourceAirborne=false;
@@ -798,6 +803,7 @@ const enemyStats = {
 function spawnEnemy(type, x, z) {
   const st = enemyStats[type],
     rig = createCharacter(type);
+  enemyFinishers.prepareRig(rig);
   const e = {
     id: nextId++,
     type,
@@ -903,9 +909,9 @@ function beginSourceStroke(comboIndex, preview = false) {
   safeAudio('weaponReady',currentWeapon.id,comboIndex);
   sourceStrokes.push({id:++sourceStrokeSerial,volumes,weaponId:currentWeapon.id,combo:comboIndex,
     move:currentWeapon.moves[comboIndex],rising:rule.rising,preview});
-  // The original reuses each emitter pool. Showing a new emitter cancels its
-  // previous lifetime; dual main/sub emissions retain independent contacts.
-  for (const volume of volumes) sourceFx.emit(rig.group,volume.descriptor,volume);
+  // Weapon-specific visuals observe the same clocks as the reference damage
+  // sensors. Their pooling never cancels a sensor or prolongs its lifetime.
+  for (const volume of volumes) sourceFx.emit(rig.group,volume.descriptor,volume,rig);
   if (!preview && rule.startForce) sourceForces.push({force:rule.startForce,age:0,angle:hero.angle});
   return clock;
 }
@@ -963,17 +969,19 @@ function hurtEnemy(e,damage,from,force=1,critical=false,playerContact=false,cutD
   temp.subVectors(e.pos,from);
   if(temp.lengthSq()<.01) temp.set(Math.sin(hero.angle),0,Math.cos(hero.angle));
   temp.normalize();
-  const direction=temp.clone();
-  e.hurtDirection=Math.sin(Math.atan2(direction.x,direction.z)-e.angle);
+  const direction=sourceContact?.direction?.clone() ?? temp.clone();
+  const knockback=sourceContact?.knockback ?? temp;
+  e.hurtDirection=Math.sin(Math.atan2(knockback.x,knockback.z)-e.angle);
   e.hurtVertical=sourceContact?.rising?.65:0;
   e.hurtBlunt=sourceContact?.weaponId==='great-hammer';
   e.hurtStrength=critical?1.15:.8;
   e.localHitStop=sourceContact?0:Math.max(e.localHitStop||0,.027);
-  e.velocity.addScaledVector(direction,force*(e.type==='boss'?.4:1));
+  e.velocity.addScaledVector(knockback,force*(e.type==='boss'?.4:1));
   if(sourceContact?.rising&&e.type!=='boss') e.sourceAirTime=0;
   showDamage(e,damage,critical?'critical':'normal');
   if(sourceContact) {
-    sourceImpact.hit(contactPoint??e.pos.clone().add(new THREE.Vector3(0,.625,0)),direction,sourceContact.layer,sourceContact.rising);
+    sourceImpact.hit(contactPoint??e.pos.clone().add(new THREE.Vector3(0,.9,0)),direction,
+      sourceContact.weaponId,sourceContact.combo,critical,e.rig);
     sourceCameraOffset.copy(getSourceCameraImpulse(sourceContact.layer,sourceHitParity++));
     safeAudio('weaponHit',sourceContact.weaponId,critical?1.25:.8,sourceContact.combo);
   } else {
@@ -984,6 +992,12 @@ function hurtEnemy(e,damage,from,force=1,critical=false,playerContact=false,cutD
   if(e.hp<=0) {
     e.state='dead'; e.elapsed=0; e.duration=1.5; e.bar.visible=false;
     kills++; dropLoot(e.pos); e.deathDirection=direction; e.deathImpactDone=false; safeAudio('kill');
+    if(sourceContact) {
+      e.rig.setFlash?.(0);
+      e.finisher=enemyFinishers.breakEnemy(e.rig,{weaponId:sourceContact.weaponId,combo:sourceContact.combo,
+        direction,contactPoint,cutNormal:sourceContact.cutNormal,critical});
+      e.deathImpactDone=!!e.finisher;
+    }
     if(e.type==='boss'){slowTime=.24;slowScale=.5;}
     if(hero.target===e)hero.target=null;
     return true;
@@ -1025,8 +1039,8 @@ function updateSourceCombat(dt) {
       if(!stroke.preview&&addForce) sourceForces.push({force:addForce,age:0,angle:hero.angle});
       safeAudio(descriptor.type==='splash'?'weaponGround':'weaponSlash',stroke.weaponId,stroke.combo,descriptor.type);
     }
-    if(result.active.length&&stroke.combo===hero.combo&&stroke.weaponId===currentWeapon.id) {
-      const blades=rig.weaponBlades();
+    const blades=stroke.combo===hero.combo&&stroke.weaponId===currentWeapon.id ? rig.weaponBlades() : [];
+    if(result.active.length&&blades.length) {
       for(const frame of blades) {
         const previous=stroke.previousBlades?.find(old=>old.hand===frame.hand);
         if(frame.headCenter)world.feedbackStrike?.({weaponId:'great-hammer',current:{...frame,headBottom:frame.headMinY},
@@ -1034,7 +1048,6 @@ function updateSourceCombat(dt) {
         else world.reactToBlade?.({current:frame,previous,combo:stroke.combo,strikeId:stroke.id,origin:hero.pos,
           phase:hero.elapsed/Math.max(.001,hero.duration)});
       }
-      stroke.previousBlades=blades;
     }
     if(!stroke.preview&&mode==='playing') for(const volume of result.active) {
       for(const enemy of enemies) {
@@ -1043,11 +1056,16 @@ function updateSourceCombat(dt) {
         if(!sourceVolumeContains(volume,{...enemy,colliderHeight:.9+air},rig.group))continue;
         volume.hitTargets.add(enemy.id);
         const critical=stroke.combo===4||Math.random()<.12;
+        const frame=blades.find(sample=>sample.hand===volume.descriptor.hand) ?? blades[0];
+        const previous=stroke.previousBlades?.find(sample=>sample.hand===frame?.hand);
+        const contact=sampleWeaponContact({frame,previous,targetRig:enemy.rig,targetPosition:enemy.pos,
+          attackerPosition:hero.pos,angle:hero.angle});
         hurtEnemy(enemy,Math.round(stroke.move.damage*(critical?1.25:1)),hero.pos,
-          stroke.move.knockback*(stroke.rising?4:3),critical,true,null,null,
-          {weaponId:stroke.weaponId,combo:stroke.combo,layer:volume.descriptor.layer,rising:stroke.rising});
+          stroke.move.knockback*(stroke.rising?4:3),critical,true,null,contact.point,
+          {...contact,weaponId:stroke.weaponId,combo:stroke.combo,layer:volume.descriptor.layer,rising:stroke.rising});
       }
     }
+    if(blades.length)stroke.previousBlades=blades;
     stroke.finished=result.finished;
   }
   sourceStrokes=sourceStrokes.filter(stroke=>!stroke.finished);
@@ -1341,13 +1359,13 @@ function updateEnemies(dt) {
       e.rig.group.position.x = e.pos.x;
       e.rig.group.position.z = e.pos.z;
       e.deathAge += tickDt;
-      if (e.deathAge >= 0.5 && !e.deathImpactDone) {
+      if (!e.finisher && e.deathAge >= 0.5 && !e.deathImpactDone) {
         e.deathImpactDone = true;
         fx.death?.(e.pos, e.deathDirection, e.type === "boss" ? 1.5 : 0.8);
       }
       e.bar.visible = false;
       e.pos.addScaledVector(e.velocity, tickDt);
-      if (e.deathAge > 0.9)
+      if (!e.finisher && e.deathAge > 0.9)
         e.rig.group.position.y = -Math.min(2, (e.deathAge - 0.9) * 2);
       if (e.deathAge > 1.85) {
         disposeGroup(e.rig.group, false);
@@ -1480,6 +1498,7 @@ function updateEnemies(dt) {
   }
   // Resolve all motion before posing, including pushes by another enemy.
   for (const e of enemies) {
+    if (e.finisher) continue;
     const tickDt = e.poseDt || 0;
     const locomotion =
       e.state === "run" || e.state === "idle" || e.state === "recover";
@@ -1791,7 +1810,7 @@ function updatePresentation(dt) {
   poseCharacter(rig,{state,time:globalTime,dt,phase:sample?.progress??(state==='dead'?1:0),
     combo:hero.combo,sourceAttack:sample,sourceLocomotion:'idle',speedFactor:7,alertness:.25});
   rig.group.updateMatrixWorld(true);
-  updateSourceCombat(dt);sourceImpact.update(dt);fx.update(dt);weaponFx.update(dt);
+  updateSourceCombat(dt);sourceImpact.update(dt);enemyFinishers.update(dt);fx.update(dt);weaponFx.update(dt);
   if (mode !== "start") {
     for (let i = projectiles.length - 1; i >= 0; i--) {
       const p = projectiles[i];
@@ -1809,14 +1828,16 @@ function updatePresentation(dt) {
       e.deathAge += dt;
       e.velocity.multiplyScalar(Math.exp(-dt * 7));
       e.pos.addScaledVector(e.velocity, dt);
-      e.rig.group.position.copy(e.pos);
-      e.rig.group.position.y = -Math.min(2, Math.max(0, e.deathAge - 0.9) * 2);
-      poseCharacter(e.rig, {
-        state: "dead",
-        time: globalTime,
-        dt,
-        phase: Math.min(1, e.elapsed / e.duration),
-      });
+      if (!e.finisher) {
+        e.rig.group.position.copy(e.pos);
+        e.rig.group.position.y = -Math.min(2, Math.max(0, e.deathAge - 0.9) * 2);
+        poseCharacter(e.rig, {
+          state: "dead",
+          time: globalTime,
+          dt,
+          phase: Math.min(1, e.elapsed / e.duration),
+        });
+      }
       if (e.deathAge > 1.85) {
         disposeGroup(e.rig.group, false);
         disposeGroup(e.bar);
@@ -1861,6 +1882,7 @@ function animate(now) {
         fx.update(step);
         weaponFx.update(step);
         sourceImpact.update(step);
+        enemyFinishers.update(step);
       }
     }
     const markerTarget = hero.target;
@@ -1921,6 +1943,7 @@ if (new URLSearchParams(location.search).get("debug") === "1") {
       weapon: weaponFx.getState?.() ?? null,
       source: sourceFx.diagnostics(),
       impacts: sourceImpact.snapshot(),
+      finishers: enemyFinishers.diagnostics(),
     }),
     positionPlayer(x, z) {
       if (mode !== 'playing' || !Number.isFinite(x) || !Number.isFinite(z)) return false;
@@ -2150,6 +2173,7 @@ if (new URLSearchParams(location.search).get("debug") === "1") {
     },
     forceWave(index = 3) {
       if (mode !== "playing") startGame();
+      enemyFinishers.clear();
       for (const e of enemies) {
         disposeGroup(e.rig.group, false);
         disposeGroup(e.bar);

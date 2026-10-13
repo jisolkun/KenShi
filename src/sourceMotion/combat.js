@@ -61,7 +61,12 @@ export function getSourceAttackRule(weaponId, combo, atkspd = 0) {
   // A new hammer slam uses the original splash emitter and native clocks.
   if(weaponId==='great-hammer'&&index===3)rule.volumes.push(splash(rule.volumes[0].delay+.05));
   // The original adjusts every ordinary descriptor, including polearm splash.
-  for (const descriptor of rule.volumes) descriptor.delay = Math.max(0, descriptor.delay - atkspd);
+  for (const descriptor of rule.volumes) {
+    descriptor.delay = Math.max(0, descriptor.delay - atkspd);
+    descriptor.weaponId = weaponId;
+    descriptor.combo = index;
+    descriptor.hand = family === 'dual' && descriptor.emitter === 'swing2' ? 0 : 1;
+  }
   return { ...rule, family, combo: index };
 }
 
