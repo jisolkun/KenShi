@@ -2,8 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { createWorldCombat, sweptPropContact } from '../src/worldCombat.js';
-import { createCharacter, poseCharacter } from '../src/characters.js';
-import { getWeapon } from '../src/weapons.js';
 
 const vector = (x, y, z) => new THREE.Vector3(x, y, z);
 const blade = (heel, tip) => ({ heel: vector(...heel), tip: vector(...tip) });
@@ -102,44 +100,6 @@ test('a purely vertical cleave still contacts the floor at its physical tip', ()
   assert.equal(fx.getCombatState().groundHits, 1);
   assert.equal(fx.getCombatState().lastGround.x, 1);
 });
-
-for (const rate of [30, 60, 120]) for (const combo of [1, 3]) {
-  test(`the source styled hammer strike ${combo + 1} reaches the actual scene floor at ${rate} Hz`, () => {
-    const fx = combat(), rig = createCharacter('hero');
-    rig.setWeapon('great-hammer');
-    const move = getWeapon('great-hammer').moves[combo];
-    const frames = Math.ceil(move.duration * rate);
-    let previous = null, contact = null, contactHeight = null;
-    for (let frame = 0; frame <= frames; frame++) {
-      const phase = frame / frames;
-      poseCharacter(rig, { state: 'attack', combo, phase, dt: 1 / rate, immediate: true });
-      const physical = rig.weaponBlades().find(sample => sample.headCenter);
-      // The production bridge uses the eight-corner head minimum as the
-      // scalar floor height; headBottom itself is a world-space point.
-      const current = { ...physical, headBottom: physical.headMinY };
-      if (phase >= move.active[0] && phase <= move.active[1]) {
-        const result = fx.feedbackStrike({ weaponId: 'great-hammer', current, previous,
-          combo, strikeId: 1, headRadius: physical.headRadius });
-        if (result.groundContact) {
-          contact = result.groundContact;
-          contactHeight = Math.min(current.headBottom, previous?.headBottom ?? Infinity);
-          assert.ok(physical.headCorners.every(point => point.y >= -.001),
-            'the entire solid head remains above the floor at its impact');
-        }
-      }
-      previous = current;
-    }
-    const state = fx.getCombatState();
-    assert.ok(contact, 'the actual authored head reaches the physical floor envelope');
-    assert.equal(state.groundHits, 1, 'one source attack leaves one floor contact');
-    assert.equal(state.activeMarks, 1);
-    assert.equal(state.activeHammerRings, 1);
-    assert.ok(contactHeight >= .014 && contactHeight <= .074);
-    assert.deepEqual(state.lastGround, { x: contact.x, y: contact.y, z: contact.z });
-    assert.ok(Math.hypot(contact.x, contact.z) > .5,
-      'the crack appears at the physical hammer head rather than beneath the hero');
-  });
-}
 
 test('pause leaves particle transforms, mark opacity and active counts unchanged', () => {
   const fx = combat();

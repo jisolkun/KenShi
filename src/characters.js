@@ -4,7 +4,8 @@ import { DEFAULT_WEAPON_ID } from './weapons.js';
 import { applyWeaponPose, reconcileWeaponGrip, reconcileAttackFootwork } from './weaponMotion.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import {configureSourceHeroSkeleton,applySourceHeroPose,resetSourceHeroPose} from './sourceMotion/rig.js';
-const hasHeavyFootwork=id=>id==='great-dao'||id==='great-hammer';
+import {applyCustomHammerPose,resetCustomHammerPose} from './customHammer/pose.js';
+const hasHeavyFootwork=id=>id==='great-dao';
 
 // All body parts share geometry; each character owns its palette for hit flashes.
 const geometries = new Map();
@@ -245,13 +246,7 @@ export function createCharacter(type = 'hero') {
     arms[0].weapon=sword(arms[0].wrist,.84);
     arms[1].weapon=sword(arms[1].wrist,.9);
   } else if (heavy) {
-    const hammer = joint(arms[1].wrist,'hammer');
-    mesh(hammer,cylinder,'dark',[.042,.85,.042],[0,-.35,0]);
-    mesh(hammer,cylinder,'gold',[.052,.033,.052],[0,-.07,0]);
-    mesh(hammer,box,'metal',[.37,.23,.24],[0,-.81,0]);
-    mesh(hammer,orb,'armor',[.27,.17,.17],[0,-.81,0]);
-    for(const side of [-1,1]) mesh(hammer,cone,'metal',[.07,.20,.07],[side*.245,-.81,0],[0,0,side*-Math.PI/2]);
-    const tip = new THREE.Object3D(); tip.position.set(0,-.82,0); hammer.add(tip); tips.push(tip);
+    sword(arms[1].wrist,1.05);
   } else if (narrow) {
     bow = joint(arms[0].wrist,'bow');
     // Six actual curved stave sections and a taut string, all visible without textures.
@@ -311,6 +306,7 @@ export function createCharacter(type = 'hero') {
       }
       rig.motion = undefined;
       resetSourceHeroPose(rig);
+      resetCustomHammerPose(rig);
       poseCharacter(rig,{state:'idle',time:0,phase:0,immediate:true});
     },
     setFlash(amount) {
@@ -336,8 +332,9 @@ function sample(p, keys) {
 }
 
 export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,skill=0,dt,
-  gaitPhase,moveBlend,turnLean=0,attackCarry=0,attackStep=null,hurtDirection=1,hurtStrength=1,hurtVertical=0,hurtBlunt=false,transition=true,immediate=false,
+  gaitPhase,moveBlend,turnLean=0,attackCarry=0,attackStep=null,hurtDirection=1,hurtStrength=1,hurtVertical=0,transition=true,immediate=false,
   alertness=.35,idleAge,lookYaw,sourceAttack,sourceLocomotion,speedFactor} = {}) {
+  if(applyCustomHammerPose(rig,{state,time,phase,combo,speed,dt,gaitPhase,moveBlend,attackStep,immediate,sourceAttack,hurtDirection,hurtStrength}))return;
   if(applySourceHeroPose(rig,{state,time,phase,combo,dt,immediate,sourceAttack,sourceLocomotion,speedFactor}))return;
   const returningFromSource=Boolean(rig.sourceMotionState?.active);
   if(returningFromSource){
@@ -369,7 +366,7 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
   const stepping=hasHeavyFootwork(rig.weaponId)&&state==='attack'&&attackStep;
   const footworkChanged=hasHeavyFootwork(rig.weaponId)&&Boolean(motion.stepActive)!==Boolean(stepping);
   if(motion.key!==null && (key!==motion.key||restarted||footworkChanged)) {
-    if(['tang-dao','great-dao','great-hammer'].includes(rig.weaponId)){
+    if(['tang-dao','great-dao'].includes(rig.weaponId)){
       rig.group.updateMatrixWorld(true);
       const groupQ=rig.group.getWorldQuaternion(new THREE.Quaternion());
       motion.shaftFrom={point:rig.group.worldToLocal(rig.arms[1].wrist.getWorldPosition(new THREE.Vector3())),quaternion:groupQ.invert().multiply(rig.arms[1].wrist.getWorldQuaternion(new THREE.Quaternion()))};
@@ -379,7 +376,7 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
     }
     rig.bind.forEach(({node},i)=>{motion.from[i].p.copy(node.position);motion.from[i].q.copy(node.quaternion);motion.from[i].s.copy(node.scale);});
     motion.elapsed=0;
-    motion.duration=state==='hurt'?.04:state==='roll'?.06:rig.weaponId==='great-hammer'?(state==='attack'?(motion.key?.startsWith('attack:') ? .08 : combo===2 ? .20 : .16):.18):.08;
+    motion.duration=state==='hurt'?.04:state==='roll'?.06:.08;
     motion.footworkBlend=footworkChanged&&key===motion.key&&!restarted;
     if(motion.footworkBlend)motion.duration=.10;
   } else motion.elapsed+=delta;
@@ -495,7 +492,7 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
     pony.rotation.x=-.40*tuck;
     for(const c of cloths){c.rotation.x=-.6*tuck;c.rotation.z=.2*Math.sin(p*TAU);}
   } else if(state==='hurt') {
-    const stagger=sample(p,[[0,0],[.12,1],[.33,.72],[.65,.27],[1,0]])*clamp(hurtStrength,0,hurtBlunt?1.55:1);
+    const stagger=sample(p,[[0,0],[.12,1],[.33,.72],[.65,.27],[1,0]])*clamp(hurtStrength,0,1);
     const side=clamp(hurtDirection,-1,1);
     const resistance=heavy?.52:boss?.34:1;
     body.position.z-=.12*stagger*resistance;body.position.x+=side*.065*stagger*resistance;
@@ -562,8 +559,7 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
     for(const c of cloths){c.rotation.x=-.15-.65*energy;c.rotation.z=.35*energy;}
   }
   rig.attackFootTargets=null;
-  // The reviewed target must come from this frame's authored pose. A hammer
-  // also reconciles its head/tail during sampling, before the new state blend.
+  // The reviewed target must come from this frame's authored pose.
   rig.reviewedShaftBlend=null;
   applyWeaponPose(rig,{state,time,phase:p,combo,skill,speed,dt,gaitPhase:gait,moveBlend:movement,attackCarry,attackStep:stepping,idleClock:motion.idleClock,idleAge:motion.idleAge},plantIdleFoot);
   // Blend only the opening of a changed action. Contacts and complete spin arcs
@@ -581,7 +577,7 @@ export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,
     rig.group.updateMatrixWorld(true);
     blendedFeet=rig.legs.map((leg,i)=>motion.feetFrom[i].clone().lerp(rig.group.worldToLocal(leg.foot.getWorldPosition(new THREE.Vector3())),footBlend));
   }
-  if(blend<1&&['tang-dao','great-dao','great-hammer'].includes(rig.weaponId)&&motion.shaftFrom){
+  if(blend<1&&['tang-dao','great-dao'].includes(rig.weaponId)&&motion.shaftFrom){
     rig.group.updateMatrixWorld(true);
     const groupQ=rig.group.getWorldQuaternion(new THREE.Quaternion());
     const point=rig.group.worldToLocal(rig.arms[1].wrist.getWorldPosition(new THREE.Vector3()));

@@ -116,8 +116,8 @@ test('pursuit detours around consecutive pillars and reaches the command without
     'an impossible endpoint must not send the hero straight into the pillar');
 });
 
-test('AI retain distances are reachable during the native collider clock of every equipped attack', () => {
-  for (const { id, moves } of WEAPONS) {
+test('AI retain distances are reachable during the native collider clock of every source attack', () => {
+  for (const { id, moves } of WEAPONS.filter(weapon => !weapon.customMotion)) {
     const rig = createCharacter('hero');
     rig.setWeapon(id);
     for (const [combo, move] of moves.entries()) {

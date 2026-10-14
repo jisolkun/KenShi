@@ -1,5 +1,13 @@
 import { getWeapon } from './weapons.js';
-import { getHammerFeedback } from './hammerFeedback.js';
+
+export const MAX_TRANSIENT_VOICES = 48;
+// Three independently voiced releases: a low side blow, a tighter returning
+// lift, then an overhead drop. Their short tails leave room for the next load.
+export const HAMMER_AUDIO_PROFILES = Object.freeze([
+  Object.freeze({ air: 290, release: .105, pitch: 145, metal: 640, hit: 120, crack: 1700 }),
+  Object.freeze({ air: 360, release: .088, pitch: 185, metal: 790, hit: 143, crack: 1900 }),
+  Object.freeze({ air: 230, release: .14, pitch: 100, metal: 470, hit: 83, crack: 900 }),
+]);
 
 export function createAudio() {
   let context, master, noiseBuffer, wind, windGain;
@@ -11,8 +19,8 @@ export function createAudio() {
   let lastEnemy = 0;
   let lastHit = -Infinity, lastHitWeight = 0, hitSide = 0;
   let lastFootstep = -Infinity, lastKill = -Infinity;
-  let lastHammerGround = -Infinity;
   let lastReady = -Infinity, lastLanding = -Infinity;
+  let lastGround = -Infinity;
 
   const playbackAllowed = () => enabled && !paused && !destroyed && !document.hidden;
   const ready = () => playbackAllowed() && context?.state === 'running';
@@ -59,22 +67,32 @@ export function createAudio() {
   }
 
   function trackVoice(source, nodes) {
-    const voice = { source, nodes };
+    // Enemy clusters and input bursts share a hard transient budget. Remove
+    // the oldest tail before registering a new voice; ambient wind is separate.
+    if (voices.size >= MAX_TRANSIENT_VOICES) {
+      const oldest = voices.values().next().value;
+      try { oldest.source.stop(); } catch {}
+      releaseVoice(oldest);
+    }
+    const voice = { source, nodes, released: false };
     voices.add(voice);
-    source.onended = () => {
-      voices.delete(voice);
-      source.disconnect();
-      nodes.forEach(node => node.disconnect());
-    };
+    source.onended = () => releaseVoice(voice);
+  }
+
+  function releaseVoice(voice) {
+    if (voice.released) return;
+    voice.released = true;
+    voices.delete(voice);
+    voice.source.disconnect();
+    voice.nodes.forEach(node => node.disconnect());
   }
 
   // Suspending a context freezes scheduled sound. Clear transient voices as
   // well, so resuming cannot replay the tail of an old attack or victory cue.
   function stopVoices() {
-    for (const { source, nodes } of voices) {
-      try { source.stop(); } catch {}
-      source.disconnect();
-      nodes.forEach(node => node.disconnect());
+    for (const voice of voices) {
+      try { voice.source.stop(); } catch {}
+      releaseVoice(voice);
     }
     voices.clear();
   }
@@ -155,19 +173,14 @@ export function createAudio() {
   const weaponVoices = {
     'dual-dao':[2700,1320,0.8,'double'], 'tang-dao':[2450,1710,1,'cut'],
     'great-dao':[1280,780,1.8,'heavy-cut'],
-    'great-hammer':[620,110,2.1,'blunt'],
   };
   const strokeIndex = combo => ((Math.trunc(combo) % 5) + 5) % 5;
-  const fifthHammerVoice = {
-    airTone: 86, airDuration: .145, airVolume: .34, airFilter: 340,
-    hitTone: 82, hitDuration: .18, hitFilter: 500, hitCrackTone: 156,
-  };
-  const hammerVoice = index => index === 4 ? fifthHammerVoice : getHammerFeedback(index);
+  const hammerIndex = combo => ((Math.trunc(combo) % 3) + 3) % 3;
 
   function weaponReady(id, combo = 0) {
     if (!ready() || context.currentTime - lastReady < .075) return;
     lastReady = context.currentTime;
-    const index = strokeIndex(combo), heavy = id === 'great-hammer' || id === 'great-dao';
+    const index = id === 'great-hammer' ? hammerIndex(combo) : strokeIndex(combo), heavy = id === 'great-dao' || id === 'great-hammer';
     const effort = [1, .86, 1.08, 1.14, 1.24][index];
     // A quiet grip and cloth pull belongs to the loading pose; the audible
     // air release is emitted separately at the measured weapon stroke.
@@ -180,6 +193,17 @@ export function createAudio() {
   function weaponSlash(id, combo = 0, technique = null) {
     if (!ready() || context.currentTime - lastSlash < 0.06) return;
     lastSlash = context.currentTime;
+    if (id === 'great-hammer') {
+      const index = hammerIndex(combo), profile = HAMMER_AUDIO_PROFILES[index];
+      const pitch = .985 + Math.random() * .03, heavy = index === 2;
+      noise(profile.release, heavy ? .235 : .17, profile.air, heavy ? 1300 : index ? 1180 : 940, 'bandpass', 0, .006);
+      tone(profile.pitch * pitch, heavy ? 38 : index ? 82 : 62, heavy ? .105 : .075, heavy ? .055 : .04, 'triangle', .002, .004);
+      // A woody haft tick and a small steel resonance distinguish a solid
+      // weight passing through air from a sharp edge's high hiss.
+      noise(heavy ? .028 : .020, heavy ? .060 : .028, heavy ? 1600 : 1250, 320, 'lowpass', .003, .002);
+      tone(profile.metal * pitch, profile.metal * .88, heavy ? .064 : .049, .016, 'sine', .005, .003);
+      return;
+    }
     const [air, metal, weight, kind] = weaponVoices[id] || weaponVoices['tang-dao'];
     const index = strokeIndex(combo), finisher = index === 4;
     // Slight variations in release speed avoid an identical sample-like
@@ -188,18 +212,6 @@ export function createAudio() {
     const level = .96 + Math.random() * .08;
     const shape=technique === 'thrust' ? 'thrust' : technique === 'chop' ? 'crush'
       : technique === 'cut' ? 'arc' : getWeapon(id).moves[index].shape;
-    if(id==='great-hammer') {
-      const feedback=hammerVoice(index);
-      // The quick rising beat, long waist swing and loaded slam move
-      // different amounts of air. A delayed low after-pulse makes the head
-      // feel like it keeps displacing the room after the first release.
-      noise(feedback.airDuration,feedback.airVolume*level,feedback.airFilter,140,'lowpass',0,.004);
-      tone(feedback.airTone,32,feedback.airDuration,index===3?.070:finisher?.058:.040,'sine',.003,.004);
-      noise(feedback.airDuration*.72,feedback.airVolume*.48,feedback.airFilter*.72,95,'lowpass',finisher?.060:.045,.003);
-      if(index===3)tone(58,28,.18,.055,'sine',.055,.004);
-      if(finisher)tone(68,30,.13,.052,'sine',.075,.004);
-      return;
-    }
     if(id==='great-dao') {
       const heavy=shape==='crush'||finisher,stage=[.94,1.04,1.16,1.12,1.32][index]*level;
       // The wind surges abruptly with the released blade, then ends cleanly
@@ -230,17 +242,21 @@ export function createAudio() {
     const force=Math.min(2,Math.max(0.45,typeof strength==='number'?strength:1));
     if(context.currentTime-lastHit<0.05)return;
     lastHit=context.currentTime;lastHitWeight=force;
-    const index=strokeIndex(combo),finisher=index===4||technique==='chop';
-    const pitch=[1.06,.94,1.10,.97,.89][index]*(.985+Math.random()*.03),mass=Math.min(2.2,weight*force);
-    if(id==='great-hammer') {
-      const feedback=hammerVoice(index),heavy=finisher;
-      tone(feedback.hitTone*pitch,27,feedback.hitDuration,.34+mass*.070,'sine',0,.001);
-      noise(heavy?.095:.060,.30+mass*.045,feedback.hitFilter,85,'lowpass',0,.001);
-      noise(.022,.13+mass*.025,2400,800,'highpass',0,.001);
-      tone(feedback.hitCrackTone*pitch,45,heavy?.075:.045,.065,'triangle',.001,.0015);
-      if(heavy)noise(.095,.11,285,80,'lowpass',.016,.003);
+    if (id === 'great-hammer') {
+      const index = hammerIndex(combo), profile = HAMMER_AUDIO_PROFILES[index], heavy = index === 2;
+      const gain = .80 + force * .20, pitch = .985 + Math.random() * .03;
+      tone(profile.hit * pitch, heavy ? 29 : index ? 42 : 35, heavy ? .155 : .100, .31 * gain, 'sine', 0, .002);
+      noise(heavy ? .065 : .034, (heavy ? .25 : .22) * gain, profile.crack, heavy ? 120 : index ? 450 : 340, 'lowpass', 0, .0015);
+      if (heavy) {
+        noise(.025, .12 * gain, 2800, 750, 'highpass', .001, .001);
+        tone(48, 27, .17, .075 * gain, 'sine', .002, .003);
+      } else tone(index ? 870 : 680, index ? 300 : 220, .028, .048 * gain, 'triangle', .001, .0015);
+      tone((heavy ? 720 : index ? 1350 : 1100) * pitch, heavy ? 620 : index ? 1200 : 980,
+        heavy ? .12 : .080, .026 * gain, 'sine', .003, .002);
       return;
     }
+    const index=strokeIndex(combo),finisher=index===4||technique==='chop';
+    const pitch=[1.06,.94,1.10,.97,.89][index]*(.985+Math.random()*.03),mass=Math.min(2.2,weight*force);
     if(id==='great-dao') {
       // A tight low strike plus a brief edge crack carries force without a
       // long bass tail masking the increasingly fast follow-up swings.
@@ -259,20 +275,19 @@ export function createAudio() {
     tone(metal*1.49*pitch,metal*1.46*pitch,finisher?.13:.085,finisher?.030:.020,'sine',.003,.002);
     if(finisher)tone(74,30,.13,.078,'sine',.003,.002);
   }
+
+  function weaponGround(id, combo = 0) {
+    if (id !== 'great-hammer' || !ready() || context.currentTime - lastGround < .10) return;
+    lastGround = context.currentTime;
+    const heavy = hammerIndex(combo) === 2, gain = heavy ? 1 : .72;
+    tone(heavy ? 72 : 105, 26, heavy ? .15 : .105, .26 * gain, 'sine', 0, .002);
+    noise(heavy ? .115 : .075, .19 * gain, 650, 130, 'lowpass', 0, .003);
+    noise(.028, .08 * gain, 1800, 450, 'bandpass', .002, .0015);
+    tone(380, 300, .09, .016 * gain, 'sine', .003, .002);
+  }
   function roll() {
     noise(0.24, 0.3, 800, 180, 'bandpass');
     tone(170, 55, 0.15, 0.09, 'sine', 0.12);
-  }
-
-  // Both descending hammer beats have a confirmed physical paving contact.
-  function weaponGround(id, combo = 3) {
-    if(id!=='great-hammer'||(combo!==1&&combo!==3)||!ready()||context.currentTime-lastHammerGround<.12)return;
-    lastHammerGround=context.currentTime;
-    const heavy=combo===3;
-    tone(heavy?64:82,25,heavy?.20:.14,heavy?.37:.28,'sine',0,.001);
-    noise(.026,heavy?.23:.18,2800,750,'highpass',0,.001);
-    noise(.060,heavy?.29:.22,640,120,'lowpass',0,.0015);
-    noise(heavy?.16:.11,heavy?.24:.16,310,65,'lowpass',.012,.004);
   }
 
   function footstep(weight = 1) {
@@ -358,6 +373,7 @@ export function createAudio() {
   };
   document.addEventListener('visibilitychange', visibility);
   return { unlock, slash, hit, weaponReady, weaponSlash, weaponHit, weaponGround, roll, footstep, landing, kill, enemy, win, setEnabled, pause, resume, update,
+    diagnostics: () => ({ transientVoices: voices.size, maxTransientVoices: MAX_TRANSIENT_VOICES, enabled, paused, destroyed }),
     destroy() {
       destroyed = true;
       document.removeEventListener('visibilitychange', visibility);

@@ -67,27 +67,19 @@ const signature = context => JSON.stringify([
     Number((filter.frequency.endTime - filter.frequency.time).toFixed(4))]),
 ]);
 
-test('each weapon has five recognizable released strokes and contacts, including a distinct hammer finisher', () => {
+test('each source blade weapon has five recognizable released strokes and contacts', () => {
   withAudio(({ audio, context, reset }) => {
-    for (const id of ['dual-dao', 'tang-dao', 'great-dao', 'great-hammer']) {
+    for (const id of ['dual-dao', 'tang-dao', 'great-dao']) {
       const slashes = new Set(), hits = new Set();
       for (let combo = 0; combo < 5; combo++) {
         reset(); audio.weaponSlash(id, combo);
         assert.ok(context.oscillators.length > 0 && context.filters.length > 0, `${id} stroke ${combo + 1} emits air and body`);
         assert.ok(context.oscillators.length + context.filters.length <= 10, 'each stroke has a bounded voice count');
-        if (id === 'great-hammer') {
-          assert.ok(context.oscillators.every(osc => osc.type === 'sine' && osc.frequency.start <= 110));
-          assert.ok(context.filters.every(filter => filter.type === 'lowpass' && filter.frequency.start <= 420));
-        } else assert.ok(context.oscillators.some(osc => osc.frequency.start > 1000), 'blades retain an audible metal edge');
+        assert.ok(context.oscillators.some(osc => osc.frequency.start > 1000), 'blades retain an audible metal edge');
         slashes.add(signature(context));
         reset(); audio.weaponHit(id, 1.5, combo);
         assert.ok(context.oscillators.length > 0 && context.filters.length > 0);
         assert.ok(context.oscillators.length + context.filters.length <= 10, 'each contact has a bounded voice count');
-        if (id === 'great-hammer') {
-          assert.ok(context.oscillators.every(osc => osc.frequency.start < 200), 'hammer has no sword ringing');
-          assert.ok(context.filters.filter(filter => filter.type === 'highpass').every(filter =>
-            filter.frequency.endTime - filter.frequency.time <= .03), 'stone remains a short crack');
-        }
         hits.add(signature(context));
       }
       assert.equal(slashes.size, 5, `${id} five attack gestures have individual releases`);
@@ -98,17 +90,17 @@ test('each weapon has five recognizable released strokes and contacts, including
 
 test('a crowd contact is one impact cluster and loading does not consume the release event', () => {
   withAudio(({ audio, context, reset }) => {
-    reset(); audio.weaponReady('great-hammer', 4);
+    reset(); audio.weaponReady('great-dao', 4);
     const prepared = context.oscillators.length + context.filters.length;
     assert.ok(prepared > 0);
     assert.ok(context.gains.slice(-3).every(gain => gain.gain.values.every(value => value < .05)), 'loading sounds are quiet');
-    audio.weaponSlash('great-hammer', 4);
+    audio.weaponSlash('great-dao', 4);
     assert.ok(context.oscillators.length + context.filters.length > prepared, 'loading and the physical stroke use separate clocks');
     reset(); audio.weaponHit('dual-dao', 1.5, 4);
     const count = context.oscillators.length + context.filters.length;
-    context.currentTime += .04; audio.weaponHit('great-hammer', 2, 4);
+    context.currentTime += .04; audio.weaponHit('great-dao', 2, 4);
     assert.equal(context.oscillators.length + context.filters.length, count, 'all weapons share the 50ms crowd limiter');
-    context.currentTime += .011; audio.weaponHit('great-hammer', 2, 4);
+    context.currentTime += .011; audio.weaponHit('great-dao', 2, 4);
     assert.ok(context.oscillators.length + context.filters.length > count, 'a later physical contact remains audible');
     reset(); audio.landing(1.5);
     assert.ok(context.oscillators.length > 0 && context.filters.length > 0);

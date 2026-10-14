@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import {sampleSourceStyledWeapon} from './authored.js';
 import {getSourceActionProfile, getSourceAttackProfile, getSourceMotionProvenance} from './catalogue.js';
 import {sampleSourceLocomotion} from './clock.js';
 import {sampleReferenceCurveMotion, sampleReferenceCurveBlend, createReferenceCurveBlendWorkspace} from './sampler.js';
@@ -173,7 +172,6 @@ export function applySourceHeroPose(rig, pose = {}) {
     segment = 'loop';
   }
   if (!sampled) return false;
-  sampled=sampleSourceStyledWeapon(rig.weaponId,pose.combo??0,profile,phase,sampled);
   clearProceduralConstraints(rig);
   runtime.secondaryClock += delta;
   const diagnostics = applySample(rig,runtime,sampled);

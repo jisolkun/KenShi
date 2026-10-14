@@ -98,7 +98,7 @@ test('disconnected merged armour receives separate closed caps instead of a brid
   a.dispose(); b.dispose(); merged.dispose();
 });
 
-for (const [weaponId, count, kind] of [['tang-dao', 2, 'slice'], ['great-dao', 2, 'slice'], ['dual-dao', 4, 'cross-cut'], ['great-hammer', 24, 'shatter']]) {
+for (const [weaponId, count, kind] of [['tang-dao', 2, 'slice'], ['great-dao', 2, 'slice'], ['dual-dao', 4, 'cross-cut']]) {
   test(`${weaponId} replaces the actual posed enemy with ${count} complete coloured ${kind} sections`, () => {
     const scene = new THREE.Scene(), fx = createEnemyFinishers(scene), rig = createCharacter('grunt');
     rig.group.position.set(3, 0, -2); rig.group.rotation.y = .74;
@@ -115,7 +115,6 @@ for (const [weaponId, count, kind] of [['tang-dao', 2, 'slice'], ['great-dao', 2
     });
     let sharedDisposals = 0;
     for (const resource of [...geometries.keys(), ...materials.keys()]) resource.addEventListener('dispose', () => sharedDisposals++);
-    fx.prepareRig(rig);
     const direction = new THREE.Vector3(.8, -.2, .4).normalize();
     const normal = new THREE.Vector3(.2, .7, -.3).normalize();
     const session = fx.breakEnemy(rig, { weaponId, combo: 3, direction, contactPoint: new THREE.Vector3(3, 1, -2), cutNormal: normal, critical: true });
@@ -155,15 +154,9 @@ for (const [weaponId, count, kind] of [['tang-dao', 2, 'slice'], ['great-dao', 2
     }
     assert.ok(armourColours.size >= 7, 'palette from the real enemy is retained');
     assert.equal(capColours.size, 1);
-    if (weaponId === 'great-hammer') {
-      assert.equal(session.dustMesh.count, 30);
-      assert.ok(session.fragments.every(fragment => fragment.velocity.y > 1));
-      assert.equal(session.group.getObjectsByProperty('name', 'sliced-enemy-half').length, 0);
-    } else {
-      assert.ok(new THREE.Vector3(...session.cutPlanes[0]).distanceTo(normal) < 1e-6, 'the physical swing cut plane is respected');
-      assert.ok(session.fragments.some(fragment => fragment.velocity.dot(normal) > .3));
-      assert.ok(session.fragments.some(fragment => fragment.velocity.dot(normal) < -.3));
-    }
+    assert.ok(new THREE.Vector3(...session.cutPlanes[0]).distanceTo(normal) < 1e-6, 'the physical swing cut plane is respected');
+    assert.ok(session.fragments.some(fragment => fragment.velocity.dot(normal) > .3));
+    assert.ok(session.fragments.some(fragment => fragment.velocity.dot(normal) < -.3));
     for (const [geometry, buffer] of geometries) assert.deepEqual([...geometry.attributes.position.array], buffer);
     for (const [material, values] of materials) assert.deepEqual({ color: material.color.getHex(), emissive: material.emissive.getHex(), opacity: material.opacity }, values);
     fx.clear(); fx.destroy();
@@ -174,7 +167,7 @@ for (const [weaponId, count, kind] of [['tang-dao', 2, 'slice'], ['great-dao', 2
 test('pause freezes separation and fading, landing is finite, and corpses disappear after their lifespan', () => {
   const scene = new THREE.Scene(), fx = createEnemyFinishers(scene), rig = createCharacter('brute');
   scene.add(rig.group);
-  const session = fx.breakEnemy(rig, { weaponId: 'great-hammer', direction: new THREE.Vector3(0, -.8, .6), contactPoint: new THREE.Vector3(0, 1, 0) });
+  const session = fx.breakEnemy(rig, { weaponId: 'great-dao', direction: new THREE.Vector3(0, -.8, .6), contactPoint: new THREE.Vector3(0, 1, 0) });
   const initial = session.fragments.map(fragment => ({ p: fragment.mesh.position.toArray(), q: fragment.mesh.quaternion.toArray(), s: fragment.mesh.scale.toArray() }));
   const dust = [...session.dustMesh.instanceMatrix.array];
   for (let i = 0; i < 60; i++) fx.update(0);
@@ -218,8 +211,8 @@ test('36 simultaneous lethal strikes obey session, fragment, material, draw-call
   for (let i = 0; i < 36; i++) {
     const rig = createCharacter(i % 3 === 0 ? 'brute' : 'grunt');
     rig.group.position.set(i % 6, 0, Math.floor(i / 6)); scene.add(rig.group);
-    const session = fx.breakEnemy(rig, { weaponId: 'great-hammer', direction: new THREE.Vector3(1, .1, .2) });
-    assert.equal(session.fragmentCount, 24);
+    const session = fx.breakEnemy(rig, { weaponId: 'great-dao', direction: new THREE.Vector3(1, .1, .2) });
+    assert.equal(session.fragmentCount, 2);
     const counts = fx.diagnostics();
     assert.ok(counts.activeSessions <= 3);
     assert.ok(counts.activeFragments <= 48);
@@ -228,10 +221,12 @@ test('36 simultaneous lethal strikes obey session, fragment, material, draw-call
     assert.equal(counts.activeFragmentDrawCalls, counts.activeFragments);
     assert.ok(counts.history.length <= 8);
     assert.ok(counts.pooledFragmentMeshes <= 48);
-    assert.ok(counts.cachedFractureTemplates <= 96);
   }
-  assert.equal(fx.diagnostics().totalCreated, 36);
-  assert.equal(fx.diagnostics().totalReleased, 34);
+  const crowded = fx.diagnostics();
+  assert.equal(crowded.totalCreated, 36);
+  assert.equal(crowded.activeSessions, 3, 'the session budget keeps its three newest corpses');
+  assert.equal(crowded.totalReleased, crowded.totalCreated - crowded.activeSessions,
+    'every created corpse is either still active or has been released');
   fx.clear();
   assert.equal(fx.diagnostics().ownedGeometries, 0);
   assert.equal(fx.diagnostics().ownedMaterials, 0);
@@ -242,14 +237,13 @@ test('36 simultaneous lethal strikes obey session, fragment, material, draw-call
   fx.breakEnemy(rig, { weaponId: 'tang-dao' });
   assert.equal(fx.diagnostics().pooledFragmentMeshes, pooledBefore - 2);
   fx.destroy(); fx.destroy();
-  assert.equal(fx.diagnostics().cachedFractureTemplates, 0);
-  assert.equal(fx.breakEnemy(createCharacter('grunt'), { weaponId: 'great-hammer' }), null);
+  assert.equal(fx.breakEnemy(createCharacter('grunt'), { weaponId: 'great-dao' }), null);
 });
 
 test('destroy releases every pooled dust instance buffer once and never restores a hidden original', () => {
   const scene = new THREE.Scene(), fx = createEnemyFinishers(scene), rig = createCharacter('grunt');
   scene.add(rig.group);
-  const session = fx.breakEnemy(rig, { weaponId: 'great-hammer' });
+  const session = fx.breakEnemy(rig, { weaponId: 'great-dao' });
   let instanceDisposals = 0, materialDisposals = 0;
   session.dustMesh.addEventListener('dispose', () => instanceDisposals++);
   session.dustMesh.material.addEventListener('dispose', () => materialDisposals++);

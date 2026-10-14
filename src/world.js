@@ -385,6 +385,6 @@ export function createWorld(scene) {
   }
   update(0,0);
   return {bounds,obstacles,lanternLights,root,update,
-    reactToBlade: combat.reactToBlade, feedbackStrike: combat.feedbackStrike, presentedCombat: combat.presentedCombat,
+    reactToBlade: combat.reactToBlade, presentedCombat: combat.presentedCombat,
     clearCombat: combat.clearCombat, getCombatState: combat.getCombatState};
 }

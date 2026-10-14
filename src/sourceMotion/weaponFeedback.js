@@ -2,7 +2,7 @@ import * as THREE from 'three';
 
 // Combat owns the source clocks. These renderers observe them and sample the
 // real weapon, so a visual trail can never add a hit or cancel another volume.
-const LIMIT = 32, HISTORY = 18, BLADE_HISTORY = 48, Y = new THREE.Vector3(0, 1, 0);
+const LIMIT = 32, BLADE_HISTORY = 48, Y = new THREE.Vector3(0, 1, 0);
 const STYLES = Object.freeze({
   'dual-dao': { name: 'paired-edge-paths', color: 0x83b9e7, offColor: 0x66ddd0, width: .023,
     inner: .34, outer: 1.24, trail: .10, tail: .18, glow: .62, edgeWidth: .022, halo: .11 },
@@ -10,7 +10,6 @@ const STYLES = Object.freeze({
     inner: .24, outer: 1.32, trail: .14, tail: .21, glow: .72, edgeWidth: .027, halo: .13 },
   'great-dao': { name: 'heavy-steel-cut', color: 0x6c99bf, width: .071,
     inner: .12, outer: 1.40, trail: .18, tail: .24, glow: .56, edgeWidth: .046, halo: .18 },
-  'great-hammer': { name: 'forged-head-pressure', color: 0xc89a54, trail: .075, tail: .14, glow: .25 },
 });
 
 function effectMaterial(color, instanced = false, additive = false) {
@@ -83,12 +82,10 @@ export function createWeaponFeedback(scene) {
   function makeEntry(kind) {
     const group = new THREE.Group();
     const entry = { kind, group, ownedGeometry: [], materials: [], history: [], points: [], cursor: 0, count: 0,
-      scratch: { tip: new THREE.Vector3(), heel: new THREE.Vector3(), edge: new THREE.Vector3(), head: new THREE.Vector3(),
-        quaternion: new THREE.Quaternion(), extents: new THREE.Vector3(), bottom: new THREE.Vector3() } };
-    for (let i = 0; i < (kind === 'blade' ? BLADE_HISTORY : HISTORY); i++) entry.history.push({ position: new THREE.Vector3(),
-      heel: new THREE.Vector3(), edge: new THREE.Vector3(),
-      quaternion: new THREE.Quaternion(), extents: new THREE.Vector3(), age: -100 });
-    for (let i = 0; i < 20; i++) entry.points.push({ p: new THREE.Vector3(), velocity: new THREE.Vector3(), size: .02, age: -100 });
+      scratch: { tip: new THREE.Vector3(), heel: new THREE.Vector3(), edge: new THREE.Vector3() } };
+    for (let i = 0; i < (kind === 'blade' ? BLADE_HISTORY : 0); i++) entry.history.push({ position: new THREE.Vector3(),
+      heel: new THREE.Vector3(), edge: new THREE.Vector3(), age: -100 });
+    if (kind === 'ground') for (let i = 0; i < 20; i++) entry.points.push({ p: new THREE.Vector3(), velocity: new THREE.Vector3(), size: .02, age: -100 });
     if (kind === 'blade') {
       const geo = trailGeometry(4), mat = effectMaterial(0xffffff, false, true), mesh = new THREE.Mesh(geo, mat);
       mesh.frustumCulled = false; mesh.renderOrder = 5; mesh.name = 'physical-blade-path'; group.add(mesh);
@@ -110,10 +107,6 @@ export function createWeaponFeedback(scene) {
       const gold = effectMaterial(0xc4a478, false, true), goldGeo = trailGeometry();
       entry.weightLine = new THREE.Mesh(goldGeo, gold); entry.weightLine.name = 'heavy-dao-gold-edge'; entry.weightLine.frustumCulled = false;
       group.add(entry.weightLine); entry.materials.push(gold); entry.ownedGeometry.push(goldGeo);
-    } else if (kind === 'hammer') {
-      entry.ghosts = instanced(entry, 'solid-hammer-head-ghosts', () => new THREE.BoxGeometry(1, 1, 1), HISTORY, 0x95774c);
-      entry.smoke = instanced(entry, 'short-head-pressure', () => new THREE.IcosahedronGeometry(1, 1), 12, 0x655b50);
-      entry.sparks = instanced(entry, 'hammer-amber-sparks', () => new THREE.BoxGeometry(1, 1, 1), 8, 0xe0ab54, true);
     } else {
       const ringGeo = geometry('concentric-floor-pressure', () => {
         const g = new THREE.RingGeometry(.94, 1, 48); g.rotateX(-Math.PI / 2); return g;
@@ -158,7 +151,7 @@ export function createWeaponFeedback(scene) {
     const weaponId = descriptor.weaponId ?? rig?.weaponId;
     if (!STYLES[weaponId]) throw new RangeError(`Unsupported visual weapon ${weaponId}`);
     const isGround = descriptor.type === 'splash' || descriptor.emitter === 'splash';
-    const kind = isGround ? 'ground' : weaponId === 'great-hammer' ? 'hammer' : 'blade';
+    const kind = isGround ? 'ground' : 'blade';
     const hand = descriptor.hand ?? (weaponId === 'dual-dao' && descriptor.emitter === 'swing2' ? 0 : 1);
     const key = `${root?.uuid ?? root?.id ?? 'hero'}:${weaponId}:${descriptor.emitter}:${hand}`;
     if (active.has(key)) release(active.get(key));
@@ -193,21 +186,18 @@ export function createWeaponFeedback(scene) {
     if (!frame) return false;
     const s = entry.scratch;
     s.tip.copy(frame.tip); s.heel.copy(frame.heel); s.edge.copy(frame.edge ?? Y).normalize();
-    if (frame.headCenter) {
-      s.head.copy(frame.headCenter); s.quaternion.copy(frame.headQuaternion ?? orientation.identity());
-      s.extents.copy(frame.headHalfExtents ?? scale.set(.27, .19, .19));
-      s.bottom.copy(frame.headBottom?.isVector3 ? frame.headBottom : frame.headCenter);
-      if (Number.isFinite(frame.headMinY)) s.bottom.y = frame.headMinY;
+    if (entry.kind === 'ground') {
+      const bottom = frame.heel.y < frame.tip.y ? frame.heel : frame.tip;
       const groundY = entry.descriptor.groundY ?? .05;
-      if (s.bottom.y <= groundY + .13) { entry.contactAge = entry.age; entry.contact.copy(s.bottom); }
+      if (bottom.y <= groundY + .13) { entry.contactAge = entry.age; entry.contact.copy(bottom); }
     }
     entry.sampleSeen = true; entry.sampleHand = frame.hand;
     return true;
   }
   function remember(entry) {
     const h = entry.history[entry.cursor], s = entry.scratch;
-    h.position.copy(entry.kind === 'hammer' ? s.head : s.tip); h.heel.copy(s.heel); h.edge.copy(s.edge);
-    h.quaternion.copy(s.quaternion); h.extents.copy(s.extents); h.age = entry.age;
+    h.position.copy(s.tip); h.heel.copy(s.heel); h.edge.copy(s.edge);
+    h.age = entry.age;
     entry.cursor = (entry.cursor + 1) % entry.history.length; entry.count = Math.min(entry.history.length, entry.count + 1);
   }
   function writeInstance(mesh, index, p, q, size, alpha) {
@@ -266,39 +256,6 @@ export function createWeaponFeedback(scene) {
       entry.glint.material.opacity = style.glow * .44;
     }
   }
-  function burst(entry) {
-    const s = entry.scratch, previous = entry.history[(entry.cursor - 2 + HISTORY) % HISTORY];
-    direction.subVectors(s.head, previous.position);
-    if (direction.lengthSq() > .00001) direction.normalize(); else direction.set(0, -1, 0);
-    for (let i = 0; i < entry.points.length; i++) {
-      const p = entry.points[i], a = i * 2.39996;
-      p.p.copy(s.head); p.age = entry.age;
-      p.velocity.set(Math.cos(a) * (i < 12 ? .38 : 1.5), .2 + (i % 3) * .23, Math.sin(a) * (i < 12 ? .38 : 1.5));
-      p.velocity.addScaledVector(direction, i < 12 ? -.18 : .5);
-      p.size = i < 12 ? .05 + i % 4 * .017 : .012;
-    }
-  }
-  function hammer(entry, showing, dt) {
-    if (showing && entry.sampleSeen) remember(entry);
-    let ghostCount = 0;
-    for (let i = 0; i < entry.count; i++) {
-      const h = entry.history[(entry.cursor - entry.count + i + HISTORY) % HISTORY], age = entry.age - h.age;
-      if (age > entry.style.trail + entry.style.tail) continue;
-      scale.copy(h.extents).multiplyScalar(2.015);
-      writeInstance(entry.ghosts, ghostCount++, h.position, h.quaternion, scale, .20 * Math.max(0, 1 - age / .22) ** 2);
-    }
-    finishInstances(entry.ghosts, ghostCount);
-    if (showing && entry.volume.clock.colliding && !entry.impactSeen && entry.sampleSeen) { burst(entry); entry.impactSeen = true; }
-    let smokeCount = 0, sparkCount = 0;
-    for (let i = 0; i < entry.points.length; i++) {
-      const p = entry.points[i], age = entry.age - p.age, ttl = i < 12 ? .22 : .15;
-      if (age < 0 || age > ttl) continue;
-      p.p.addScaledVector(p.velocity, dt); p.velocity.y -= dt * (i < 12 ? .2 : 5);
-      if (i < 12) { scale.setScalar(p.size * (1 + age * 3)); writeInstance(entry.smoke, smokeCount++, p.p, orientation.identity(), scale, .24 * (1 - age / ttl)); }
-      else { scale.set(.012, .05 * (1 - age / ttl) + .015, .012); orientation.setFromUnitVectors(Y, direction.copy(p.velocity).normalize()); writeInstance(entry.sparks, sparkCount++, p.p, orientation, scale, .68 * (1 - age / ttl)); }
-    }
-    finishInstances(entry.smoke, smokeCount); finishInstances(entry.sparks, sparkCount);
-  }
   function ground(entry, showing, dt) {
     if (showing && !entry.snapped && entry.sampleSeen && entry.age - entry.contactAge <= .22) {
       entry.group.position.copy(entry.contact); entry.group.position.y = (entry.descriptor.groundY ?? .05) + .018;
@@ -350,7 +307,6 @@ export function createWeaponFeedback(scene) {
       entry.group.userData.atlasFrame = clock.frame;
       entry.group.userData.collisionActive = showing && clock.colliding;
       if (entry.kind === 'blade') blade(entry, showing);
-      else if (entry.kind === 'hammer') hammer(entry, showing, dt);
       else ground(entry, showing, dt);
     }
   }
@@ -376,7 +332,6 @@ export function createWeaponFeedback(scene) {
         radialRange: entry.kind === 'blade' ? [entry.style.inner, entry.style.outer] : null,
         visualTail: entry.style.tail,
         sample: entry.sampleSeen ? entry.scratch.tip.toArray() : null,
-        headCenter: entry.sampleSeen && entry.kind !== 'blade' ? entry.scratch.head.toArray() : null,
         floorContact: entry.snapped ? entry.group.position.toArray() : null })) };
   }
   return { emit, update, clear, diagnostics };

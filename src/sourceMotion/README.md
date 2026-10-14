@@ -2,7 +2,7 @@
 
 These files are imported from the user's `src.rar`. The archive and relevant source files are identified by SHA-256 in `provenance.json`.
 
-`data.js` exports the original hero profiles for `blade`, `dual` and `halberd`: idle, walk, run and all five ordinary attack/recovery pairs. Baked frame arrays are replaced with registration markers. Key times, positions, quaternion components, Hermite tangents, source skeleton, axis calibration, playback speed and clip boundaries retain the source values.
+`data.js` retains the imported original hero profiles for `blade`, `dual` and `halberd` as source provenance: idle, walk, run and all five ordinary attack/recovery pairs. Dual dao, tang dao and great dao use the original source bindings. The new three-hit great hammer has independent authored profiles in `../customHammer/` and reuses the attack/recovery clock contract; it does not bind to the original halberd poses. Baked frame arrays are replaced with registration markers. Key times, positions, quaternion components, Hermite tangents, source skeleton, axis calibration, playback speed and clip boundaries retain the source values.
 
 `sampler.js` exports `sampleReferenceCurveMotion(profile, phase)`, `sampleReferenceCurveBlend(samples, workspace)`, `createReferenceCurveBlendWorkspace()` and `hasReferenceCurveMotion(profile)`. Sample outputs contain calibrated world rotations, original target joint offsets and source weapon mount attachments. Locomotion blending sums raw Hermite quaternion components before normalizing, exactly as in the original evaluator. The caller retargets these poses to the current character rig.
 

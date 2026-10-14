@@ -3,15 +3,12 @@ import assert from 'node:assert/strict';
 import { WEAPONS } from '../../src/weapons.js';
 import { weaponStrikeContains as contains } from '../../src/weaponCombat.js';
 
-// Hammer contacts use the real head sweep API covered in hammer-combat.test.js.
-// These authored arc/corridor checks cover the three existing blade weapons.
-const moves = WEAPONS.filter(weapon => weapon.id !== 'great-hammer')
-  .flatMap(weapon => weapon.moves.map((move, index) => ({ weapon, move, index })));
+const moves = WEAPONS.flatMap(weapon => weapon.moves.map((move, index) => ({ weapon, move, index })));
 const point = (distance, angle) => [Math.sin(angle) * distance, Math.cos(angle) * distance];
 const strike = (move, distance, targetAngle, facing = 0, radius = 0) => contains(move, ...point(distance, targetAngle), facing, radius);
 
-test('all twelve existing blade attacks hit forward inside their authored reach', () => {
-  assert.equal(moves.length, 12);
+test('all existing blade attacks hit forward inside their authored reach', () => {
+  assert.equal(moves.length, 15);
   for (const {weapon, move, index} of moves) {
     assert.equal(strike(move, move.reach * .8, 0), true, `${weapon.id}/${index}`);
   }

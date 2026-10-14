@@ -16,6 +16,9 @@ import { createWeaponImpact } from "./sourceMotion/weaponImpact.js";
 import { getSourceCameraImpulse, lerpSourceCameraOffset } from "./sourceMotion/impact.js";
 import { sampleWeaponContact } from "./sourceMotion/contact.js";
 import { createEnemyFinishers } from "./enemyFinishers.js";
+import {HAMMER_ID} from './customHammer/definition.js';
+import {clipHammerSweep,hammerSweepContact,hammerGroundContact} from './customHammer/combat.js';
+import {createHammerFeedback} from './customHammer/feedback.js';
 import { isCombatTarget, referenceAttackSensorTargets,
   sourceAttackDirectionAllowed,
   projectWalkablePoint } from "./heroAI.js";
@@ -24,7 +27,7 @@ import { createHeroControl, resetHeroControl, resetHeroAttackFamily,
   clearHeroCombo, disableHeroSensor } from "./referenceHeroControl.js";
 import "./style.css";
 
-const isHeavyWeapon = id => id === 'great-dao' || id === 'great-hammer';
+const isHeavyWeapon = id => id === 'great-dao' || id === HAMMER_ID;
 
 const app = document.querySelector("#app") || document.body;
 const canvas = document.createElement("canvas");
@@ -117,6 +120,7 @@ const fx = createEffects(scene, camera);
 const weaponFx = createWeaponEffects(scene, fx);
 const sourceFx = createWeaponFeedback(scene);
 const sourceImpact = createWeaponImpact(scene);
+const hammerFeedback = createHammerFeedback(scene);
 const enemyFinishers = createEnemyFinishers(scene);
 const sourceCameraOffset = new THREE.Vector3();
 let sourceStrokes = [], sourceForces = [], sourceHitParity = 0, sourceStrokeSerial = 0;
@@ -550,6 +554,7 @@ function clearDynamic() {
   weaponFx.clear();
   sourceFx.clear();
   sourceImpact.clear();
+  hammerFeedback.clear();
   enemyFinishers.clear();
   sourceStrokes = []; sourceForces = [];
   sourceCameraOffset.set(0,0,0);
@@ -570,6 +575,8 @@ function selectWeapon(id = currentWeapon.id, preview = true) {
   hero.state='idle'; hero.elapsed=0; hero.duration=0; hero.attackTarget=null;
   hero.control.sensorEnabled=true; hero.control.sensorInside.clear(); hero.control.locomotion='idle';
   resetHeroAttackFamily(hero.control);
+  hero.control.comboCount=currentWeapon.moves.length;
+  if(currentWeapon.customMotion)clearHeroCombo(hero.control);
   hero.attackHits.clear();
   hero.previewAge = preview && mode === "start" ? 0 : Infinity;
   hero.attackStep = null;
@@ -595,6 +602,7 @@ function selectWeapon(id = currentWeapon.id, preview = true) {
   weaponFx.clear();
   sourceFx.clear();
   sourceImpact.clear();
+  hammerFeedback.clear();
   sourceStrokes = []; sourceForces = [];
   sourceCameraOffset.set(0,0,0);
   hero.sourceClock = null; hero.previewClock = null; hero.previewIndex = 0; hero.sourceStepTimes = new Map(); hero.sourceAirborne=false;
@@ -618,6 +626,7 @@ function chooseWeapon(id = currentWeapon.id) {
   hero.target = null;
   hero.attackTarget = null;
   resetHeroControl(hero.control, { comboCount: currentWeapon.moves.length });
+  if(currentWeapon.customMotion)clearHeroCombo(hero.control);
   hero.destination = null;
   hero.velocity.set(0, 0, 0);
   hero.moveVelocity.set(0, 0, 0);
@@ -684,6 +693,7 @@ function startGame(weaponId = currentWeapon.id) {
   hero.target = null;
   hero.attackTarget = null;
   resetHeroControl(hero.control, { comboCount: currentWeapon.moves.length });
+  if(currentWeapon.customMotion)clearHeroCombo(hero.control);
   hero.destination = null;
   hero.velocity.set(0, 0, 0);
   hero.moveVelocity.set(0, 0, 0);
@@ -803,7 +813,6 @@ const enemyStats = {
 function spawnEnemy(type, x, z) {
   const st = enemyStats[type],
     rig = createCharacter(type);
-  enemyFinishers.prepareRig(rig);
   const e = {
     id: nextId++,
     type,
@@ -897,6 +906,10 @@ function beginAttack(enemy) {
   startHeroAttack(hero.control, hero.combo, hero.angle);
   hero.attackStep = null;
   hero.sourceClock = beginSourceStroke(hero.combo);
+  if(currentWeapon.customMotion) {
+    hero.attackStep={angle:hero.angle,progress:0,
+      feet:rig.legs.map(leg=>leg.foot.getWorldPosition(new THREE.Vector3()))};
+  }
   hero.attackStepPhase = 0;
   destinationMarker.visible = !!hero.destination;
 }
@@ -904,6 +917,13 @@ function beginSourceStroke(comboIndex, preview = false) {
   const clock = createSourceAttackClock(currentWeapon.id,comboIndex);
   advanceSourceAttackClock(clock,0);
   const timing = getSourceAttackTiming(currentWeapon.id,comboIndex);
+  if(currentWeapon.customMotion) {
+    safeAudio('weaponReady',currentWeapon.id,comboIndex);
+    sourceStrokes.push({id:++sourceStrokeSerial,custom:true,clock,
+      weaponId:currentWeapon.id,combo:comboIndex,move:currentWeapon.moves[comboIndex],preview,
+      previous:rig.weaponBlades()[0],previousPhase:0,hitTargets:new Set(),released:false,ground:false});
+    return clock;
+  }
   const rule = getSourceAttackRule(currentWeapon.id,comboIndex,timing.atkspd);
   const volumes = createSourceAttackVolumes(currentWeapon.id,comboIndex,timing.atkspd);
   safeAudio('weaponReady',currentWeapon.id,comboIndex);
@@ -929,6 +949,18 @@ function advanceSourceForces(dt,preview=false) {
     targets:preview?[]:enemies.filter(e=>isCombatTarget(e,enemies)).map(e=>({x:e.pos.x,z:e.pos.z,radius:e.radius}))});
   hero.moveVelocity.x += (resolved.x-hero.pos.x)/dt;
   hero.moveVelocity.z += (resolved.z-hero.pos.z)/dt;
+  hero.pos.set(resolved.x,0,resolved.z);
+}
+function advanceHammerRoot(dt) {
+  const step=hero.attackStep;
+  if(!currentWeapon.customMotion||hero.state!=='attack'||!step||!(dt>0))return;
+  const move=currentWeapon.moves[hero.combo];
+  const phase=hero.sourceClock.phase/Math.max(.001,move.recoverAt);
+  const u=THREE.MathUtils.clamp((phase-.08)/.45,0,1),progress=u*u*(3-2*u);
+  const travel=move.lunge*Math.max(0,progress-step.progress);step.progress=progress;
+  const displacement={x:Math.sin(step.angle)*travel,z:Math.cos(step.angle)*travel};
+  const resolved=resolveGreatDaoStep(hero.pos,displacement,{obstacles:world.obstacles,bounds:world.bounds,
+    targets:enemies.filter(e=>isCombatTarget(e,enemies)).map(e=>({x:e.pos.x,z:e.pos.z,radius:e.radius}))});
   hero.pos.set(resolved.x,0,resolved.z);
 }
 function heroAttackCandidate() {
@@ -973,7 +1005,6 @@ function hurtEnemy(e,damage,from,force=1,critical=false,playerContact=false,cutD
   const knockback=sourceContact?.knockback ?? temp;
   e.hurtDirection=Math.sin(Math.atan2(knockback.x,knockback.z)-e.angle);
   e.hurtVertical=sourceContact?.rising?.65:0;
-  e.hurtBlunt=sourceContact?.weaponId==='great-hammer';
   e.hurtStrength=critical?1.15:.8;
   e.localHitStop=sourceContact?0:Math.max(e.localHitStop||0,.027);
   e.velocity.addScaledVector(knockback,force*(e.type==='boss'?.4:1));
@@ -992,7 +1023,7 @@ function hurtEnemy(e,damage,from,force=1,critical=false,playerContact=false,cutD
   if(e.hp<=0) {
     e.state='dead'; e.elapsed=0; e.duration=1.5; e.bar.visible=false;
     kills++; dropLoot(e.pos); e.deathDirection=direction; e.deathImpactDone=false; safeAudio('kill');
-    if(sourceContact) {
+    if(sourceContact&&sourceContact.weaponId!==HAMMER_ID) {
       e.rig.setFlash?.(0);
       e.finisher=enemyFinishers.breakEnemy(e.rig,{weaponId:sourceContact.weaponId,combo:sourceContact.combo,
         direction,contactPoint,cutNormal:sourceContact.cutNormal,critical});
@@ -1015,7 +1046,7 @@ function playSourceFootsteps() {
     const old=previous.get(entry.state)??entry.rawTime;
     previous.set(entry.state,entry.rawTime);
     const profile=entry.state==='run'?{length:.3333333134651184,events:[.13333334028720856,.30000001192092896]}
-      :entry.state==='walk'&&currentWeapon.id!=='dual-dao'&&currentWeapon.id!=='great-hammer'
+      :entry.state==='walk'&&currentWeapon.id!=='dual-dao'
       ?{length:.46666669845581055,events:[.23333333432674408,.46666666865348816]}:null;
     if(!profile||entry.rawTime<=old||entry.weight<=0)continue;
     if(profile.events.some(event=>Math.floor((entry.rawTime-event)/profile.length)>Math.floor((old-event)/profile.length)))safeAudio('footstep',.6);
@@ -1027,25 +1058,24 @@ function playSourceLanding() {
   if(minimum>.09)hero.sourceAirborne=true;
   else if(hero.sourceAirborne&&minimum<.035) {
     hero.sourceAirborne=false;
-    safeAudio('landing',currentWeapon.id==='great-hammer'?1.3:1);
+    safeAudio('landing',1);
   }
 }
 function updateSourceCombat(dt) {
   if (!(dt>0)) return;
   playSourceLanding();
   for(const stroke of sourceStrokes) {
+    if(stroke.custom) {updateHammerCombat(stroke,dt);continue;}
     const result=advanceSourceAttackVolumes(stroke.volumes,dt,rig.group);
     for(const {descriptor,addForce} of result.onsets) {
       if(!stroke.preview&&addForce) sourceForces.push({force:addForce,age:0,angle:hero.angle});
-      safeAudio(descriptor.type==='splash'?'weaponGround':'weaponSlash',stroke.weaponId,stroke.combo,descriptor.type);
+      safeAudio('weaponSlash',stroke.weaponId,stroke.combo,descriptor.type);
     }
     const blades=stroke.combo===hero.combo&&stroke.weaponId===currentWeapon.id ? rig.weaponBlades() : [];
     if(result.active.length&&blades.length) {
       for(const frame of blades) {
         const previous=stroke.previousBlades?.find(old=>old.hand===frame.hand);
-        if(frame.headCenter)world.feedbackStrike?.({weaponId:'great-hammer',current:{...frame,headBottom:frame.headMinY},
-          previous:previous?{...previous,headBottom:previous.headMinY}:null,combo:stroke.combo,strikeId:stroke.id,headRadius:frame.headRadius});
-        else world.reactToBlade?.({current:frame,previous,combo:stroke.combo,strikeId:stroke.id,origin:hero.pos,
+        world.reactToBlade?.({current:frame,previous,combo:stroke.combo,strikeId:stroke.id,origin:hero.pos,
           phase:hero.elapsed/Math.max(.001,hero.duration)});
       }
     }
@@ -1070,6 +1100,46 @@ function updateSourceCombat(dt) {
   }
   sourceStrokes=sourceStrokes.filter(stroke=>!stroke.finished);
   sourceFx.update(dt);
+}
+function updateHammerCombat(stroke,dt) {
+  const owner=stroke.preview?hero.previewClock:hero.sourceClock;
+  if(owner!==stroke.clock||hero.state!=='attack'||hero.combo!==stroke.combo) {stroke.finished=true;return;}
+  const frame=rig.weaponBlades()[0],phase=stroke.clock.phase;
+  if(!frame?.headCenter){stroke.finished=true;return;}
+  const sweep=clipHammerSweep(frame,stroke.previous,phase,stroke.previousPhase,stroke.move.active);
+  if(!stroke.released&&phase>=stroke.move.active[0]) {
+    stroke.released=true;safeAudio('weaponSlash',stroke.weaponId,stroke.combo);
+  }
+  if(sweep) {
+    hammerFeedback.trace({frame:sweep.current,previous:sweep.previous,dt,active:true,
+      combo:stroke.combo,strikeId:stroke.id});
+    if(stroke.combo===2&&!stroke.ground) {
+      const point=hammerGroundContact(sweep.current,sweep.previous);
+      if(point) {
+        stroke.ground=true;
+        const direction=frame.headCenter.clone().sub(stroke.previous?.headCenter??frame.headCenter);
+        hammerFeedback.ground({point,direction,combo:stroke.combo,strikeId:stroke.id});
+        safeAudio('weaponGround',stroke.weaponId,stroke.combo);
+        if(!stroke.preview)kickCamera(new THREE.Vector3(Math.sin(hero.angle),0,Math.cos(hero.angle)),.08);
+      }
+    }
+    if(!stroke.preview&&mode==='playing')for(const enemy of enemies) {
+      if(!isCombatTarget(enemy,enemies)||stroke.hitTargets.has(enemy.id))continue;
+      const lift=Number.isFinite(enemy.sourceAirTime)?Math.sin(Math.PI*Math.min(1,enemy.sourceAirTime/.55))*.65:0;
+      const physical=hammerSweepContact(sweep.current,sweep.previous,{x:enemy.pos.x,z:enemy.pos.z,
+        radius:enemy.radius,minY:enemy.pos.y+.12+lift,maxY:enemy.pos.y+1.78*enemy.rig.group.scale.y+lift});
+      if(!physical)continue;
+      stroke.hitTargets.add(enemy.id);
+      const contact=sampleWeaponContact({frame:sweep.current,previous:sweep.previous,targetRig:enemy.rig,
+        targetPosition:enemy.pos,attackerPosition:hero.pos,angle:hero.angle});
+      contact.point=physical.point;
+      const critical=stroke.combo===2||Math.random()<.08;
+      hurtEnemy(enemy,Math.round(stroke.move.damage*(critical?1.18:1)),hero.pos,
+        stroke.move.knockback*2.25,critical,true,null,contact.point,
+        {...contact,weaponId:HAMMER_ID,combo:stroke.combo,layer:21,rising:stroke.combo===1});
+    }
+  }
+  stroke.previous=frame;stroke.previousPhase=phase;stroke.finished=stroke.clock.done;
 }
 function damageHero(amount, from) {
   if (
@@ -1218,6 +1288,7 @@ function updateHero(frameDt) {
     const enemy = heroAttackCandidate();
     if (enemy) beginAttack(enemy);
   }
+  advanceHammerRoot(dt);
   advanceSourceForces(dt);
   clampPosition(hero.pos);
   if (hero.state !== 'attack') hero.attackStep = null;
@@ -1281,7 +1352,7 @@ function updateHero(frameDt) {
     gaitPhase: hero.gaitPhase,
     turnLean: hero.turnLean,
     attackCarry: hero.attackCarry,
-    attackStep: null,
+    attackStep: hero.attackStep,
     sourceAttack: hero.state==='attack'?sampleSourceAttackClock(hero.sourceClock):null,
     sourceLocomotion: hero.control.locomotion,
     speedFactor: hero.control.speedFactor,
@@ -1552,7 +1623,6 @@ function updateEnemies(dt) {
       hurtDirection: e.hurtDirection || 0,
       hurtStrength: e.hurtStrength || 0,
       hurtVertical: e.hurtVertical || 0,
-      hurtBlunt: e.hurtBlunt || false,
     });
     updateEnemyBar(e);
   }
@@ -1793,7 +1863,7 @@ function updatePresentation(dt) {
     if(hero.previewAge>=.18&&!hero.previewClock)hero.previewClock=beginSourceStroke(hero.previewIndex??0,true);
     if(hero.previewClock) {
       sample=advanceSourceAttackClock(hero.previewClock,dt);
-      if(sample.done) {
+      if(sample.done||(currentWeapon.customMotion&&sample.recovering&&(hero.previewIndex??0)<currentWeapon.moves.length-1)) {
         hero.previewIndex=(hero.previewIndex??0)+1;
         if(hero.previewIndex<currentWeapon.moves.length) {
           hero.previewClock=beginSourceStroke(hero.previewIndex,true);
@@ -1810,7 +1880,7 @@ function updatePresentation(dt) {
   poseCharacter(rig,{state,time:globalTime,dt,phase:sample?.progress??(state==='dead'?1:0),
     combo:hero.combo,sourceAttack:sample,sourceLocomotion:'idle',speedFactor:7,alertness:.25});
   rig.group.updateMatrixWorld(true);
-  updateSourceCombat(dt);sourceImpact.update(dt);enemyFinishers.update(dt);fx.update(dt);weaponFx.update(dt);
+  updateSourceCombat(dt);hammerFeedback.update(dt);sourceImpact.update(dt);enemyFinishers.update(dt);fx.update(dt);weaponFx.update(dt);
   if (mode !== "start") {
     for (let i = projectiles.length - 1; i >= 0; i--) {
       const p = projectiles[i];
@@ -1881,6 +1951,7 @@ function animate(now) {
         updateDrops(step);
         fx.update(step);
         weaponFx.update(step);
+        hammerFeedback.update(step);
         sourceImpact.update(step);
         enemyFinishers.update(step);
       }
@@ -1919,6 +1990,8 @@ function animate(now) {
   renderer.render(scene, camera);
   fx.presented?.();
   weaponFx.presented?.();
+  hammerFeedback.presented();
+  sourceImpact.presented?.();
   world.presentedCombat?.();
   if (mode === "playing" && hero.state === "attack" && hero.elapsed >= hero.duration)
     hero.attackEndRendered = true;
@@ -1943,6 +2016,7 @@ if (new URLSearchParams(location.search).get("debug") === "1") {
       weapon: weaponFx.getState?.() ?? null,
       source: sourceFx.diagnostics(),
       impacts: sourceImpact.snapshot(),
+      hammer: hammerFeedback.diagnostics(),
       finishers: enemyFinishers.diagnostics(),
     }),
     positionPlayer(x, z) {
@@ -1953,6 +2027,7 @@ if (new URLSearchParams(location.search).get("debug") === "1") {
       hero.moveVelocity.set(0, 0, 0);
       hero.target = hero.destination = null;
       resetHeroControl(hero.control, { comboCount: currentWeapon.moves.length });
+      if(currentWeapon.customMotion)clearHeroCombo(hero.control);
       rig.group.position.copy(hero.pos);
       cameraFocus.copy(hero.pos);
       return true;
@@ -2002,10 +2077,6 @@ if (new URLSearchParams(location.search).get("debug") === "1") {
           weaponWorldPos: xyz(arm.weapon.getWorldPosition(new THREE.Vector3())),
         })),
         weaponTips: rig.weaponTips().map(xyz),
-        weaponHeads: rig.weaponBlades().filter(frame=>frame.headCenter).map(frame=>({
-          center:xyz(frame.headCenter),bottom:xyz(frame.headBottom),minY:frame.headMinY,
-          maxY:frame.headMaxY,halfHeight:frame.headHalfHeight,radius:frame.headRadius,
-        })),
         legs: rig.legs.map((leg) => ({
           side: leg.side,
           foot: joint(leg.foot),
@@ -2013,6 +2084,11 @@ if (new URLSearchParams(location.search).get("debug") === "1") {
         })),
         motion,
         sourceMotion: rig.sourceMotionDebug,
+        customMotion: rig.customHammerDebug,
+        hammer:currentWeapon.customMotion?rig.weaponBlades().map(frame=>({
+          center:xyz(frame.headCenter),quaternion:frame.headQuaternion.toArray(),
+          halfExtents:frame.headHalfExtents.toArray(),minY:frame.headMinY,
+          corners:frame.headCorners.map(xyz)})):null,
       };
     },
     worldToScreen(x, z, y = 0.8) {

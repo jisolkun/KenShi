@@ -4,13 +4,13 @@ import * as THREE from 'three';
 import { WEAPONS } from '../src/weapons.js';
 import { createWeaponEffects } from '../src/weaponEffects.js';
 
+const sourceWeapons = WEAPONS.filter(weapon => !weapon.customMotion);
 const position=new THREE.Vector3();
 function bounds(mesh){mesh.geometry.computeBoundingBox();return mesh.geometry.boundingBox.getSize(new THREE.Vector3());}
-test('blade attack trails match their contact shapes while hammer swings create no invented slash',()=>{
+test('blade attack trails match their contact shapes',()=>{
   const scene=new THREE.Scene(),fx=createWeaponEffects(scene),signatures=new Set();
-  for(const weapon of WEAPONS)for(let combo=0;combo<4;combo++){
+  for(const weapon of sourceWeapons)for(let combo=0;combo<4;combo++){
     fx.attack(weapon.id,position,0,combo);
-    if(weapon.id==='great-hammer'){assert.equal(scene.children.length,0,'hammer contact must come from its real head');continue;}
     const group=scene.children.at(-1),mesh=group.children[0],move=weapon.moves[combo];
     assert.ok([...mesh.geometry.attributes.position.array].every(Number.isFinite),`${weapon.id}:${combo}`);
     signatures.add([...mesh.geometry.attributes.position.array].map(v=>v.toFixed(3)).join(','));
@@ -34,15 +34,15 @@ test('pause freezes, expiry reuses pooled groups, and clear removes every active
   fx.clear();assert.equal(scene.children.length,0);
   fx.destroy();fx.destroy();fx.attack('dual-dao',position,0,0);assert.equal(scene.children.length,0);
 });
-test('basic attack contact delegates one physical blade or blunt impact',()=>{
-  let impacts=0;const scene=new THREE.Scene(),fx=createWeaponEffects(scene,{impact(){impacts++;},hammerImpact(){impacts++;},ring(){}});
-  for(const weapon of WEAPONS)for(let combo=0;combo<4;combo++){
+test('basic source attack contact delegates one physical blade impact',()=>{
+  let impacts=0;const scene=new THREE.Scene(),fx=createWeaponEffects(scene,{impact(){impacts++;},ring(){}});
+  for(const weapon of sourceWeapons)for(let combo=0;combo<4;combo++){
     fx.impact(weapon.id,position,0,combo,true);
     for(const group of scene.children)group.traverse(mesh=>{if(mesh.isMesh)assert.ok([...mesh.geometry.attributes.position.array].every(Number.isFinite));});
     fx.clear();fx.update(1);
     assert.equal(scene.children.length,0);
   }
-  assert.equal(impacts,WEAPONS.length*4);
+  assert.equal(impacts,sourceWeapons.length*4);
   fx.destroy();
 });
 

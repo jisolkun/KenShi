@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { getHammerArea, hammerAreaContains } from './hammerFeedback.js';
 
 const clamp = (x, low, high) => Math.max(low, Math.min(high, x));
 const point = (a, b, t) => ({ x: a.x + (b.x - a.x) * t,
@@ -56,40 +55,10 @@ export function lowestBladePoint(previous, current) {
   return points.reduce((lowest, candidate) => candidate.y < lowest.y ? candidate : lowest);
 }
 
-// This primitive only sweeps the physical head. Deliberate fan/floor impact
-// waves use their own bounded area test below; the long handle never damages.
-export function sweptHammerPropContact(previous, current, volume, radius = .27) {
-  const center=current?.headCenter;
-  if(!center||![center.x,center.y,center.z,radius].every(Number.isFinite)||radius<0)return null;
-  const start=previous?.headCenter??center;
-  if(![start.x,start.y,start.z].every(Number.isFinite))return null;
-  const halfHeight=frame=>Number.isFinite(frame?.headHalfHeight)&&frame.headHalfHeight>=0?frame.headHalfHeight:.19;
-  const startHeight=halfHeight(previous??current),heightDelta=halfHeight(current)-startHeight;
-  const dx=center.x-start.x,dy=center.y-start.y,dz=center.z-start.z;
-  let from=0,to=1;
-  // Projected head height changes as it rotates. Clip both vertical slab
-  // inequalities at that same phase before finding the horizontal closest point.
-  for(const [offset,slope] of [[start.y+startHeight-volume.minY,dy+heightDelta],
-    [volume.maxY-start.y+startHeight,-dy+heightDelta]]){
-    if(Math.abs(slope)<1e-12){if(offset<0)return null;}
-    else if(slope>0)from=Math.max(from,-offset/slope);
-    else to=Math.min(to,-offset/slope);
-    if(to<from)return null;
-  }
-  const length=dx*dx+dz*dz;
-  const projected=length?((volume.x-start.x)*dx+(volume.z-start.z)*dz)/length:from;
-  const t=clamp(projected,from,to),contact=point(start,center,t),reach=volume.radius+radius;
-  return (contact.x-volume.x)**2+(contact.z-volume.z)**2<=reach*reach+1e-12?contact:null;
-}
-
 export function createWorldCombat(parent, { props = [], random = Math.random } = {}) {
   const group = new THREE.Group(); group.name = 'blade-world-reactions'; parent.add(group);
   const dummy = new THREE.Object3D(), tint = new THREE.Color();
   const records = new Map();
-  const propDamage=new Map(props.map(prop=>[prop.id,{id:prop.id,hits:0,broken:false,
-    volumes:prop.volumes.map(volume=>({volume,original:{...volume}})),
-    nodes:(prop.nodes??[]).map(node=>({node,position:node.position.clone(),quaternion:node.quaternion.clone(),
-      scale:node.scale.clone(),visible:node.visible}))}]));
   const stats = { dustSweeps: 0, propHits: 0, groundHits: 0 };
   let lastDust = null, lastContact = null, lastGround = null;
   const dustGeometry = new THREE.IcosahedronGeometry(1, 0);
@@ -116,29 +85,12 @@ export function createWorldCombat(parent, { props = [], random = Math.random } =
   const sparks = pool('struck-stone-sparks', sparkGeometry, 48, .9, true);
   const pools = [dust, leaves, chips, sparks];
   const markGeometry = new THREE.PlaneGeometry(1, .038);
-  const crackVertices=[];
-  for(let spoke=0;spoke<7;spoke++){
-    const angle=spoke/7*Math.PI*2+.12,length=.45+(spoke%3)*.13;
-    const points=[[Math.cos(angle)*.08,Math.sin(angle)*.08],
-      [Math.cos(angle+.12)*length*.62,Math.sin(angle+.12)*length*.62],
-      [Math.cos(angle)*length,Math.sin(angle)*length]];
-    for(let i=1;i<points.length;i++){
-      const [ax,ay]=points[i-1],[bx,by]=points[i],dx=bx-ax,dy=by-ay,span=Math.hypot(dx,dy),ox=-dy/span*.012,oy=dx/span*.012;
-      const corners=[[ax-ox,ay-oy,0],[ax+ox,ay+oy,0],[bx-ox,by-oy,0],[bx+ox,by+oy,0]];
-      for(const index of [0,1,2,2,1,3])crackVertices.push(...corners[index]);
-    }
-  }
-  const hammerCrackGeometry=new THREE.BufferGeometry();hammerCrackGeometry.setAttribute('position',new THREE.Float32BufferAttribute(crackVertices,3));
-  const hammerRingGeometry=new THREE.RingGeometry(.92,1,32);
   const marks = Array.from({ length: 12 }, () => {
     const mesh = new THREE.Mesh(markGeometry, new THREE.MeshBasicMaterial({ color: 0x3c3b32,
       transparent: true, opacity: .72, depthWrite: false, polygonOffset: true,
       polygonOffsetFactor: -1, polygonOffsetUnits: -1, side: THREE.DoubleSide }));
     mesh.rotation.x = -Math.PI / 2; mesh.visible = false; group.add(mesh);
-    const ring=new THREE.Mesh(hammerRingGeometry,new THREE.MeshBasicMaterial({color:0xd8b78c,transparent:true,
-      opacity:0,depthWrite:false,side:THREE.DoubleSide,toneMapped:false}));
-    ring.visible=false;ring.position.z=.003;mesh.add(ring);
-    return { mesh, ring, hammer: false, active: false, age: 0, life: 1.5, awaiting: false, unseen: 0 };
+    return { mesh, active: false, age: 0, life: 1.5, awaiting: false, unseen: 0 };
   });
   let markCursor = 0;
   function emit(targetPool, location, velocity, color, life, scale, gravity = 3) {
@@ -182,14 +134,8 @@ export function createWorldCombat(parent, { props = [], random = Math.random } =
     }
     for (const mark of marks) {
       mark.mesh.visible = mark.active;
-      const markFade=mark.awaiting?1:mark.hammer
-        ?1-clamp((mark.age-1)/.5,0,1):1-clamp(mark.age/mark.life,0,1);
+      const markFade=mark.awaiting?1:1-clamp(mark.age/mark.life,0,1);
       mark.mesh.material.opacity = .72 * markFade;
-      if(mark.hammer){
-        const age=mark.awaiting?0:mark.age,phase=clamp(age/.20,0,1);
-        mark.ring.visible=mark.active&&phase<1;
-        mark.ring.scale.setScalar(.14+phase*.70);mark.ring.material.opacity=.55*(1-phase)*(1-phase);
-      }else mark.ring.visible=false;
     }
   }
   function reactToBlade({ previous = null, current, combo = 0, strikeId = 0, origin = null } = {}) {
@@ -240,7 +186,6 @@ export function createWorldCombat(parent, { props = [], random = Math.random } =
       record.ground = true; stats.groundHits++; lastGround = { x: low.x, y: .068, z: low.z };
       dustFan(low, direction, true);
       const mark = marks[markCursor++ % marks.length];
-      mark.hammer=false;mark.mesh.geometry=markGeometry;mark.ring.visible=false;
       mark.active = mark.awaiting = true; mark.age = mark.unseen = 0;
       mark.mesh.position.set(low.x, .068, low.z);
       mark.mesh.rotation.set(-Math.PI / 2, 0, -Math.atan2(direction.z, direction.x));
@@ -251,117 +196,6 @@ export function createWorldCombat(parent, { props = [], random = Math.random } =
       mark.life = combo === 3 ? 2.1 : 1.5;
     }
     refresh(); // A new event is visible even before the next simulation update.
-  }
-  function damageStone(prop) {
-    const state=propDamage.get(prop.id);
-    if(!state)return;
-    state.hits=Math.min(2,state.hits+1);state.broken=state.hits>=2;
-    for(const {volume,original} of state.volumes) {
-      Object.assign(volume,original);
-      if(state.broken) {
-        volume.minY=.02;
-        volume.maxY=Math.max(.12,Math.min(.42,.07+(original.maxY-original.minY)*.32));
-      }
-    }
-    for(const [index,snapshot] of state.nodes.entries()) {
-      const {node,position,quaternion,scale}=snapshot;
-      node.position.copy(position);node.quaternion.copy(quaternion);node.scale.copy(scale);
-      if(!state.broken) {
-        node.scale.y*=.93;
-        node.rotateZ((index%2?-1:1)*.065);
-      } else if(prop.type==='stone-lamp'&&position.y>.40) {
-        const angle=index*2.40;
-        node.position.set(position.x+Math.cos(angle)*.24,.13+index%3*.045,
-          position.z+Math.sin(angle)*.24);
-        node.scale.y*=.48;node.rotateX(.85+index%2*.50);node.rotateZ(angle);
-      } else {
-        node.scale.multiply(new THREE.Vector3(1.15,.32,1.10));
-        node.position.y=Math.min(position.y,.13);node.rotateZ(.18);
-      }
-      node.updateMatrixWorld(true);
-    }
-  }
-  function reactToHammer({previous=null,current,combo=0,strikeId=0,headRadius=.27,groundY=.049,
-    impactArea=null}={}){
-    const result={groundContact:null,propContacts:[]},center=current?.headCenter;
-    if(!center||![center.x,center.y,center.z,headRadius,groundY].every(Number.isFinite))return result;
-    if(!records.has(strikeId)){
-      records.set(strikeId,{dust:false,ground:false,props:new Set()});
-      if(records.size>32)records.delete(records.keys().next().value);
-    }
-    const record=records.get(strikeId),travel=previous?.headCenter
-      ?new THREE.Vector3().subVectors(center,previous.headCenter):new THREE.Vector3(0,0,1);
-    if(travel.lengthSq()<1e-6)travel.set(0,0,1);travel.normalize();
-    const strikeProp=(prop,contact)=>{
-      if(record.props.has(prop.id))return;
-      record.props.add(prop.id);stats.propHits++;lastContact={prop:prop.id,type:prop.type,...contact};
-      result.propContacts.push({...lastContact});
-      damageStone(prop);
-      for(let i=0;i<14;i++){
-        const angle=i/14*Math.PI*2;
-        velocity.set(Math.sin(angle)*(1.5+random()*2.8),1.0+random()*2.2,Math.cos(angle)*(1.5+random()*2.8));
-        emit(chips,contact,velocity,i%2?0x78867b:0xb5b3a1,.42+random()*.20,.075+random()*.085,9);
-        if(i<5)emit(sparks,contact,velocity,0xffda93,.055+random()*.06,.09+random()*.10,2);
-      }
-    };
-    const strikeArea=area=>{
-      for(const prop of props) {
-        if(record.props.has(prop.id))continue;
-        const volume=prop.volumes.find(v=>hammerAreaContains(area,
-          {x:v.x,z:v.z,minY:v.minY,maxY:v.maxY},v.radius));
-        if(volume)strikeProp(prop,{x:volume.x,y:Math.max(.14,Math.min(volume.maxY,center.y)),z:volume.z});
-      }
-    };
-    for(const prop of props){
-      if(record.props.has(prop.id))continue;
-      let contact=null;
-      for(const volume of prop.volumes){contact=sweptHammerPropContact(previous,current,volume,headRadius);if(contact)break;}
-      if(contact)strikeProp(prop,contact);
-    }
-    if(impactArea&&!record.area){record.area=true;strikeArea(impactArea);}
-    // The actual eight-corner head bottom controls contact; its spherical
-    // damage envelope must never manufacture a floor hit during a high sweep.
-    const candidates=[previous,current].filter(frame=>frame?.headCenter&&Number.isFinite(frame.headBottom));
-    const low=candidates.reduce((best,frame)=>!best||frame.headBottom<best.headBottom?frame:best,null);
-    if((combo===1||combo===3)&&!record.ground&&low&&low.headBottom>=groundY-.035&&low.headBottom<=groundY+.025){
-      record.ground=true;stats.groundHits++;
-      const contact={x:low.headCenter.x,y:groundY+.018,z:low.headCenter.z};
-      // A broad, fast downswing can travel far in one combat substep. Anchor
-      // its dust/crack at the first real corner entering the floor band, so
-      // presentation cadence does not move the same impact across the paving.
-      const floorBand=groundY+.025;
-      if(previous?.headCenter&&Number.isFinite(previous.headBottom)&&Number.isFinite(current.headBottom)
-        &&Number.isFinite(previous.headCenter.x)&&Number.isFinite(previous.headCenter.z)
-        &&previous.headBottom>floorBand&&current.headBottom<=floorBand) {
-        const crossed=(previous.headBottom-floorBand)/(previous.headBottom-current.headBottom);
-        contact.x=THREE.MathUtils.lerp(previous.headCenter.x,current.headCenter.x,crossed);
-        contact.z=THREE.MathUtils.lerp(previous.headCenter.z,current.headCenter.z,crossed);
-      }
-      record.dust=true;stats.dustSweeps++;lastDust={...contact};
-      result.groundContact=new THREE.Vector3(contact.x,contact.y,contact.z);lastGround={...contact};
-      const area=getHammerArea(combo,contact),heavy=combo===3;
-      strikeArea(area);
-      for(let i=0;i<(heavy?36:26);i++){
-        const angle=i/(heavy?36:26)*Math.PI*2+(random()-.5)*.15,speed=(heavy?4.4:3.5)+random()*2.0;
-        velocity.set(Math.sin(angle)*speed,.30+random()*.42,Math.cos(angle)*speed);
-        emit(dust,contact,velocity,0xb29a78,.32+random()*.12,.14+random()*.13,1.4);
-      }
-      for(let i=0;i<(heavy?18:12);i++){
-        const angle=i/(heavy?18:12)*Math.PI*2,speed=1.4+random()*2.5;
-        velocity.set(Math.sin(angle)*speed,1.5+random()*2.2,Math.cos(angle)*speed);
-        emit(chips,contact,velocity,i%2?0x8b8170:0xb29c7b,.42+random()*.16,.075+random()*.10,9);
-      }
-      const mark=marks[markCursor++%marks.length];
-      mark.hammer=true;mark.mesh.geometry=hammerCrackGeometry;mark.mesh.material.color.setHex(0x4d4030);
-      mark.active=mark.awaiting=true;mark.age=mark.unseen=0;mark.life=1.5;
-      mark.mesh.position.set(contact.x,contact.y,contact.z);mark.mesh.rotation.set(-Math.PI/2,0,0);
-      mark.mesh.scale.setScalar(area.radius/.84);
-    }
-    refresh();return result;
-  }
-  function feedbackStrike(payload={}){
-    return payload.weaponId==='great-hammer'||payload.strikeVolume==='hammer-head'
-      ?reactToHammer(payload):reactToBlade(payload);
   }
   function update(dt) {
     if (!Number.isFinite(dt) || dt <= 0) return;
@@ -392,27 +226,15 @@ export function createWorldCombat(parent, { props = [], random = Math.random } =
     lastDust = lastContact = lastGround = null;
     for (const ppool of pools) for (const p of ppool.particles) p.active = false;
     for (const mark of marks) mark.active = false;
-    for(const state of propDamage.values()) {
-      state.hits=0;state.broken=false;
-      for(const {volume,original} of state.volumes)Object.assign(volume,original);
-      for(const snapshot of state.nodes) {
-        snapshot.node.position.copy(snapshot.position);snapshot.node.quaternion.copy(snapshot.quaternion);
-        snapshot.node.scale.copy(snapshot.scale);snapshot.node.visible=snapshot.visible;
-        snapshot.node.updateMatrixWorld(true);
-      }
-    }
     refresh();
   }
   function getCombatState() {
     const poolCounts = Object.fromEntries(pools.map(ppool => [ppool.name, ppool.mesh.count]));
     return { ...stats, activeParticles: Object.values(poolCounts).reduce((a, b) => a + b, 0),
       activeMarks: marks.filter(mark => mark.active).length, poolCounts,
-      activeHammerRings: marks.filter(mark=>mark.hammer&&mark.ring.visible).length,
       particleBudget: 232, markBudget: marks.length, trackedStrikes: records.size,
       lastDust, lastContact, lastGround,
-      damagedProps:[...propDamage.values()].filter(state=>state.hits>0)
-        .map(({id,hits,broken})=>({id,hits,broken})),
       props: props.map(prop => ({ id: prop.id, type: prop.type, volumes: prop.volumes })) };
   }
-  return { group, reactToBlade, feedbackStrike, update, presentedCombat, clearCombat, getCombatState };
+  return { group, reactToBlade, update, presentedCombat, clearCombat, getCombatState };
 }

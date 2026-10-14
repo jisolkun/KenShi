@@ -6,7 +6,7 @@ export const WEAPON_IMPACT_PROFILES = Object.freeze({
   'dual-dao': Object.freeze({ family: 'paired-cut', styleId: 'dual-cross-flick', duration: .14, chips: 6 }),
   'tang-dao': Object.freeze({ family: 'incision', styleId: 'tang-directional-incision', duration: .17, chips: 4 }),
   'great-dao': Object.freeze({ family: 'heavy-cleave', styleId: 'great-cleave-slivers', duration: .23, chips: 7 }),
-  'great-hammer': Object.freeze({ family: 'crush', styleId: 'hammer-faceted-crush', duration: .27, chips: 10 }),
+  'great-hammer': Object.freeze({ family: 'solid-pressure', styleId: 'hammer-compression-core', duration: .24, chips: 9 }),
 });
 export const WEAPON_IMPACT_POOL_SIZE = 12;
 
@@ -50,18 +50,6 @@ function cutGeometry(id) {
   return geometryWithTag(geometry, id === 'dual-dao' ? 'crossed-flicks' : id === 'tang-dao' ? 'thin-incision' : 'wide-cleave', WEAPON_IMPACT_PROFILES[id].family);
 }
 
-// A chipped plate is an actual closed, faceted volume, not a camera sprite.
-function plateGeometry() {
-  const p = [[-.7, -.35, -.20], [.6, -.3, -.13], [.8, .4, -.12], [-.35, .6, -.15],
-    [-.6, -.3, .18], [.45, -.2, .26], [.5, .35, .2], [-.3, .4, .15]];
-  const faces = [[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4],
-    [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]];
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(faces.flatMap(face => face.flatMap(i => p[i])), 3));
-  geometry.computeVertexNormals();
-  return geometry;
-}
-
 function colorsFromRig(rig) {
   const palette = rig?.materials ?? {};
   const color = (keys, fallback) => {
@@ -69,7 +57,7 @@ function colorsFromRig(rig) {
     return new THREE.Color(fallback);
   };
   return { armor: color(['armor', 'metal', 'edge'], 0x59625a), metal: color(['metal', 'edge', 'armor'], 0xc6cbc2),
-    dust: color(['cloth', 'dark', 'armor'], 0x69644f).lerp(new THREE.Color(0x887961), .55) };
+  };
 }
 
 function transparentMaterial(color, { additive = false, lit = false } = {}) {
@@ -94,12 +82,12 @@ export function createWeaponImpact(scene) {
 
   function ensurePool(id) {
     if (pools.has(id)) return pools.get(id);
-    const profile = WEAPON_IMPACT_PROFILES[id], hammer = id === 'great-hammer';
-    const glintGeometry = ownGeometry(hammer ? geometryWithTag(new THREE.IcosahedronGeometry(.11, 0), 'compact-crush-core', profile.family) : cutGeometry(id));
-    const chipGeometry = ownGeometry(geometryWithTag(hammer ? plateGeometry() : id === 'great-dao'
+    const profile = WEAPON_IMPACT_PROFILES[id];
+    const hammer = id === 'great-hammer';
+    const glintGeometry = ownGeometry(hammer
+      ? geometryWithTag(new THREE.IcosahedronGeometry(1, 1), 'volumetric-pressure-core', profile.family) : cutGeometry(id));
+    const chipGeometry = ownGeometry(geometryWithTag(hammer ? new THREE.BoxGeometry(1, .4, .75) : id === 'great-dao'
       ? new THREE.OctahedronGeometry(1, 0) : id === 'dual-dao' ? new THREE.TetrahedronGeometry(1, 0) : new THREE.BoxGeometry(1, .35, .8), 'armor-chips', profile.family));
-    const ringGeometry = hammer ? ownGeometry(geometryWithTag(new THREE.TorusGeometry(.18, .015, 4, 16), 'pressure-ring-volume', profile.family)) : null;
-    const dustGeometry = hammer ? ownGeometry(geometryWithTag(new THREE.IcosahedronGeometry(1, 0), 'dust-volume', profile.family)) : null;
     const sliverGeometry = id === 'great-dao' ? ownGeometry(geometryWithTag(new THREE.TetrahedronGeometry(1, 0), 'stylized-dark-red-slivers', profile.family)) : null;
     const pool = { next: 0, slots: [] };
     for (let i = 0; i < WEAPON_IMPACT_POOL_SIZE; i++) {
@@ -107,8 +95,8 @@ export function createWeaponImpact(scene) {
       group.name = `${profile.styleId}: slot ${i}`;
       group.visible = false;
       group.userData = { effectType: 'weapon-impact', weaponId: id, effectFamily: profile.family, styleId: profile.styleId, poolSlot: i, phase: 'inactive' };
-      const glint = new THREE.Mesh(glintGeometry, ownMaterial(transparentMaterial(hammer ? 0xe5ccb3 : id === 'great-dao' ? 0xe3c4a9 : id === 'tang-dao' ? 0xebdac4 : 0xd4e3df, { additive: true })));
-      glint.name = hammer ? 'Compact faceted crush flash' : 'Directional cutting contact';
+      const glint = new THREE.Mesh(glintGeometry, ownMaterial(transparentMaterial(hammer ? 0xf1ddaa : id === 'great-dao' ? 0xe3c4a9 : id === 'tang-dao' ? 0xebdac4 : 0xd4e3df, { additive: !hammer })));
+      glint.name = hammer ? 'Compact solid contact pressure' : 'Directional cutting contact';
       group.add(glint);
       const chips = new THREE.InstancedMesh(chipGeometry, ownMaterial(transparentMaterial(0x59625a, { lit: true })), profile.chips);
       chips.frustumCulled = false;
@@ -116,15 +104,15 @@ export function createWeaponImpact(scene) {
       chips.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       ownedInstances.add(chips);
       group.add(chips);
-      const ring = ringGeometry ? new THREE.Mesh(ringGeometry, ownMaterial(transparentMaterial(0xb7a386))) : null;
-      const dust = dustGeometry ? new THREE.InstancedMesh(dustGeometry, ownMaterial(transparentMaterial(0x7c735f)), 8) : null;
       const slivers = sliverGeometry ? new THREE.InstancedMesh(sliverGeometry, ownMaterial(transparentMaterial(0x65171b)), 5) : null;
-      if (ring) { ring.name = 'Three dimensional pressure ring'; group.add(ring); }
-      if (dust) { dust.name = 'Low poly crush dust'; dust.frustumCulled = false; ownedInstances.add(dust); group.add(dust); }
       if (slivers) { slivers.name = 'Dark red stylized cutting slivers'; slivers.frustumCulled = false; ownedInstances.add(slivers); group.add(slivers); }
       holder.add(group);
-      const slot = { id, index: i, group, glint, chips, ring, dust, slivers, age: 0, life: profile.duration,
-        active: false, serial: 0, seed: i, gain: 1, gravity: new THREE.Vector3(), direction: FORWARD.clone() };
+      const slot = { id, index: i, group, glint, chips, slivers, age: 0, life: profile.duration,
+        active: false, serial: 0, seed: i, gain: 1, awaitingPresentation: false, unseenAge: 0,
+        gravity: new THREE.Vector3(), direction: FORWARD.clone() };
+      if (hammer) for (const mesh of [glint, chips]) mesh.onAfterRender = () => {
+        if (slot.active && slot.awaitingPresentation) { slot.awaitingPresentation = false; slot.age = 0; }
+      };
       group.userData.snapshot = () => slotSnapshot(slot);
       pool.slots.push(slot);
     }
@@ -136,25 +124,22 @@ export function createWeaponImpact(scene) {
     if (!mesh) return;
     const t = slot.age, progress = clamp(t / slot.life, 0, 1);
     for (let i = 0; i < mesh.count; i++) {
-      const seed = slot.seed * 17 + i * 3.7 + (kind === 'dust' ? 500 : kind === 'sliver' ? 200 : 0);
+      const seed = slot.seed * 17 + i * 3.7 + (kind === 'sliver' ? 200 : 0);
       const angle = noise(seed) * Math.PI * 2, radial = .8 + noise(seed + 1) * 1.45;
-      const hammer = slot.id === 'great-hammer';
-      const forward = kind === 'dust' ? .4 : hammer ? .5 + noise(seed + 2) * 1.4 : 1.1 + noise(seed + 2) * 1.7;
-      const spread = kind === 'dust' ? 1.2 : hammer ? .85 : .5;
+      const forward = (slot.id === 'great-hammer' ? 1.7 : 1.1) + noise(seed + 2) * 1.7;
+      const spread = slot.id === 'great-hammer' ? .62 : .5;
       point.set(Math.cos(angle) * radial * t * spread, Math.sin(angle) * radial * t * spread, forward * t);
-      if (kind !== 'dust') point.addScaledVector(slot.gravity, .5 * t * t);
-      else point.addScaledVector(slot.gravity, -.04 * t * t);
+      point.addScaledVector(slot.gravity, .5 * t * t);
       euler.set(noise(seed + 3) * 6 + t * 11, noise(seed + 4) * 6 - t * 8, angle + t * 9);
       rotation.setFromEuler(euler);
-      const size = kind === 'dust' ? (.023 + noise(seed + 5) * .04) * (.8 + progress * 2.6)
-        : (.018 + noise(seed + 5) * (hammer ? .048 : .028)) * (1 - progress * .6);
+      const size = (.018 + noise(seed + 5) * .028) * (1 - progress * .6);
       if (kind === 'sliver') scale.set(size * .4, size * .65, size * 2.5);
-      else scale.set(size, size * (kind === 'dust' ? .75 : .8), size);
+      else scale.set(size, size * (slot.id === 'great-hammer' ? .45 : .8), size);
       matrix.compose(point, rotation, scale);
       mesh.setMatrixAt(i, matrix);
     }
     mesh.instanceMatrix.needsUpdate = true;
-    mesh.material.opacity = kind === 'dust' ? .44 * (1 - progress) : .95 * (1 - progress * progress);
+    mesh.material.opacity = .95 * (1 - progress * progress);
   }
 
   function sync(slot) {
@@ -163,18 +148,15 @@ export function createWeaponImpact(scene) {
     const phase = !slot.active ? 'inactive' : slot.age < .028 ? 'contact' : p < .52 ? 'burst' : 'fade';
     Object.assign(slot.group.userData, { active: slot.active, phase, age: slot.age, duration: slot.life, serial: slot.serial });
     if (!slot.active) return;
-    const hammer = slot.id === 'great-hammer';
-    const flash = Math.max(0, 1 - slot.age / (hammer ? .075 : .105));
+    const flash = Math.max(0, 1 - slot.age / .105);
     slot.glint.visible = flash > 0;
-    slot.glint.material.opacity = flash * (hammer ? .75 : .68);
-    if (hammer) slot.glint.scale.setScalar(.72 + p * 2.3);
-    else slot.glint.scale.set(1 - p * .55, 1, .85 + p * .65);
-    if (slot.ring) {
-      slot.ring.scale.setScalar(.55 + p * 2.7);
-      slot.ring.material.opacity = .52 * (1 - p) ** 2;
-    }
+    slot.glint.material.opacity = flash * (slot.id === 'great-hammer' ? .80 : .68);
+    if (slot.id === 'great-hammer') {
+      const pressure = 1 + Math.min(1, slot.age / .030) * .35;
+      slot.glint.scale.set(.082 * pressure * (1 - p * .55), .070 * pressure, .115 * pressure);
+      slot.glint.material.color.setHex(slot.age < .025 ? 0xfff1cd : 0xd7b877);
+    } else slot.glint.scale.set(1 - p * .55, 1, .85 + p * .65);
     particles(slot, slot.chips, 'chip');
-    particles(slot, slot.dust, 'dust');
     particles(slot, slot.slivers, 'sliver');
   }
 
@@ -183,6 +165,7 @@ export function createWeaponImpact(scene) {
       poolSlot: slot.index, active: slot.active, phase: slot.group.userData.phase, serial: slot.serial, age: slot.age,
       duration: slot.life, direction: slot.direction.toArray(), position: slot.group.position.toArray(),
       quaternion: slot.group.quaternion.toArray(), critical: slot.critical ?? false, combo: slot.combo ?? 0,
+      awaitingPresentation: slot.awaitingPresentation,
       geometryRoles: slot.group.children.map(child => child.geometry?.userData.role).filter(Boolean) };
   }
 
@@ -196,7 +179,7 @@ export function createWeaponImpact(scene) {
   function clear() {
     for (const pool of pools.values()) {
       pool.next = 0;
-      for (const slot of pool.slots) { slot.active = false; slot.age = 0; sync(slot); }
+      for (const slot of pool.slots) { slot.active = false; slot.age = 0; slot.awaitingPresentation = false; sync(slot); }
     }
     holder.removeFromParent();
   }
@@ -208,9 +191,12 @@ export function createWeaponImpact(scene) {
       const pool = ensurePool(weaponId), slot = pool.slots[pool.next];
       pool.next = (pool.next + 1) % WEAPON_IMPACT_POOL_SIZE;
       slot.active = true; slot.age = 0; slot.serial = ++serial; slot.seed = serial;
-      slot.combo = ((Math.trunc(combo) % 5) + 5) % 5; slot.critical = !!critical;
-      slot.life = WEAPON_IMPACT_PROFILES[weaponId].duration * (slot.combo === 4 ? 1.15 : 1);
-      slot.gain = (slot.combo === 4 ? 1.18 : 1) * (critical ? 1.12 : 1);
+      const strokes = weaponId === 'great-hammer' ? 3 : 5;
+      slot.combo = ((Math.trunc(combo) % strokes) + strokes) % strokes; slot.critical = !!critical;
+      const finisher = slot.combo === strokes - 1;
+      slot.life = WEAPON_IMPACT_PROFILES[weaponId].duration * (finisher ? 1.15 : 1);
+      slot.gain = (finisher ? 1.18 : 1) * (critical ? 1.12 : 1);
+      slot.awaitingPresentation = weaponId === 'great-hammer'; slot.unseenAge = 0;
       slot.group.position.copy(vector(position, new THREE.Vector3()));
       slot.direction.copy(vector(direction));
       if (!Number.isFinite(slot.direction.lengthSq()) || slot.direction.lengthSq() < 1e-10) slot.direction.copy(FORWARD);
@@ -220,7 +206,7 @@ export function createWeaponImpact(scene) {
       slot.gravity.set(0, -7.8, 0).applyQuaternion(slot.group.quaternion.clone().invert());
       const colors = colorsFromRig(targetRig);
       slot.chips.material.color.copy(weaponId === 'dual-dao' || weaponId === 'tang-dao' ? colors.metal : colors.armor);
-      if (slot.dust) slot.dust.material.color.copy(colors.dust);
+      if (weaponId === 'great-hammer') slot.chips.material.color.lerp(new THREE.Color(0x69716e), .78);
       sync(slot);
       if (holder.parent !== scene) scene.add(holder);
       return slot.group;
@@ -230,9 +216,19 @@ export function createWeaponImpact(scene) {
       if (dt === 0 || destroyed) return;
       for (const pool of pools.values()) for (const slot of pool.slots) {
         if (!slot.active) continue;
-        slot.age = Math.min(slot.life, slot.age + dt);
-        if (slot.age >= slot.life) slot.active = false;
+        if (slot.awaitingPresentation) {
+          slot.unseenAge += dt;
+          if (slot.unseenAge >= .5) slot.active = false;
+        } else {
+          slot.age = Math.min(slot.life, slot.age + dt);
+          if (slot.age >= slot.life) slot.active = false;
+        }
         sync(slot);
+      }
+    },
+    presented() {
+      for (const pool of pools.values()) for (const slot of pool.slots) {
+        if (slot.active && slot.awaitingPresentation) { slot.awaitingPresentation = false; slot.age = 0; }
       }
     },
     clear,

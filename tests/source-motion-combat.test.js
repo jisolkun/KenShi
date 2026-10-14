@@ -53,8 +53,22 @@ test('original sphere and thrust capsule rotate with the root and reject targets
   assert.equal(sourceVolumeContains(thrust, { pos: new THREE.Vector3(2, 0, 5), radius: .3 }, hero), false);
 });
 
-test('polearm splash keeps its show position after the attacker moves, then stops collision', () => {
-  const hero = root(), volumes = createSourceAttackVolumes('great-hammer', 1, .02), splash = volumes[1];
+test('snapshot ground feedback keeps its show position after the attacker moves, then stops collision', () => {
+  // Exercise the reusable source snapshot-volume API with a ground descriptor.
+  // Equipped great dao attacks use a single live-root blade volume.
+  assert.deepEqual(createSourceAttackVolumes('great-dao', 1, .02).map(volume => volume.descriptor.type), ['swing']);
+  const hero = root();
+  const splash = {
+    descriptor: { type: 'splash', emitter: 'splash', delay: .48, position: [0, .02, .1],
+      rotation: [0, 0, 0], rotationOrder: 'YXZ', scale: [1.6, 1.6, 1.6],
+      collider: { type: 'sphere', radius: .12, center: [0, 0, 0] }, originMode: 'snapshot', addForce: 0 },
+    clock: { kind: 'splash', pending: true, showtime: Math.fround(1.5), elapsed: 0, frame: 0,
+      visible: false, colliding: false, finished: false, tint: 1, fireFrame: 0, fireVisible: false,
+      justStarted: false },
+    age: 0, inside: new Set(), hitTargets: new Set(), cancelled: false, started: false,
+    origin: null, facing: null,
+  };
+  const volumes = [splash];
   close(splash.descriptor.delay, .48);
   for (let frame = 0; frame < 24; frame++) advanceSourceAttackVolumes(volumes, .02, hero);
   assert.equal(splash.started, true); close(splash.origin.z, 1.25); close(splash.origin.y, .25);

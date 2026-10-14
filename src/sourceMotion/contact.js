@@ -12,8 +12,8 @@ export function sampleWeaponContact({ frame, previous, targetRig, targetPosition
   if (outward.lengthSq() < 1e-6) outward.set(Math.sin(angle), 0, Math.cos(angle));
   outward.normalize();
 
-  const current = frame?.headCenter ?? frame?.tip;
-  const old = previous?.headCenter ?? previous?.tip;
+  const current = frame?.tip;
+  const old = previous?.tip;
   const direction = current && old ? current.clone().sub(old) : outward.clone();
   if (direction.lengthSq() < 1e-6) direction.copy(outward);
   direction.normalize();

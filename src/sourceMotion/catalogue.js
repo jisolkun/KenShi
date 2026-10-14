@@ -3,6 +3,7 @@ import {
   referenceActionProfiles,
   referenceMotionMetadata,
 } from './data.js';
+import {HAMMER_ID,HAMMER_MOVES,getHammerAttackProfile,getHammerAttackTiming} from '../customHammer/definition.js';
 
 export const SOURCE_ATTACK_COUNT = 5;
 export const SOURCE_BASE_ATTACK_SPEED = .24;
@@ -13,7 +14,6 @@ export const SOURCE_WEAPON_FAMILIES = Object.freeze({
   'dual-dao': 'dual',
   'tang-dao': 'blade',
   'great-dao': 'blade',
-  'great-hammer': 'halberd',
 });
 
 export const SOURCE_WEAPON_BINDINGS = Object.freeze(Object.fromEntries(
@@ -21,15 +21,13 @@ export const SOURCE_WEAPON_BINDINGS = Object.freeze(Object.fromEntries(
     family,
     // Initial inventory stats, including ChangeCharacter's dual speed offset.
     atkspd: family === 'dual' ? -.01 : .02,
-    fallback: id === 'great-hammer',
-    provenance: id === 'great-hammer'
-      ? 'The supplied source has no hammer animation family. Continuous authored hammer swings and torso accents use the original halberd pelvis, head and leg curves with native attack clocks.'
-      : `Original ${family} clips from the supplied source.`,
+    fallback: false,
+    provenance: `Original ${family} clips from the supplied source.`,
   })]),
 ));
 
 const familyOf = id => SOURCE_WEAPON_FAMILIES[id]
-  ?? (['dual', 'blade', 'halberd'].includes(id) ? id : null);
+  ?? (['dual', 'blade'].includes(id) ? id : null);
 const finite = (value, fallback) => Number.isFinite(value) ? value : fallback;
 const clamp = value => Math.min(1, Math.max(0, value));
 const attackIndex = combo => Math.min(SOURCE_ATTACK_COUNT - 1,
@@ -38,6 +36,7 @@ const attackIndex = combo => Math.min(SOURCE_ATTACK_COUNT - 1,
 /** Profiles keep their original identity and base-speed duration. The curve
  * sampler caches these objects; use getSourceAttackTiming for game seconds. */
 export function getSourceAttackProfile(id, combo = 0) {
+  if(id===HAMMER_ID)return getHammerAttackProfile(combo);
   const family = familyOf(id);
   return referenceWeaponAttackProfiles.hero?.[family]?.[attackIndex(combo)] ?? null;
 }
@@ -49,6 +48,8 @@ export function getSourceActionProfile(id, state = 'idle') {
 }
 
 export function getSourceMotionProvenance(id) {
+  if(id===HAMMER_ID)return {family:'custom-hammer',fallback:false,authored:true,
+    provenance:'New original three-hit hammer; timing style studied from the supplied source.'};
   const binding = SOURCE_WEAPON_BINDINGS[id];
   return binding ? { ...binding, source: referenceMotionMetadata.source } : null;
 }
@@ -56,6 +57,7 @@ export function getSourceMotionProvenance(id) {
 /** Native ordinary attacks run at .24 + initial weapon atkspd; queued
  * recovery always runs at .24. Hit delays subtract that same atkspd. */
 export function getSourceAttackTiming(id, combo = 0, { atkspd } = {}) {
+  if(id===HAMMER_ID)return getHammerAttackTiming(combo);
   const profile = getSourceAttackProfile(id, combo);
   if (!profile) return null;
   const family = familyOf(id);
@@ -91,6 +93,7 @@ const names = ['第一式', '第二式', '第三式', '第四式', '第五式'];
 /** Build five source-timed moves while retaining the caller's game balance.
  * A four-move balance table retains its strongest move for source attack5. */
 export function createSourceWeaponMoves(id, baseMoves = [], options = {}) {
+  if(id===HAMMER_ID)return HAMMER_MOVES.map(move=>({...move}));
   if (!getSourceAttackProfile(id, 0)) return [];
   return Array.from({ length: SOURCE_ATTACK_COUNT }, (_, combo) => {
     const timing = getSourceAttackTiming(id, combo, options);

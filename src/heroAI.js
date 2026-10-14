@@ -239,7 +239,7 @@ export function attackChainPhase(weaponId, combo) {
   // Heavy weapons finish their full root travel on every source stroke. The
   // fifth blade stroke is also a terminal release, while combo 3 remains a
   // legacy terminal gate for callers that still use the four-step table.
-  return ['great-dao','great-hammer'].includes(weaponId) ? 1 : combo === 3 || combo === 4 ? .96 : .9;
+  return weaponId === 'great-dao' ? 1 : combo === 3 || combo === 4 ? .96 : .9;
 }
 
 // A small visibility graph around circular props. The 16-sided perimeter is

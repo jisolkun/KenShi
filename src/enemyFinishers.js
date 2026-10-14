@@ -194,9 +194,8 @@ export function cutGeometry(geometry, plane, { matrixWorld, capMaterialIndex = 1
   return { positive: positive.finish(), negative: negative.finish(), capTriangles, capLoops: loops.length, cutPlane };
 }
 
-function snapshotCharacter(group, { templateFor } = {}) {
+function snapshotCharacter(group) {
   const builder = geometryBuilder(), materials = [], materialIndices = new Map();
-  const chunks = [], bounds = new THREE.Box3();
   let sourceMeshes = 0;
   group.updateWorldMatrix(true, true);
   group.traverseVisible(mesh => {
@@ -218,57 +217,9 @@ function snapshotCharacter(group, { templateFor } = {}) {
       }
       return materialIndices.get(material);
     });
-    if (templateFor) {
-      for (const template of templateFor(mesh.geometry)) {
-        const matrixWorld = mesh.matrixWorld.clone();
-        const center = template.geometry.boundingBox.getCenter(new THREE.Vector3()).applyMatrix4(matrixWorld);
-        bounds.union(template.geometry.boundingBox.clone().applyMatrix4(matrixWorld));
-        chunks.push({ ...template, center, matrixWorld, materialIndices: indices });
-      }
-    } else forEachTriangle(mesh.geometry, (vertices, index) => builder.triangle(...vertices, indices[index] ?? indices[0]), mesh.matrixWorld);
+    forEachTriangle(mesh.geometry, (vertices, index) => builder.triangle(...vertices, indices[index] ?? indices[0]), mesh.matrixWorld);
   });
-  return { geometry: templateFor ? null : builder.finish(), materials, sourceMeshes, chunks, bounds };
-}
-
-function groupHammerChunks(snapshot, capMaterialIndex) {
-  const { chunks } = snapshot;
-  if (!chunks.length) return { pieces: [], capTriangles: 0 };
-  const target = Math.min(24, chunks.length);
-  const center = snapshot.bounds.getCenter(new THREE.Vector3());
-  let first = 0, firstDistance = Infinity;
-  chunks.forEach((chunk, index) => {
-    const distance = chunk.center.distanceToSquared(center);
-    if (distance < firstDistance) { first = index; firstDistance = distance; }
-  });
-  const seeds = [chunks[first].center];
-  const nearest = chunks.map(chunk => chunk.center.distanceToSquared(seeds[0]));
-  for (let n = 1; n < target; n++) {
-    let next = 0, farthest = -1;
-    chunks.forEach((chunk, index) => {
-      const score = nearest[index] * Math.pow(chunk.geometry.attributes.position.count, .15);
-      if (score > farthest) { next = index; farthest = score; }
-    });
-    seeds.push(chunks[next].center);
-    for (let i = 0; i < chunks.length; i++) nearest[i] = Math.min(nearest[i], chunks[i].center.distanceToSquared(seeds.at(-1)));
-  }
-  const builders = seeds.map(() => geometryBuilder());
-  let capTriangles = 0;
-  for (const chunk of chunks) {
-    let index = 0, closest = Infinity;
-    for (let i = 0; i < seeds.length; i++) {
-      const distance = chunk.center.distanceToSquared(seeds[i]);
-      if (distance < closest) { index = i; closest = distance; }
-    }
-    forEachTriangle(chunk.geometry, (vertices, localMaterial) => {
-      const isCap = localMaterial === chunk.capIndex;
-      if (isCap) capTriangles++;
-      builders[index].triangle(...vertices, isCap ? capMaterialIndex : chunk.materialIndices[localMaterial] ?? chunk.materialIndices[0]);
-    }, chunk.matrixWorld);
-  }
-  return {
-    pieces: builders.map(builder => builder.finish()).filter(Boolean).map(geometry => ({ geometry, signs: [], normals: [] })),
-    capTriangles,
-  };
+  return { geometry: builder.finish(), materials, sourceMeshes };
 }
 
 // Per-vertex palette colours keep each detached shard to one draw call, even
@@ -351,7 +302,6 @@ export function createEnemyFinishers(scene, { maxSessions = 12, maxFragments = 3
   maxSessions = Math.max(1, Math.floor(maxSessions));
   maxFragments = Math.max(24, Math.floor(maxFragments));
   const sessions = [], sessionPool = [], meshPool = [], history = [];
-  const fractureTemplates = new Map();
   const emptyGeometry = new THREE.BufferGeometry();
   const poolMaterial = new THREE.MeshBasicMaterial({ visible: false });
   const dustGeometry = new THREE.IcosahedronGeometry(1, 0);
@@ -359,35 +309,6 @@ export function createEnemyFinishers(scene, { maxSessions = 12, maxFragments = 3
   const dummy = new THREE.Object3D();
   const tempMatrix = new THREE.Matrix4();
   let serial = 0, totalCreated = 0, totalReleased = 0, destroyed = false;
-
-  function templateFor(source) {
-    if (fractureTemplates.has(source)) return fractureTemplates.get(source);
-    // Cutting in each rigid body's local coordinates is exactly compatible
-    // with its eventual posed world transform, including nonuniform scales.
-    const sourceCopy = source.index ? source.toNonIndexed() : source.clone();
-    sourceCopy.computeBoundingBox();
-    const bounds = sourceCopy.boundingBox, size = bounds.getSize(new THREE.Vector3());
-    const axis = [size.x, size.y, size.z].indexOf(Math.max(size.x, size.y, size.z));
-    const normal = new THREE.Vector3(.11, -.075, .09).setComponent(axis, 1).normalize();
-    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, bounds.getCenter(new THREE.Vector3()));
-    const capIndex = Math.max(0, ...sourceCopy.groups.map(group => group.materialIndex)) + 1;
-    const cut = cutGeometry(sourceCopy, plane, { capMaterialIndex: capIndex });
-    sourceCopy.dispose();
-    const templates = [cut.negative, cut.positive].filter(Boolean).map(geometry => ({ geometry, capIndex }));
-    fractureTemplates.set(source, templates);
-    if (fractureTemplates.size > 96) {
-      const oldest = fractureTemplates.keys().next().value;
-      for (const template of fractureTemplates.get(oldest)) template.geometry.dispose();
-      fractureTemplates.delete(oldest);
-    }
-    return templates;
-  }
-
-  function prepareRig(rig) {
-    if (destroyed) return;
-    const group = rig?.group ?? rig;
-    group?.traverse(mesh => { if (mesh.isMesh && !mesh.isInstancedMesh && mesh.geometry?.attributes.position) templateFor(mesh.geometry); });
-  }
 
   function acquireSession() {
     const session = sessionPool.pop() ?? {
@@ -442,26 +363,24 @@ export function createEnemyFinishers(scene, { maxSessions = 12, maxFragments = 3
     if (destroyed) return null;
     const original = rig?.group ?? rig;
     if (!original?.isObject3D || !original.visible) return null;
-    const blunt = weaponId === 'great-hammer';
-    const snapshot = snapshotCharacter(original, blunt ? { templateFor } : {});
-    if (!snapshot.geometry && !snapshot.chunks.length) { for (const material of snapshot.materials) material.dispose(); return null; }
-    const center = (blunt ? snapshot.bounds : snapshot.geometry.boundingBox).getCenter(new THREE.Vector3());
+    const snapshot = snapshotCharacter(original);
+    if (!snapshot.geometry) { for (const material of snapshot.materials) material.dispose(); return null; }
+    const center = snapshot.geometry.boundingBox.getCenter(new THREE.Vector3());
     const strikeDirection = finiteVector(direction, FALLBACK_DIRECTION).normalize();
     if (strikeDirection.lengthSq() < .5) strikeDirection.copy(FALLBACK_DIRECTION);
     const contact = finiteVector(contactPoint, center);
     const capMaterialIndex = snapshot.materials.length;
     snapshot.materials.push(new THREE.MeshStandardMaterial({
-      color: blunt ? 0x353d38 : 0x253631, roughness: .94, metalness: .12,
+      color: 0x253631, roughness: .94, metalness: .12,
       flatShading: true, side: THREE.DoubleSide, transparent: true,
     }));
     const initial = { geometry: snapshot.geometry, signs: [], normals: [] };
-    const result = blunt ? groupHammerChunks(snapshot, capMaterialIndex) :
-      sliceBlade(initial, { weaponId, direction: strikeDirection, contactPoint: contact, cutNormal }, center, capMaterialIndex);
+    const result = sliceBlade(initial, { weaponId, direction: strikeDirection, contactPoint: contact, cutNormal }, center, capMaterialIndex);
     while (sessions.length >= maxSessions || (sessions.reduce((count, session) => count + session.fragments.length, 0) + result.pieces.length > maxFragments)) release(sessions.shift());
     const session = acquireSession();
     session.id = ++serial;
     session.weaponId = weaponId;
-    session.kind = blunt ? 'shatter' : weaponId === 'dual-dao' ? 'cross-cut' : 'slice';
+    session.kind = weaponId === 'dual-dao' ? 'cross-cut' : 'slice';
     session.age = 0;
     session.complete = false;
     session.materials = snapshot.materials;
@@ -488,7 +407,7 @@ export function createEnemyFinishers(scene, { maxSessions = 12, maxFragments = 3
       const mesh = meshPool.pop() ?? new THREE.Mesh(emptyGeometry, poolMaterial);
       mesh.geometry = piece.geometry;
       mesh.material = presentationMaterial;
-      mesh.name = blunt ? 'shattered-enemy-armour' : 'sliced-enemy-half';
+      mesh.name = 'sliced-enemy-half';
       mesh.position.copy(pieceCenter);
       mesh.quaternion.identity();
       mesh.scale.setScalar(1);
@@ -501,38 +420,29 @@ export function createEnemyFinishers(scene, { maxSessions = 12, maxFragments = 3
         snapshotCenter: pieceCenter.toArray(),
       };
       const velocity = new THREE.Vector3(), separation = new THREE.Vector3();
-      if (blunt) {
-        const radial = pieceCenter.clone().sub(contact);
-        if (radial.lengthSq() < .005) radial.set(hash(index + 1, serial) - .5, .4, hash(index + 5, serial) - .5);
-        radial.normalize();
-        velocity.copy(radial).multiplyScalar(2.1 + hash(index + 17, serial) * 1.8).addScaledVector(strikeDirection, critical ? 4.2 : 3.4);
-        velocity.y = Math.max(1.15, velocity.y + 2.6 + hash(index + 3, serial) * 1.1);
-        separation.copy(radial).multiplyScalar(.065).addScaledVector(strikeDirection, .035);
-      } else {
-        piece.normals.forEach((normal, i) => separation.addScaledVector(normal, piece.signs[i]));
-        separation.normalize();
-        velocity.copy(separation).multiplyScalar(weaponId === 'great-dao' ? 2.05 : 1.6).addScaledVector(strikeDirection, weaponId === 'great-dao' ? 2.4 : 1.45);
-        velocity.y += .85 + hash(index + 3, serial) * .4;
-        separation.multiplyScalar(weaponId === 'great-dao' ? .055 : .045);
-      }
+      piece.normals.forEach((normal, i) => separation.addScaledVector(normal, piece.signs[i]));
+      separation.normalize();
+      velocity.copy(separation).multiplyScalar(weaponId === 'great-dao' ? 2.05 : 1.6).addScaledVector(strikeDirection, weaponId === 'great-dao' ? 2.4 : 1.45);
+      velocity.y += .85 + hash(index + 3, serial) * .4;
+      separation.multiplyScalar(weaponId === 'great-dao' ? .055 : .045);
       mesh.position.add(separation);
       initialCenters.push(mesh.position.toArray());
-      const spin = new THREE.Vector3(hash(index + 11, serial) - .5, hash(index + 19, serial) - .5, hash(index + 23, serial) - .5).multiplyScalar(blunt ? 11 : 4.4);
+      const spin = new THREE.Vector3(hash(index + 11, serial) - .5, hash(index + 19, serial) - .5, hash(index + 23, serial) - .5).multiplyScalar(4.4);
       session.fragments.push({ mesh, velocity, spin, extent, rest: false, bounces: 0 });
       session.group.add(mesh);
     });
     for (const material of snapshot.materials) material.dispose();
     session.materials = [presentationMaterial];
     ownedMaterials.add(presentationMaterial);
-    const dustCount = blunt ? 30 : 8;
-    session.dustMesh.material.color.setHex(blunt ? 0x8b8470 : 0x9ca295);
-    session.dustMesh.material.opacity = blunt ? .5 : .32;
+    const dustCount = 8;
+    session.dustMesh.material.color.setHex(0x9ca295);
+    session.dustMesh.material.opacity = .32;
     for (let i = 0; i < dustCount; i++) {
       const radial = new THREE.Vector3(hash(i + 30, serial) - .5, hash(i + 37, serial) * .7, hash(i + 41, serial) - .5).normalize();
       const position = contact.clone().addScaledVector(radial, .08);
-      const velocity = radial.clone().multiplyScalar(blunt ? 1.8 : .8).addScaledVector(strikeDirection, blunt ? 1.4 : .5);
-      velocity.y += blunt ? 1.3 : .6;
-      const particle = { position, velocity, size: (blunt ? .09 : .035) * (.6 + hash(i + 47, serial)), rotation: hash(i + 51, serial) * 6 };
+      const velocity = radial.clone().multiplyScalar(.8).addScaledVector(strikeDirection, .5);
+      velocity.y += .6;
+      const particle = { position, velocity, size: .035 * (.6 + hash(i + 47, serial)), rotation: hash(i + 51, serial) * 6 };
       session.dust.push(particle);
       session.dustMesh.setMatrixAt(i, dustMatrix(particle));
     }
@@ -593,7 +503,7 @@ export function createEnemyFinishers(scene, { maxSessions = 12, maxFragments = 3
         material.depthWrite = scale > .45;
       }
       if (session.age < .65) {
-        const dustScale = 1 + session.age * (session.kind === 'shatter' ? 1.9 : .6);
+        const dustScale = 1 + session.age * .6;
         session.dust.forEach((particle, j) => {
           particle.velocity.y -= 3.8 * step;
           particle.position.addScaledVector(particle.velocity, step);
@@ -601,7 +511,7 @@ export function createEnemyFinishers(scene, { maxSessions = 12, maxFragments = 3
           particle.rotation += step * 1.8;
           session.dustMesh.setMatrixAt(j, dustMatrix(particle, dustScale));
         });
-        session.dustMesh.material.opacity = (session.kind === 'shatter' ? .5 : .32) * (1 - session.age / .65);
+        session.dustMesh.material.opacity = .32 * (1 - session.age / .65);
         session.dustMesh.instanceMatrix.needsUpdate = true;
       } else session.dustMesh.count = 0;
     }
@@ -619,7 +529,6 @@ export function createEnemyFinishers(scene, { maxSessions = 12, maxFragments = 3
       activeDustParticles: sessions.reduce((count, session) => count + session.dustMesh.count, 0),
       pooledSessions: sessionPool.length, pooledFragmentMeshes: meshPool.length,
       ownedGeometries: ownedGeometries.size, ownedMaterials: ownedMaterials.size,
-      cachedFractureTemplates: fractureTemplates.size,
       activeFragmentDrawCalls: sessions.reduce((count, session) => count + session.fragments.length, 0),
       maxSessions, maxFragments, totalCreated, totalReleased,
       lastFinisher: history.at(-1) ?? null,
@@ -632,11 +541,9 @@ export function createEnemyFinishers(scene, { maxSessions = 12, maxFragments = 3
     clear();
     for (const session of sessionPool) { session.dustMesh.dispose(); session.dustMesh.material.dispose(); }
     sessionPool.length = 0; meshPool.length = 0;
-    for (const templates of fractureTemplates.values()) for (const template of templates) template.geometry.dispose();
-    fractureTemplates.clear();
     emptyGeometry.dispose(); poolMaterial.dispose(); dustGeometry.dispose();
     destroyed = true;
   }
 
-  return { breakEnemy, prepareRig, update, clear, diagnostics, destroy };
+  return { breakEnemy, update, clear, diagnostics, destroy };
 }

@@ -14,7 +14,7 @@ import { referenceWeaponAttackProfiles } from '../src/sourceMotion/data.js';
 const close = (actual, expected, epsilon = 1e-7) =>
   assert.ok(Math.abs(actual - expected) <= epsilon, `${actual} differs from ${expected}`);
 
-test('all four weapons use five original profiles without changing sampler identities', () => {
+test('all registered weapons use five original profiles without changing sampler identities', () => {
   assert.equal(SOURCE_ATTACK_COUNT, 5);
   for (const [id, family] of Object.entries(SOURCE_WEAPON_FAMILIES)) {
     for (let combo = 0; combo < SOURCE_ATTACK_COUNT; combo++) {
@@ -31,12 +31,10 @@ test('all four weapons use five original profiles without changing sampler ident
   assert.equal(getSourceActionProfile('dual-dao', 'dead'), getSourceActionProfile('dual-dao', 'death'));
 });
 
-test('hammer fallback explicitly identifies original halberd provenance', () => {
-  const hammer = getSourceMotionProvenance('great-hammer');
-  assert.equal(hammer.family, 'halberd');
-  assert.equal(hammer.fallback, true);
-  assert.match(hammer.provenance, /no hammer/);
-  assert.equal(getSourceMotionProvenance('great-dao').fallback, false);
+test('registered weapons use their source motion without fallback', () => {
+  for (const id of Object.keys(SOURCE_WEAPON_FAMILIES)) {
+    assert.equal(getSourceMotionProvenance(id).fallback, false);
+  }
 });
 
 test('ordinary durations use initial inventory atkspd and fixed queued recovery speed', () => {
@@ -93,7 +91,7 @@ test('Fixed-origin first interval can be provided separately from the display de
 });
 
 test('attack expiry enables queued recovery at zero and discards evaluation overflow', () => {
-  const clock = createSourceAttackClock('great-hammer', 1);
+  const clock = createSourceAttackClock('great-dao', 1);
   advanceSourceAttackClock(clock, 0);
   const boundary = advanceSourceAttackClock(clock, clock.timing.attackSeconds + .2);
   assert.equal(boundary.segment, 'recovery');

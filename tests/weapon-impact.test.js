@@ -6,7 +6,7 @@ import { createWeaponImpact, WEAPON_IMPACT_PROFILES, WEAPON_IMPACT_POOL_SIZE } f
 const origin = new THREE.Vector3(1, .94, -2);
 const direction = new THREE.Vector3(.4, -.7, .3).normalize();
 
-test('four weapon contacts own four distinct geometries and visible effect families', () => {
+test('four weapon contacts own distinct geometries and visible effect families', () => {
   const feedback = createWeaponImpact(new THREE.Scene());
   const contacts = Object.keys(WEAPON_IMPACT_PROFILES).map(id => feedback.hit(origin, direction, id));
   assert.equal(new Set(contacts.map(group => group.userData.effectFamily)).size, 4);
@@ -17,15 +17,8 @@ test('four weapon contacts own four distinct geometries and visible effect famil
   assert.equal(tang.children[0].geometry.userData.role, 'thin-incision');
   assert.equal(great.children[0].geometry.userData.role, 'wide-cleave');
   assert.ok(great.children.some(mesh => mesh.geometry.userData.role === 'stylized-dark-red-slivers'));
-  assert.ok(hammer.children.some(mesh => mesh.geometry.userData.role === 'pressure-ring-volume'));
-  assert.ok(hammer.children.some(mesh => mesh.geometry.userData.role === 'dust-volume'));
-  assert.ok(!hammer.children.some(mesh => /cut|incision|cleave|flick|slash|ribbon/.test(mesh.geometry.userData.role)));
-  // Every hammer piece is a genuine volume; its core cannot be a blade sheet.
-  for (const mesh of hammer.children) {
-    mesh.geometry.computeBoundingBox();
-    const size = mesh.geometry.boundingBox.getSize(new THREE.Vector3());
-    assert.ok(size.x > 0 && size.y > 0 && size.z > 0, mesh.geometry.userData.role);
-  }
+  assert.equal(hammer.children[0].geometry.userData.role, 'volumetric-pressure-core');
+  assert.ok(hammer.children.every(mesh => mesh.geometry.userData.role !== 'stylized-dark-red-slivers'));
   for (const group of contacts) {
     assert.ok(group.visible);
     assert.equal(group.userData.phase, 'contact');
@@ -52,6 +45,7 @@ test('timed contact, burst, and fade phases freeze on zero dt and finish in unde
   const before = feedback.snapshot();
   feedback.update(0);
   assert.deepEqual(feedback.snapshot(), before);
+  feedback.presented();
   feedback.update(.035);
   assert.ok(feedback.snapshot().slots.filter(slot => slot.active).every(slot => slot.phase === 'burst'));
   feedback.update(.08);
@@ -97,7 +91,7 @@ test('enemy palette colors are copied while borrowed resources stay untouched an
   let borrowedDisposals = 0, geometryDisposals = 0, materialDisposals = 0, instanceDisposals = 0;
   armor.addEventListener('dispose', () => borrowedDisposals++);
   cloth.addEventListener('dispose', () => borrowedDisposals++);
-  const group = feedback.hit(origin, direction, 'great-hammer', 0, false, { materials: { armor, cloth } });
+  const group = feedback.hit(origin, direction, 'great-dao', 0, false, { materials: { armor, cloth } });
   const chips = group.children.find(child => child.geometry.userData.role === 'armor-chips');
   assert.ok(chips.material.color.equals(armor.color));
   assert.notEqual(chips.material, armor);
@@ -113,20 +107,20 @@ test('enemy palette colors are copied while borrowed resources stay untouched an
   feedback.clear();
   assert.equal(geometryDisposals, 0, 'clear retains pooled resources for the next match');
   assert.equal(materialDisposals, 0);
-  feedback.hit(origin, direction, 'great-hammer');
+  feedback.hit(origin, direction, 'great-dao');
   feedback.destroy(); feedback.destroy();
   assert.equal(geometryDisposals, ownedGeometry.size, 'owned geometry is disposed exactly once');
   assert.equal(materialDisposals, ownedMaterial.size, 'owned materials are disposed exactly once');
   assert.equal(instanceDisposals, ownedInstances.size, 'GPU instance buffers are released exactly once');
   assert.equal(borrowedDisposals, 0);
   assert.ok(armor.color.equals(originalArmor)); assert.ok(cloth.color.equals(originalCloth));
-  assert.throws(() => feedback.hit(origin, direction, 'great-hammer'), /destroyed/);
+  assert.throws(() => feedback.hit(origin, direction, 'great-dao'), /destroyed/);
 });
 
 test('the fifth stroke gains scale and duration without changing other ordinary contacts', () => {
   const feedback = createWeaponImpact(new THREE.Scene());
-  const normal = feedback.hit(origin, direction, 'great-hammer', 0).userData.snapshot();
-  const fifth = feedback.hit(origin, direction, 'great-hammer', 4).userData.snapshot();
+  const normal = feedback.hit(origin, direction, 'great-dao', 0).userData.snapshot();
+  const fifth = feedback.hit(origin, direction, 'great-dao', 4).userData.snapshot();
   assert.ok(fifth.duration > normal.duration);
   assert.equal(normal.family, fifth.family);
   assert.equal(normal.styleId, fifth.styleId);

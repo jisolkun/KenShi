@@ -5,7 +5,7 @@ import { createCharacter, poseCharacter } from '../src/characters.js';
 import { getSourceAttackProfile } from '../src/sourceMotion/catalogue.js';
 import { sampleReferenceCurveMotion } from '../src/sourceMotion/sampler.js';
 
-const weapons = ['dual-dao', 'tang-dao', 'great-dao', 'great-hammer'];
+const weapons = ['dual-dao', 'tang-dao', 'great-dao'];
 const sourceBones = rig => [rig.body, rig.chest, rig.head,
   ...rig.arms.flatMap(arm => [arm.shoulder, arm.elbow, arm.wrist]),
   ...rig.legs.flatMap(leg => [leg.hip, leg.knee, leg.foot])];
@@ -98,7 +98,7 @@ test('pause freezes source joints and blend clocks, and weapon switches reset th
   for (let i = 0; i < 5; i++) poseCharacter(rig, { state: 'run', time: 10 + i, dt: 0, speedFactor: 7 });
   assert.deepEqual(transforms(rig), before);
   assert.deepEqual(rig.sourceMotionDebug, debug);
-  rig.setWeapon('great-hammer');
+  rig.setWeapon('great-dao');
   assert.notEqual(rig.sourceMotionState, runtime);
   assert.equal(rig.sourceMotionDebug.state, 'idle');
   assert.equal(rig.sourceMotionDebug.rawTime, 0);
@@ -120,46 +120,5 @@ test('hurt and roll release source ownership and locomotion resumes afterward', 
     assert.equal(rig.sourcePose.active, true);
     assert.equal(rig.sourceMotionDebug.state, 'run');
     finiteRig(rig);
-  }
-});
-
-test('authored hammer keeps both hands on its shaft and the solid head above the floor', () => {
-  const rig = createCharacter('hero');
-  rig.setWeapon('great-hammer');
-  for (const state of ['idle', 'walk', 'run', 'attack']) {
-    for (const combo of state === 'attack' ? [0, 1, 2, 3, 4] : [0]) {
-      for (let i = 0; i <= 100; i++) {
-        poseCharacter(rig, { state, combo, phase: i / 100, time: i / 60,
-          dt: 1 / 60, speedFactor: 7, immediate: true });
-        assert.equal(rig.sourceMotionDebug.authored, true);
-        assert.ok(rig.sourcePose.offhandGap < .005,
-          `hammer ${state} ${combo + 1} phase ${i / 100}: support hand leaves the shaft`);
-        const head = rig.weaponBlades().find(frame => frame.headCenter);
-        assert.ok(head.headMinY >= -.001,
-          `hammer ${state} ${combo + 1} phase ${i / 100}: solid head penetrates the floor`);
-        finiteRig(rig);
-      }
-    }
-  }
-});
-
-test('hammer waist accents retain native pelvis, head and legs without altering the evaluator cache', () => {
-  const rig = createCharacter('hero');
-  rig.setWeapon('great-hammer');
-  for (let combo = 0; combo < 5; combo++) for (const phase of [.13, .4, .67, .91]) {
-    const profile = getSourceAttackProfile('great-hammer', combo);
-    const cached = sampleReferenceCurveMotion(profile, phase);
-    const frame = cached.frame.slice(), attachments = cached.attachments.slice();
-    poseCharacter(rig, { state: 'attack', combo, phase, dt: 1 / 60, immediate: true });
-    assert.deepEqual(cached.frame, frame, 'authored hands must not mutate cached source frames');
-    assert.deepEqual(cached.attachments, attachments, 'authored shaft must not mutate cached source mounts');
-    for (const i of [0, 2, 9, 10, 11, 12, 13, 14]) {
-      const expected = new THREE.Quaternion().fromArray(frame, 3 + i * 4).normalize();
-      assert.ok(expected.angleTo(rig.sourcePose.world[i]) < 1e-6,
-        `hammer attack ${combo + 1}: authored shaft changes native pelvis, head or legs`);
-    }
-    const nativeChest = new THREE.Quaternion().fromArray(frame, 7).normalize();
-    assert.ok(nativeChest.angleTo(rig.sourcePose.world[1]) < .5,
-      'the hammer accent adds a bounded shoulder turn to the original full-body pose');
   }
 });

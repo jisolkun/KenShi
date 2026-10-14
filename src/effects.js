@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { getHammerFeedback } from './hammerFeedback.js';
 
 export function createEffects(scene, camera) {
   const objects = [], trails = [], allCached = new Set(), cache = new Map(), geometries = new Map();
@@ -236,37 +235,6 @@ export function createEffects(scene, camera) {
       emit(slivers,point,velocity,color||palette[i%palette.length],0.2+Math.random()*0.11,0.28,0.17,1,10);
     }
   }
-  // Blunt enemy contact uses the existing fixed particle passes. It never
-  // invokes the blade crescent or creates a floor ring beneath a torso hit.
-  function hammerImpact(position, headDirection, strength=1, critical=false, combo=0) {
-    const weight=THREE.MathUtils.clamp(strength,.4,2),feedback=getHammerFeedback(combo);
-    direction.copy(headDirection||zero);if(direction.lengthSq()<.001)direction.set(0,0,1);direction.normalize();
-    side.set(-direction.z,0,direction.x);if(side.lengthSq()<.001)side.set(1,0,0);side.normalize();
-    temp.crossVectors(direction,side).normalize();
-    cameraRight.set(1,0,0).applyQuaternion(camera.quaternion);cameraUp.set(0,1,0).applyQuaternion(camera.quaternion);
-    const angle=Math.atan2(direction.dot(cameraUp),direction.dot(cameraRight));
-    const starSize=.30+weight*.075;
-    // Two directional layers match the reference heavy hit: a short warm
-    // core followed by a cooler, wider star. Both use the pooled flash pass,
-    // so a crowd of victims cannot allocate a new mesh per contact.
-    emit(flashes,position,zero,0xffedc6,feedback.flashLife,starSize,starSize*.62,1,0,angle,true);
-    emit(flashes,position,zero,critical?0x9edcff:0xd9b7e8,Math.min(.20,feedback.impactLife*.82),starSize*(critical?2.25:1.72),starSize*.20,1,0,angle+.58,true);
-    if(critical)emit(flashes,position,zero,0xffffff,Math.min(.16,feedback.impactLife*.68),starSize*1.9,starSize*.13,1,0,angle-Math.PI*.46,true);
-    for(let i=0;i<(critical?10:6);i++){
-      velocity.copy(direction).multiplyScalar(feedback.dustDrive*(.5+Math.random()*.4))
-        .addScaledVector(side,(Math.random()-.5)*feedback.dustSpread*2)
-        .addScaledVector(temp,(Math.random()-.5)*feedback.dustSpread);
-      emit(slivers,position,velocity,i%2?0xbda084:0xe6c7a0,.16+Math.random()*.08,
-        .12+Math.random()*.11,.080+Math.random()*.055,1,3,0,true);
-    }
-    for(let i=0;i<(critical?6:3);i++){
-      velocity.copy(direction).multiplyScalar(feedback.dustDrive*.45)
-        .addScaledVector(side,(Math.random()-.5)*feedback.dustSpread*1.6);
-      velocity.y+=.25+Math.random()*.55;
-      emit(chips,position,velocity,i%2?0x88765d:0xc7ab7f,.22+Math.random()*.08,
-        .055,.040,.060,7,Math.random()*6.28,true);
-    }
-  }
   function death(position,fallDirection,strength=1) {
     direction.copy(fallDirection||zero);if(direction.lengthSq()>0.001)direction.normalize();point.copy(position);point.y=0.12;
     for(let i=0;i<5+Math.floor(strength);i++){
@@ -379,5 +347,5 @@ export function createEffects(scene, camera) {
     function disposeMesh(mesh){scene.remove(mesh);mesh.traverse(o=>{if(!(o.isMesh||o.isLineSegments))return;if(!disposed.has(o.geometry)){o.geometry.dispose();disposed.add(o.geometry);}for(const material of Array.isArray(o.material)?o.material:[o.material]){if(!disposed.has(material)){material.dispose();disposed.add(material);}}});}
     allCached.forEach(disposeMesh);particlePools.forEach(pool=>disposeMesh(pool.mesh));trails.forEach(trail=>disposeMesh(trail.mesh));geometries.forEach(geometry=>{if(!disposed.has(geometry))geometry.dispose();});allCached.clear();cache.clear();geometries.clear();
   }
-  return {ring,warning,groundImpact,burst,impact,hammerImpact,death,arc,ghost,swordTrail,sample,presented,update,clear,destroy};
+  return {ring,warning,groundImpact,burst,impact,death,arc,ghost,swordTrail,sample,presented,update,clear,destroy};
 }

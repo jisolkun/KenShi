@@ -1,9 +1,8 @@
 import { Euler, Quaternion, Vector3 } from 'three';
 
 // Cha_Control.AttackOn and Ef_swing1/Ef_splash from the supplied source.
-// Hammer has no original family; it uses the source's heavy two-handed polearm.
 export const SOURCE_ATTACK_WORLD_SCALE = 12.5;
-const families = Object.freeze({ 'dual-dao': 'dual', 'tang-dao': 'blade', 'great-dao': 'blade', 'great-hammer': 'halberd' });
+const families = Object.freeze({ 'dual-dao': 'dual', 'tang-dao': 'blade', 'great-dao': 'blade' });
 const f = Math.fround;
 const DEG = Math.PI / 180;
 
@@ -28,7 +27,7 @@ function splash(delay = 0, distance = .1) {
 
 export function getSourceAttackRule(weaponId, combo, atkspd = 0) {
   const family = families[weaponId] ?? weaponId;
-  if (!['blade', 'dual', 'halberd'].includes(family)) return null;
+  if (!['blade', 'dual'].includes(family)) return null;
   const index = ((Math.floor(combo) % 5) + 5) % 5;
   let rule;
   if (family === 'dual') {
@@ -58,8 +57,6 @@ export function getSourceAttackRule(weaponId, combo, atkspd = 0) {
     if (index === 1) volumes.push(splash(.5));
     rule = { startForce, rising, volumes };
   }
-  // A new hammer slam uses the original splash emitter and native clocks.
-  if(weaponId==='great-hammer'&&index===3)rule.volumes.push(splash(rule.volumes[0].delay+.05));
   // The original adjusts every ordinary descriptor, including polearm splash.
   for (const descriptor of rule.volumes) {
     descriptor.delay = Math.max(0, descriptor.delay - atkspd);

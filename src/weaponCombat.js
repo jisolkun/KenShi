@@ -50,47 +50,6 @@ export function clipBladeSweep(current, previous, phase, previousPhase, window) 
   return { current: at(to), previous: at(from) };
 }
 
-// The hammer's damaging point is its actual head marker. Clip this point path
-// before testing contacts so neither the chamber nor the recovery can hit.
-export function clipHammerHeadSweep(current, previous, phase, previousPhase, window) {
-  const [start, end] = window;
-  if (!previous || !Number.isFinite(previousPhase) || phase <= previousPhase)
-    return phase >= start && phase <= end ? { current, previous: null } : null;
-  const from = Math.max(start, previousPhase), to = Math.min(end, phase);
-  if (to < from || phase < start || previousPhase > end) return null;
-  const at = p => p === phase ? current : p === previousPhase ? previous
-    : previous.clone().lerp(current, (p - previousPhase) / (phase - previousPhase));
-  return { current: at(to), previous: at(from) };
-}
-
-// A compact upright cylinder approximates the visible hammer head, not its
-// handle. Restrict the centre path to the valid vertical interval *first*, then
-// find its horizontal contact in that same time interval. The .19m default
-// half-height preserves the model's .38m thickness instead of turning its .27m
-// horizontal radius into extra overhead reach. Callers may pass the real head's
-// projected half-height after rotation; this remains a conservative prototype.
-export function hammerHeadSweepContains(current, previous, target, enemyRadius = 0,
-  headRadius = .27, headHalfHeight = .19) {
-  const start = previous || current;
-  const low = (target.minY ?? .18) - headHalfHeight;
-  const high = (target.maxY ?? 1.9) + headHalfHeight;
-  const dx = current.x - start.x, dy = current.y - start.y, dz = current.z - start.z;
-  let from = 0, to = 1;
-  if (Math.abs(dy) < 1e-12) {
-    if (start.y < low || start.y > high) return false;
-  } else {
-    const a = (low - start.y) / dy, b = (high - start.y) / dy;
-    from = Math.max(0, Math.min(a, b)); to = Math.min(1, Math.max(a, b));
-    if (to < from) return false;
-  }
-  const length = dx * dx + dz * dz;
-  const projected = length ? ((target.x - start.x) * dx + (target.z - start.z) * dz) / length : from;
-  const t = Math.max(from, Math.min(to, projected));
-  const x = start.x + dx * t - target.x, z = start.z + dz * t - target.z;
-  const radius = enemyRadius + headRadius;
-  return x * x + z * z <= radius * radius + 1e-12;
-}
-
 // Sample the physical blade's swept surface between rendered poses. There is
 // no invisible radial damage outside the heel-to-tip trajectory.
 export function bladeSweepContains(frame,previous,target,radius,width=.08) {

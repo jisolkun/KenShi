@@ -2,8 +2,9 @@
 import { getReviewedAttack } from './choreography/index.js';
 import { createSourceWeaponMoves } from './sourceMotion/catalogue.js';
 import { getSourceAttackRule } from './sourceMotion/combat.js';
+import {HAMMER_ID,HAMMER_WEAPON} from './customHammer/definition.js';
 export const DEFAULT_WEAPON_ID = 'dual-dao';
-export const UNLOCKED_WEAPON_IDS = new Set(['dual-dao', 'tang-dao', 'great-dao', 'great-hammer']);
+export const UNLOCKED_WEAPON_IDS = new Set(['dual-dao', 'tang-dao', 'great-dao', HAMMER_ID]);
 export function isWeaponUnlocked(id) { return UNLOCKED_WEAPON_IDS.has(id); }
 export const WEAPON_TYPES = [
   {
@@ -189,26 +190,12 @@ export const WEAPON_TYPES = [
       {name:'踏地重劈',damage:70,knockback:1.90,hitstop:.036,lunge:.55,recoverAt:.95},
     ],
   },
-  {
-    id: 'great-hammer', name: '大锤', category: '重兵', grip: 'twohand',
-    tagline: '横抡开阵，震地碎石',
-    description: '全身轮锤大幅横扫，反向斜砸碎石，借惯性回身扫开两翼，再高举重锤震地破阵。短起手连续挥击，宽面冲击击退成片敌人，砸地掀起碎石、尘浪与放射地裂。',
-    effectColor: 0xffcc7a, effectAccent: 0xfff0cb,
-    stats: { speed: 4, power: 5, reach: 5 },
-    moves: [
-      {name:'横抡开阵',damage:42,knockback:1.28,hitstop:.012,lunge:.46,recoverAt:.91},
-      {name:'斜砸碎石',damage:50,knockback:1.50,hitstop:.014,lunge:.28,recoverAt:.90},
-      {name:'回身狂扫',damage:58,knockback:1.75,hitstop:.018,lunge:.54,recoverAt:.93},
-      {name:'震地破阵',damage:92,knockback:2.65,hitstop:.028,lunge:.30,recoverAt:.95},
-    ],
-  }
 ];
 export const WEAPONS = WEAPON_TYPES;
 const reviewedMoveNames = {
  'dual-dao':['右斜劈','左接斩','反手撩切','错锋双斩'],
  'tang-dao':['踏步斜斩','转胯横斩','提膝上撩','过顶落劈'],
  'great-dao':['踏步横扫','反向斜劈','回身大扫','踏地重劈'],
- 'great-hammer':['横抡开阵','斜砸碎石','回身狂扫','震地破阵'],
 };
 const reviewedDescriptions = {
  'tang-dao':'双手长柄直刃，踏步转胯带动斜斩、宽横斩、上撩与过顶落劈，以大幅刀路扫开前方敌阵。',
@@ -221,12 +208,10 @@ for(const weapon of WEAPONS){
     Object.assign(move,{name:reviewedMoveNames[weapon.id][combo],duration:action.duration,contact:action.contact,active:action.active,reach:action.reach,shape:action.kind==='thrust'?'thrust':['chop','smash'].includes(action.kind)?'crush':'arc',width:action.width,halfAngle:action.halfAngle??(weapon.id==='tang-dao'?1.6:action.kind==='thrust'?.28:.95),reviewed:true});
   });
 }
-const weaponById = new Map(WEAPONS.map(weapon => [weapon.id, weapon]));
 const sourceNames = {
  'dual-dao':['交锋连斩','双锋回切','腾身撩刃','疾步破阵','双月旋杀'],
  'tang-dao':['转身横斩','反手撩切','踏步回斩','破阵直刺','腾身重斩'],
  'great-dao':['重刃开阵','回身撩刀','踏步大斩','蓄势突刺','腾身断阵'],
- 'great-hammer':['横抡开阵','反手斜砸','回身上挑','腾身震地','回旋破阵'],
 };
 for (const weapon of WEAPONS) {
  if(['tang-dao','great-dao'].includes(weapon.id))weapon.grip='single';
@@ -236,10 +221,10 @@ for (const weapon of WEAPONS) {
   const end=Math.max(...rule.volumes.map(v=>v.delay+(v.type==='splash'?.2:.15)));
   return {...move,name:sourceNames[weapon.id][index],hitstop:0,
    contact:start/move.duration,active:[start/move.duration,end/move.duration],
-   shape:rule.volumes.some(v=>v.type==='thrust')?'thrust':weapon.id==='great-hammer'?'crush':'arc'};
+   shape:rule.volumes.some(v=>v.type==='thrust')?'thrust':'arc'};
  });
- weapon.description=weapon.id==='great-hammer'
-  ?'踏步转腰带动五式抡锤，横扫接反砸、回身上挑与腾身震地，借全身惯性连续破阵。'
-  :'持械走跑随肩胯摆动，五式普攻由脚步、转腰、腾身与双臂共同发力，挥击与收势连续衔接。';
+ weapon.description='持械走跑随肩胯摆动，五式普攻由脚步、转腰、腾身与双臂共同发力，挥击与收势连续衔接。';
 }
+WEAPONS.push(HAMMER_WEAPON);
+const weaponById = new Map(WEAPONS.map(weapon => [weapon.id, weapon]));
 export function getWeapon(id) { return weaponById.get(id) || weaponById.get(DEFAULT_WEAPON_ID); }

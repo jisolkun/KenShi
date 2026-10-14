@@ -7,14 +7,15 @@ import { SOURCE_WEAPON_BINDINGS } from '../src/sourceMotion/catalogue.js';
 import { createSourceAttackVolumes, advanceSourceAttackVolumes,
   getSourceAttackRule, sourceVolumeGeometry, sourceVolumeContains } from '../src/sourceMotion/combat.js';
 
+const sourceWeapons = WEAPONS.filter(weapon => !weapon.customMotion);
 const root = (x = 0, z = 0, facing = 0) => ({ pos: new Vector3(x, 0, z), facing });
 const target = (x, z, y = 0, radius = .3) => ({ pos: new Vector3(x, y, z), radius, colliderHeight: .9 });
 const close = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-8,
   `${actual} differs from ${expected}`);
 
-test('all twenty equipped attacks hit a forward enemy during their actual source emitter clocks', () => {
-  assert.equal(WEAPONS.length, 4);
-  for (const weapon of WEAPONS) {
+test('all fifteen source attacks hit a forward enemy during their actual source emitter clocks', () => {
+  assert.equal(sourceWeapons.length, 3);
+  for (const weapon of sourceWeapons) {
     assert.equal(weapon.moves.length, 5, weapon.id);
     for (const [combo, move] of weapon.moves.entries()) {
       assert.equal(move.sourceMotion, true);
@@ -47,7 +48,6 @@ test('normal slash families retain the uploaded sphere sizes and forward offsets
     ['dual-dao', 1.7, .75, .85],
     ['tang-dao', 2, .6875, 1],
     ['great-dao', 2, .6875, 1],
-    ['great-hammer', 2.6, .75, 1.3],
   ];
   for (const [id, radius, height, forward] of expected) {
     const geometry = sourceVolumeGeometry(getSourceAttackRule(id, 0).volumes[0], root());
@@ -60,7 +60,7 @@ test('normal slash families retain the uploaded sphere sizes and forward offsets
 });
 
 test('sphere contacts use three dimensional source volume boundaries and the enemy body radius', () => {
-  for (const weapon of WEAPONS) for (const combo of [0, 1, 2, 3, 4]) {
+  for (const weapon of sourceWeapons) for (const combo of [0, 1, 2, 3, 4]) {
     const actor = root();
     for (const descriptor of getSourceAttackRule(weapon.id, combo).volumes) {
       const geometry = sourceVolumeGeometry(descriptor, actor);
@@ -84,7 +84,7 @@ test('sphere contacts use three dimensional source volume boundaries and the ene
 });
 
 test('source slash damage can reach beside and behind its root inside the sphere', () => {
-  for (const id of ['dual-dao', 'tang-dao', 'great-dao', 'great-hammer']) {
+  for (const id of ['dual-dao', 'tang-dao', 'great-dao']) {
     const slash = getSourceAttackRule(id, 0).volumes[0];
     assert.equal(sourceVolumeContains(slash, target(0, -.7), root()), true, id);
     assert.equal(sourceVolumeContains(slash, target(1.7, .8), root()), true, id);
@@ -112,7 +112,7 @@ test('all source emitter collision geometry rotates and translates with its root
     const p = victim.pos.clone().applyAxisAngle(new Vector3(0, 1, 0), yaw).add(actor.pos);
     return { ...victim, pos: p };
   };
-  for (const weapon of WEAPONS) for (let combo = 0; combo < 5; combo++) {
+  for (const weapon of sourceWeapons) for (let combo = 0; combo < 5; combo++) {
     for (const descriptor of getSourceAttackRule(weapon.id, combo).volumes) {
       for (const victim of [target(0, 1.55), target(-.8, -.7), target(1.2, 2.2), target(8, 8), target(0, 1, 5)]) {
         assert.equal(sourceVolumeContains(descriptor, rotate(victim), actor),
