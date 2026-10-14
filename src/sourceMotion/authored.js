@@ -202,9 +202,9 @@ function constrainTorsoEnvelope(primary,axis,hips,chestQ,strength=1) {
   const normalized=new THREE.Vector3(local.x/radii.x,local.y/radii.y,local.z/radii.z);
   const radius=Math.max(normalized.length(),1e-4),u=THREE.MathUtils.clamp((1.25-radius)/.25,0,1);
   // Start the lift before contact with the envelope and ease it to a
-  // predictable 16% margin. This keeps the wrist outside the torso without
+  // predictable 30% margin. This keeps the wrist outside the torso without
   // introducing a derivative jump at the old hard projection boundary.
-  const smooth=u*u*(3-2*u),desiredRadius=1+.16*smooth;
+  const smooth=u*u*(3-2*u),desiredRadius=1+.30*smooth;
   if(radius>=desiredRadius)continue;
   const scale=desiredRadius/radius;
   const desired=center.clone().add(new THREE.Vector3(local.x*scale,local.y*scale,local.z*scale));
@@ -261,7 +261,7 @@ export function sampleSourceStyledWeapon(weaponId,combo,profile,phase,sampled) {
   ? THREE.MathUtils.clamp((attackEnd-phase)/.08,0,1)
   : THREE.MathUtils.clamp((1-phase)/.08,0,1);
  const torsoBlend=(torsoStart*torsoStart*(3-2*torsoStart))*(torsoEnd*torsoEnd*(3-2*torsoEnd));
- if(index!==3&&torsoBlend>0)constrainTorsoEnvelope(primary,axis,hips,chestQ,torsoBlend);
+ constrainTorsoEnvelope(primary,axis,hips,chestQ,Math.max(torsoBlend,.32));
  if(index===3){
   const guardIn=THREE.MathUtils.clamp(phase/.10,0,1),guardOut=THREE.MathUtils.clamp((.42-phase)/.10,0,1);
   const guard=(guardIn*guardIn*(3-2*guardIn))*(guardOut*guardOut*(3-2*guardOut));
