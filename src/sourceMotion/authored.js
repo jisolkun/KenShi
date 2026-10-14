@@ -11,43 +11,40 @@ const down=new THREE.Vector3(0,-1,0), foreAxis=new THREE.Vector3(0,-.35,.015).no
 // wide returning circle.  The last carry is exactly the first one so a queued
 // sixth clock can never teleport at the combo boundary.
 const carries=[
- [.16,.39,.52, 1.18,-.10], // ready: low guard, head forward-left
- [-.18,.46,.45,-1.56, .06], // after horizontal sweep, opposite shoulder
- [.14,.42,.50, 0.36,-.38], // after diagonal smash, lifted inside guard
- [.08,.48,.52, 2.03, .58], // after rising return, rear shoulder
- [-.03,.53,.42,-1.13, .30], // after overhead drop, low outside guard
- [.16,.39,.52, 1.18,-.10],
+ [.05,.55,.70, .72,-.24],
+ [-.28,.57,.66,-1.68,.14],
+ [.16,.49,.58,.30,.15],
+ [-.10,.76,.57,1.74,.82],
+ [.30,.55,.70,-2.34,-.22],
+ [.05,.55,.70, .72,-.24],
 ].map(row=>[...row,0,0,0]);
-// Each load is a recognisable silhouette rather than a small variation of the
-// same swing.  The first/third/fifth are horizontal power circles; the second
-// and fourth deliberately travel through a tall vertical plane.
 const loads=[
- [.33,.72,.41, 2.45, .16,.18,-.08,-.10], // shoulder-high wind-up, left sweep
- [-.07,.64,.26,-1.35, 1.43,-.14,-.16,-.10], // high right chamber
- [-.32,.33,.46,-2.42,-.18,-.26, .10, .10], // low reverse scoop
- [.10,.67,.38, .95, 1.46, .18,-.16, .08], // overhead chamber
- [.25,.65,.46,-2.72, .16,-.31, .03, .11], // coiled spin
+ [-.26,.76,.66,2.18,.18,-.04,.14,-.05],
+ [.34,.80,.55,-1.02,1.40,.05,.12,.08],
+ [-1.20,.38,.74,-2.85,-.62,-.08,-.08,.06],
+ [.18,.94,.58,1.14,1.42,.02,.20,-.03],
+ [.42,.69,.58,-2.86,.10,.10,.04,.09],
 ];
 const contacts=[
- [.10,.42,.53, .18,-.08,-.14, .10, .08], // broad horizontal impact
- [.09,.41,.46, .22,-.66, .12,-.12, .07], // diagonal ground impact
- [.06,.38,.52, .02, .50, .17,-.10,-.08], // rising backhand impact
- [-.01,.46,.49,-.12,-.88,-.16, .24,-.10], // overhead ground impact
- [.08,.43,.54,-.16, .08,-.24, .10, .11], // returning horizontal impact
+ [.03,.55,.93,.08,-.04,.08,-.12,.05],
+ [.02,.52,.62,-.10,-.76,-.10,.02,-.06],
+ [.75,.50,.98,.68,.56,.12,.10,.08],
+ [.00,.65,.60,-.16,-1.18,-.03,-.18,-.04],
+ [.02,.53,.89,-.38,-.16,.14,-.08,.10],
 ];
 const followThrough=[
- [-.24,.45,.42,-1.82, .10,-.21, .02, .06],
- [.05,.48,.42, .70,-.30, .18,-.08, .06],
- [.23,.45,.40, 2.02, .60, .19,-.15,-.10],
- [-.19,.47,.36,-.62,-.56,-.25, .18,-.12],
- [-.22,.48,.43, 2.54, .14,-.33, .03, .10],
+ [.38,.62,.62,-1.56,.06,.03,-.16,.04],
+ [.14,.68,.72,.78,.20,-.06,.11,-.08],
+ [-.62,.61,.82,2.20,.52,.05,.12,-.10],
+ [-.22,.78,.70,-.70,-.25,-.05,-.20,.05],
+ [-.37,.58,.68,2.38,.06,.11,-.10,.09],
 ];
 const rebounds=[
- [-.13,.44,.42,-1.88, .17,-.10,-.02, .03],
- [.08,.51,.35, 1.15, .35, .08,-.02, 0],
- [.10,.47,.40, 1.86, .69, .08,-.10,-.03],
- [-.03,.51,.34,-1.18, .34,-.12,-.03, 0],
- [-.08,.47,.43, 2.34, .20,-.12,-.02, .03],
+ [.25,.60,.68,-1.90,.12,.02,-.08,.02],
+ [.05,.65,.58,1.38,.36,-.04,.08,-.02],
+ [.22,.66,.68,2.10,.62,.05,.05,-.06],
+ [.25,.58,.68,-2.15,-.10,-.03,-.10,.02],
+ [-.18,.60,.66,2.58,.17,.08,-.07,.04],
 ];
 
 // Shape-preserving Hermite tangents carry momentum through the contact key.
@@ -100,6 +97,38 @@ function torsoScore(point,hips,chestQ) {
  const dx=local.x/.34,dy=(local.y-.30)/.42,dz=local.z/.225;
  return dx*dx+dy*dy+dz*dz;
 }
+function applyHammerChestAccent(frame,index,profile,phase,row){
+ const end=profile.clipBoundaries?.[0]?.phase??1;if(phase>end)return;
+ const u=THREE.MathUtils.clamp(phase/end,0,1),weight=Math.sin(Math.PI*u);
+ const yaw=[.12,-.14,.17,-.11,.19][index]*weight;
+ const pitch=[.02,.05,-.03,.10,.01][index]*weight;
+ const roll=[.03,-.02,.05,.02,-.04][index]*weight;
+ const chest=new THREE.Quaternion().fromArray(frame,7).normalize();
+ chest.premultiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch,yaw,roll,'YXZ'))).normalize();
+ if(row){
+  const swing=new THREE.Vector3(row[0],row[1]-.36,row[2]).normalize();
+  const local=swing.applyQuaternion(chest.clone().invert());
+  const activation=THREE.MathUtils.clamp((.36-local.z)/.34,0,1);
+  if(activation>0){
+   const smooth=activation*activation*(3-2*activation);
+   const theta=THREE.MathUtils.clamp(Math.atan2(local.x,local.z),-.20,.20)*smooth;
+   chest.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0,theta,0,'YXZ'))).normalize();
+  }
+ }
+ chest.toArray(frame,7);
+}
+function segmentTorsoClearance(a,b,hips,chestQ){
+ const inverse=chestQ.clone().invert();let minimum=Infinity;
+ // Sample the actual arm centreline against a padded chest capsule. The
+ // rendered forearm has radius, so the proxy is deliberately wider than the
+ // visual rib mesh and leaves a margin before a pole is accepted.
+ for(let n=1;n<=8;n++){
+  const point=a.clone().lerp(b,n/8).sub(hips).applyQuaternion(inverse);
+  const score=(point.x/.38)**2+((point.y-.32)/.52)**2+(point.z/.30)**2;
+  minimum=Math.min(minimum,score);
+ }
+ return minimum;
+}
 function writeArm(frame,index,shoulder,target,chestQ,weaponQ,hips,maxReach=armReach) {
  const vector=target.clone().sub(shoulder),length=THREE.MathUtils.clamp(vector.length(),.025,maxReach);
  const axis=vector.normalize();
@@ -120,7 +149,9 @@ function writeArm(frame,index,shoulder,target,chestQ,weaponQ,hips,maxReach=armRe
   // Keep the elbow on its anatomical side and slightly in front of the
   // torso. A mathematically valid elbow on the centreline is the source of
   // the old forearm-through-abdomen silhouette.
-  const score=sideClear+Math.max(0,handSide)*1.1+Math.max(0,localElbow.z)*.8;
+  const upperClear=segmentTorsoClearance(shoulder,candidate,hips,chestQ),foreClear=segmentTorsoClearance(candidate,target,hips,chestQ);
+  const strict=handSide>=.20&&localElbow.z>=.20&&upperClear>=1.02&&foreClear>=1.02;
+  const score=(strict?1000:0)+Math.min(upperClear,foreClear)*12+sideClear+Math.max(0,handSide)*1.1+Math.max(0,localElbow.z)*.8;
   if(score>best){best=score;elbow=candidate;}
  }
  // Fallback is unreachable for normal source poses, but keeps malformed input finite.
@@ -194,6 +225,7 @@ export function sampleSourceStyledWeapon(weaponId,combo,profile,phase,sampled) {
  const index=Number.isInteger(profile.combo)
    ? profile.combo : Math.max(0,Math.min(4,requested));
  const row=profile.loop?null:poseAt(index,profile,phase);
+ if(!profile.loop)applyHammerChestAccent(frame,index,profile,phase,row);
  const attackEnd=profile.clipBoundaries?.[0]?.phase??1;
  const hips=new THREE.Vector3().fromArray(frame),chestQ=new THREE.Quaternion().fromArray(frame,7).normalize();
  // Keep the native source torso orientation.  The shaft is solved against
@@ -211,8 +243,6 @@ export function sampleSourceStyledWeapon(weaponId,combo,profile,phase,sampled) {
   // use the same pelvis/chest frame, while the two-bone solve absorbs the
   // torso turn without warping the authored swing path.
   primary=new THREE.Vector3(...row.slice(0,3)).add(hips);
-  if(index===3){const u=THREE.MathUtils.clamp((phase-attackEnd)/(1-attackEnd),0,1),amount=.25*u*u*(3-2*u);primary.z+=amount;}
-  if(index===3){const a=THREE.MathUtils.clamp((phase-.18)/.24,0,1),b=THREE.MathUtils.clamp((attackEnd-phase)/.24,0,1),smooth=x=>x*x*(3-2*x);primary.z+=.50*smooth(a)*smooth(b);}
  }
  const weaponQ=row?quaternion(row):new THREE.Quaternion().fromArray(frame,63).normalize(),axis=new THREE.Vector3(0,1,0).applyQuaternion(weaponQ);
  // A differentiable clearance envelope raises the paired grip instead of
@@ -237,7 +267,7 @@ export function sampleSourceStyledWeapon(weaponId,combo,profile,phase,sampled) {
   const guard=(guardIn*guardIn*(3-2*guardIn))*(guardOut*guardOut*(3-2*guardOut));
   if(guard>0)constrainTorsoEnvelope(primary,axis,hips,chestQ,.72*guard);
  }
- const reach=(index===2||index===3)?.72:armReach;
+ const reach=.74;
  constrainGrip(primary,axis,shoulders,minimumY,reach);
  const secondary=primary.clone().addScaledVector(axis,-support);
  writeArm(frame,0,shoulders[0],secondary,chestQ,weaponQ,hips,reach);
