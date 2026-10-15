@@ -5,6 +5,8 @@ const UP = new THREE.Vector3(0, 1, 0);
 const FALLBACK_DIRECTION = new THREE.Vector3(0, 0, 1);
 const LIFETIME = 2.05;
 const FADE_START = 1.2;
+const SHATTER_LIFETIME = 1.8;
+const SHATTER_FADE_START = .92;
 
 function finiteVector(value, fallback) {
   if (value && [value.x, value.y, value.z].every(Number.isFinite)) return new THREE.Vector3(value.x, value.y, value.z);
@@ -222,6 +224,113 @@ function snapshotCharacter(group) {
   return { geometry: builder.finish(), materials, sourceMeshes };
 }
 
+// A hammer breaks armour at the model's existing seams. Cache each shared
+// primitive's triangle layout, then snapshot only its current joint transform.
+// Unlike slicing a whole corpse repeatedly, this work is linear in the original
+// vertex count and cannot multiply triangles on a crowd finishing strike.
+const shatterLayouts = new WeakMap();
+function shatterLayout(geometry) {
+  let layout = shatterLayouts.get(geometry);
+  if (layout) return layout;
+  const flat = geometry.index ? geometry.toNonIndexed() : geometry;
+  if (!flat.attributes.normal) flat.computeVertexNormals();
+  if (!geometry.boundingBox) geometry.computeBoundingBox();
+  const count = flat.attributes.position.count;
+  const materialIndices = new Uint16Array(count);
+  for (const group of geometry.groups) materialIndices.fill(group.materialIndex, group.start, Math.min(count, group.start + group.count));
+  layout = {
+    positions: flat.attributes.position.array,
+    normals: flat.attributes.normal.array,
+    count, materialIndices,
+    center: geometry.boundingBox.getCenter(new THREE.Vector3()),
+  };
+  shatterLayouts.set(geometry, layout);
+  // Indexed geometry needs its own flattened arrays, which the layout retains.
+  if (flat !== geometry) flat.dispose();
+  return layout;
+}
+
+function snapshotShatterCharacter(group, target) {
+  const parts = [], bounds = new THREE.Box3();
+  group.updateWorldMatrix(true, true);
+  group.traverseVisible(mesh => {
+    if (!mesh.isMesh || mesh.isInstancedMesh || !mesh.geometry?.attributes.position) return;
+    const layout = shatterLayout(mesh.geometry);
+    const center = layout.center.clone().applyMatrix4(mesh.matrixWorld);
+    bounds.union(mesh.geometry.boundingBox.clone().applyMatrix4(mesh.matrixWorld));
+    parts.push({ mesh, layout, center, normalMatrix: new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld) });
+  });
+  if (!parts.length) return { pieces: [], materials: [], sourceMeshes: 0 };
+  const center = bounds.getCenter(new THREE.Vector3());
+  const count = Math.min(target, parts.length);
+  // Farthest-point seeds spread fragments across head, torso and all limbs.
+  // A few weighted Lloyd passes join nearby armour/trim into compact chunks;
+  // small decorations therefore travel with their own limb, never another one.
+  const seeds = [parts.reduce((best, part) => part.center.distanceToSquared(center) < best.center.distanceToSquared(center) ? part : best).center.clone()];
+  const nearest = new Float64Array(parts.length).fill(Infinity);
+  for (let i = 1; i < count; i++) {
+    const last = seeds[i - 1];
+    let chosen = 0, farthest = -1;
+    parts.forEach((part, index) => {
+      nearest[index] = Math.min(nearest[index], part.center.distanceToSquared(last));
+      if (nearest[index] > farthest) { farthest = nearest[index]; chosen = index; }
+    });
+    seeds.push(parts[chosen].center.clone());
+  }
+  const assignments = new Uint16Array(parts.length);
+  for (let pass = 0; pass < 4; pass++) {
+    const sums = seeds.map(() => new THREE.Vector3()), weights = new Float64Array(count);
+    parts.forEach((part, index) => {
+      let nearestSeed = 0, distance = Infinity;
+      seeds.forEach((seed, candidate) => {
+        const next = part.center.distanceToSquared(seed);
+        if (next < distance) { distance = next; nearestSeed = candidate; }
+      });
+      assignments[index] = nearestSeed;
+      const weight = Math.sqrt(part.layout.count);
+      sums[nearestSeed].addScaledVector(part.center, weight);
+      weights[nearestSeed] += weight;
+    });
+    seeds.forEach((seed, index) => { if (weights[index]) seed.copy(sums[index]).divideScalar(weights[index]); });
+  }
+  const clusters = seeds.map(() => []);
+  parts.forEach((part, index) => clusters[assignments[index]].push(part));
+  const pieces = [];
+  for (const cluster of clusters) {
+    if (!cluster.length) continue;
+    const vertices = cluster.reduce((sum, part) => sum + part.layout.count, 0);
+    const positions = new Float32Array(vertices * 3), normals = new Float32Array(vertices * 3), colours = new Float32Array(vertices * 3);
+    let offset = 0;
+    for (const { mesh, layout, normalMatrix } of cluster) {
+      const m = mesh.matrixWorld.elements, n = normalMatrix.elements;
+      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      for (let i = 0; i < layout.count; i++) {
+        const input = i * 3, output = (offset + i) * 3;
+        const x = layout.positions[input], y = layout.positions[input + 1], z = layout.positions[input + 2];
+        positions[output] = m[0] * x + m[4] * y + m[8] * z + m[12];
+        positions[output + 1] = m[1] * x + m[5] * y + m[9] * z + m[13];
+        positions[output + 2] = m[2] * x + m[6] * y + m[10] * z + m[14];
+        const nx = layout.normals[input], ny = layout.normals[input + 1], nz = layout.normals[input + 2];
+        const a = n[0] * nx + n[3] * ny + n[6] * nz, b = n[1] * nx + n[4] * ny + n[7] * nz, c = n[2] * nx + n[5] * ny + n[8] * nz;
+        const length = Math.hypot(a, b, c) || 1;
+        normals[output] = a / length; normals[output + 1] = b / length; normals[output + 2] = c / length;
+        const colour = (materials[layout.materialIndices[i]] ?? materials[0])?.color;
+        colours[output] = colour?.r ?? .2; colours[output + 1] = colour?.g ?? .25; colours[output + 2] = colour?.b ?? .22;
+      }
+      offset += layout.count;
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colours, 3));
+    geometry.setAttribute('finisherCutSurface', new THREE.BufferAttribute(new Uint8Array(vertices), 1));
+    geometry.computeBoundingBox();
+    geometry.computeBoundingSphere();
+    pieces.push({ geometry, signs: [], normals: [], paletteBaked: true });
+  }
+  return { pieces, center, materials: [], sourceMeshes: parts.length };
+}
+
 // Per-vertex palette colours keep each detached shard to one draw call, even
 // when a shard contains skin, cloth, three metals, and a shaded flat cut face.
 function bakePalette(geometry, materials, capMaterialIndex) {
@@ -301,7 +410,7 @@ function sliceBlade(initial, options, center, capMaterialIndex) {
 export function createEnemyFinishers(scene, { maxSessions = 12, maxFragments = 320 } = {}) {
   maxSessions = Math.max(1, Math.floor(maxSessions));
   maxFragments = Math.max(24, Math.floor(maxFragments));
-  const sessions = [], sessionPool = [], meshPool = [], history = [];
+  const sessions = [], sessionPool = [], meshPool = [], shatterGeometryPool = [], history = [];
   const emptyGeometry = new THREE.BufferGeometry();
   const poolMaterial = new THREE.MeshBasicMaterial({ visible: false });
   const dustGeometry = new THREE.IcosahedronGeometry(1, 0);
@@ -309,6 +418,41 @@ export function createEnemyFinishers(scene, { maxSessions = 12, maxFragments = 3
   const dummy = new THREE.Object3D();
   const tempMatrix = new THREE.Matrix4();
   let serial = 0, totalCreated = 0, totalReleased = 0, destroyed = false;
+
+  // Keep the vertex buffers of rendered shatter pieces for the next victim.
+  // Attribute counts and draw ranges expose only the current model's vertices;
+  // spare capacity never becomes an extra triangle or affects its bounds.
+  function reusableShatterGeometry(source) {
+    const count = source.attributes.position.count;
+    let selected = -1, capacity = Infinity;
+    shatterGeometryPool.forEach((geometry, index) => {
+      const available = geometry.attributes.position.array.length / 3;
+      if (available >= count && available < capacity) { capacity = available; selected = index; }
+    });
+    let geometry;
+    if (selected >= 0) geometry = shatterGeometryPool.splice(selected, 1)[0];
+    else {
+      geometry = shatterGeometryPool.pop() ?? new THREE.BufferGeometry();
+      // A pooled object can need a larger allocation for a larger enemy. Let
+      // Three release its old GPU buffers before installing replacement arrays.
+      geometry.dispose();
+      capacity = 2 ** Math.ceil(Math.log2(Math.max(3, count)));
+      for (const name of ['position', 'normal', 'color']) geometry.setAttribute(name, new THREE.BufferAttribute(new Float32Array(capacity * 3), 3).setUsage(THREE.DynamicDrawUsage));
+      geometry.setAttribute('finisherCutSurface', new THREE.BufferAttribute(new Uint8Array(capacity), 1).setUsage(THREE.DynamicDrawUsage));
+    }
+    for (const name of ['position', 'normal', 'color', 'finisherCutSurface']) {
+      const attribute = geometry.attributes[name], incoming = source.attributes[name];
+      attribute.array.set(incoming.array.subarray(0, incoming.count * incoming.itemSize));
+      attribute.count = incoming.count;
+      attribute.needsUpdate = true;
+    }
+    geometry.clearGroups();
+    geometry.setDrawRange(0, count);
+    geometry.boundingBox = source.boundingBox.clone();
+    geometry.boundingSphere = source.boundingSphere?.clone() ?? null;
+    source.dispose();
+    return geometry;
+  }
 
   function acquireSession() {
     const session = sessionPool.pop() ?? {
@@ -333,8 +477,9 @@ export function createEnemyFinishers(scene, { maxSessions = 12, maxFragments = 3
     scene.remove(session.group);
     for (const fragment of session.fragments) {
       session.group.remove(fragment.mesh);
-      fragment.mesh.geometry.dispose();
       ownedGeometries.delete(fragment.mesh.geometry);
+      if (fragment.shatter && shatterGeometryPool.length < maxFragments) shatterGeometryPool.push(fragment.mesh.geometry);
+      else fragment.mesh.geometry.dispose();
       fragment.mesh.geometry = emptyGeometry;
       fragment.mesh.material = poolMaterial;
       if (meshPool.length < maxFragments) meshPool.push(fragment.mesh);
@@ -363,24 +508,31 @@ export function createEnemyFinishers(scene, { maxSessions = 12, maxFragments = 3
     if (destroyed) return null;
     const original = rig?.group ?? rig;
     if (!original?.isObject3D || !original.visible) return null;
-    const snapshot = snapshotCharacter(original);
-    if (!snapshot.geometry) { for (const material of snapshot.materials) material.dispose(); return null; }
-    const center = snapshot.geometry.boundingBox.getCenter(new THREE.Vector3());
+    const shatter = weaponId === 'great-hammer';
+    const snapshot = shatter
+      ? snapshotShatterCharacter(original, Math.min(maxFragments, ((combo % 3) + 3) % 3 === 2 ? 26 : 24))
+      : snapshotCharacter(original);
+    if (!snapshot.geometry && !snapshot.pieces?.length) { for (const material of snapshot.materials) material.dispose(); return null; }
+    const center = snapshot.center ?? snapshot.geometry.boundingBox.getCenter(new THREE.Vector3());
     const strikeDirection = finiteVector(direction, FALLBACK_DIRECTION).normalize();
     if (strikeDirection.lengthSq() < .5) strikeDirection.copy(FALLBACK_DIRECTION);
     const contact = finiteVector(contactPoint, center);
     const capMaterialIndex = snapshot.materials.length;
-    snapshot.materials.push(new THREE.MeshStandardMaterial({
+    if (!shatter) snapshot.materials.push(new THREE.MeshStandardMaterial({
       color: 0x253631, roughness: .94, metalness: .12,
       flatShading: true, side: THREE.DoubleSide, transparent: true,
     }));
     const initial = { geometry: snapshot.geometry, signs: [], normals: [] };
-    const result = sliceBlade(initial, { weaponId, direction: strikeDirection, contactPoint: contact, cutNormal }, center, capMaterialIndex);
+    const result = shatter
+      ? { pieces: snapshot.pieces, capTriangles: 0, cutPlanes: [] }
+      : sliceBlade(initial, { weaponId, direction: strikeDirection, contactPoint: contact, cutNormal }, center, capMaterialIndex);
     while (sessions.length >= maxSessions || (sessions.reduce((count, session) => count + session.fragments.length, 0) + result.pieces.length > maxFragments)) release(sessions.shift());
     const session = acquireSession();
     session.id = ++serial;
     session.weaponId = weaponId;
-    session.kind = weaponId === 'dual-dao' ? 'cross-cut' : 'slice';
+    session.kind = shatter ? 'crush-shatter' : weaponId === 'dual-dao' ? 'cross-cut' : 'slice';
+    session.lifetime = shatter ? SHATTER_LIFETIME : LIFETIME;
+    session.fadeStart = shatter ? SHATTER_FADE_START : FADE_START;
     session.age = 0;
     session.complete = false;
     session.materials = snapshot.materials;
@@ -397,17 +549,18 @@ export function createEnemyFinishers(scene, { maxSessions = 12, maxFragments = 3
       color: 0xffffff, vertexColors: true, roughness: .76, metalness: .15,
       flatShading: true, side: THREE.DoubleSide, transparent: true, opacity: 1,
     });
-    const initialCenters = [];
+    const initialCenters = [], initialVelocities = [];
     result.pieces.forEach((piece, index) => {
       const pieceCenter = piece.geometry.boundingBox.getCenter(new THREE.Vector3());
       const extent = piece.geometry.boundingBox.getSize(new THREE.Vector3()).multiplyScalar(.5);
-      bakePalette(piece.geometry, snapshot.materials, capMaterialIndex);
+      if (!piece.paletteBaked) bakePalette(piece.geometry, snapshot.materials, capMaterialIndex);
       piece.geometry.translate(-pieceCenter.x, -pieceCenter.y, -pieceCenter.z);
+      if (shatter) piece.geometry = reusableShatterGeometry(piece.geometry);
       ownedGeometries.add(piece.geometry);
       const mesh = meshPool.pop() ?? new THREE.Mesh(emptyGeometry, poolMaterial);
       mesh.geometry = piece.geometry;
       mesh.material = presentationMaterial;
-      mesh.name = 'sliced-enemy-half';
+      mesh.name = shatter ? 'crushed-enemy-shard' : 'sliced-enemy-half';
       mesh.position.copy(pieceCenter);
       mesh.quaternion.identity();
       mesh.scale.setScalar(1);
@@ -415,34 +568,50 @@ export function createEnemyFinishers(scene, { maxSessions = 12, maxFragments = 3
       mesh.receiveShadow = true;
       mesh.visible = true;
       mesh.userData.enemyFinisher = {
-        sessionId: session.id, weaponId, section: index,
+        sessionId: session.id, weaponId, section: index, kind: session.kind,
         originalMeshCount: snapshot.sourceMeshes, capMaterialIndex,
         snapshotCenter: pieceCenter.toArray(),
       };
       const velocity = new THREE.Vector3(), separation = new THREE.Vector3();
-      piece.normals.forEach((normal, i) => separation.addScaledVector(normal, piece.signs[i]));
-      separation.normalize();
-      velocity.copy(separation).multiplyScalar(weaponId === 'great-dao' ? 2.05 : 1.6).addScaledVector(strikeDirection, weaponId === 'great-dao' ? 2.4 : 1.45);
-      velocity.y += .85 + hash(index + 3, serial) * .4;
-      separation.multiplyScalar(weaponId === 'great-dao' ? .055 : .045);
+      if (shatter) {
+        // Small pieces burst locally around the victim, then drop. In
+        // particular there is no shared upward corpse-launch velocity.
+        separation.copy(pieceCenter).sub(center);
+        separation.y *= .3;
+        if (separation.lengthSq() < EPSILON) separation.set(hash(index + 13, serial) - .5, .1, hash(index + 29, serial) - .5);
+        separation.normalize();
+        velocity.copy(separation).multiplyScalar(.75 + hash(index + 3, serial) * .9);
+        velocity.x += strikeDirection.x * .4;
+        velocity.z += strikeDirection.z * .4;
+        velocity.y = .25 + hash(index + 9, serial) * .7;
+        separation.multiplyScalar(.012 + hash(index + 21, serial) * .015);
+      } else {
+        piece.normals.forEach((normal, i) => separation.addScaledVector(normal, piece.signs[i]));
+        separation.normalize();
+        velocity.copy(separation).multiplyScalar(weaponId === 'great-dao' ? 2.05 : 1.6).addScaledVector(strikeDirection, weaponId === 'great-dao' ? 2.4 : 1.45);
+        velocity.y += .85 + hash(index + 3, serial) * .4;
+        separation.multiplyScalar(weaponId === 'great-dao' ? .055 : .045);
+      }
       mesh.position.add(separation);
       initialCenters.push(mesh.position.toArray());
-      const spin = new THREE.Vector3(hash(index + 11, serial) - .5, hash(index + 19, serial) - .5, hash(index + 23, serial) - .5).multiplyScalar(4.4);
-      session.fragments.push({ mesh, velocity, spin, extent, rest: false, bounces: 0 });
+      initialVelocities.push(velocity.toArray());
+      const spin = new THREE.Vector3(hash(index + 11, serial) - .5, hash(index + 19, serial) - .5, hash(index + 23, serial) - .5).multiplyScalar(shatter ? 12 : 4.4);
+      session.fragments.push({ mesh, velocity, spin, extent, shatter, rest: false, bounces: 0 });
       session.group.add(mesh);
     });
     for (const material of snapshot.materials) material.dispose();
     session.materials = [presentationMaterial];
     ownedMaterials.add(presentationMaterial);
-    const dustCount = 8;
-    session.dustMesh.material.color.setHex(0x9ca295);
-    session.dustMesh.material.opacity = .32;
+    const dustCount = shatter ? (combo === 2 ? 24 : 18) : 8;
+    session.dustMesh.material.color.setHex(shatter ? 0xaaa798 : 0x9ca295);
+    session.dustMesh.material.opacity = shatter ? .44 : .32;
+    session.dustOpacity = shatter ? .44 : .32;
     for (let i = 0; i < dustCount; i++) {
       const radial = new THREE.Vector3(hash(i + 30, serial) - .5, hash(i + 37, serial) * .7, hash(i + 41, serial) - .5).normalize();
-      const position = contact.clone().addScaledVector(radial, .08);
-      const velocity = radial.clone().multiplyScalar(.8).addScaledVector(strikeDirection, .5);
-      velocity.y += .6;
-      const particle = { position, velocity, size: .035 * (.6 + hash(i + 47, serial)), rotation: hash(i + 51, serial) * 6 };
+      const position = contact.clone().addScaledVector(radial, shatter ? .19 : .08);
+      const velocity = radial.clone().multiplyScalar(shatter ? 1.1 : .8).addScaledVector(strikeDirection, shatter ? .25 : .5);
+      velocity.y += shatter ? .35 : .6;
+      const particle = { position, velocity, size: (shatter ? .06 : .035) * (.6 + hash(i + 47, serial)), rotation: hash(i + 51, serial) * 6 };
       session.dust.push(particle);
       session.dustMesh.setMatrixAt(i, dustMatrix(particle));
     }
@@ -456,7 +625,8 @@ export function createEnemyFinishers(scene, { maxSessions = 12, maxFragments = 3
       fragmentCount: session.fragmentCount, sourceMeshes: snapshot.sourceMeshes,
       capTriangles: session.capTriangles, cutPlanes: session.cutPlanes,
       direction: session.direction, contactPoint: session.contactPoint,
-      initialCenters, originalHidden: !original.visible, age: 0,
+      initialCenters, initialVelocities, originalHidden: !original.visible, age: 0,
+      lifetime: session.lifetime, wholeBodyLaunch: false,
     };
     history.push(record);
     if (history.length > 8) history.shift();
@@ -470,15 +640,16 @@ export function createEnemyFinishers(scene, { maxSessions = 12, maxFragments = 3
       const session = sessions[i];
       session.age += dt;
       session.record.age = session.age;
-      if (session.age >= LIFETIME) { sessions.splice(i, 1); release(session); continue; }
+      if (session.age >= session.lifetime) { sessions.splice(i, 1); release(session); continue; }
       const step = Math.min(dt, .05);
-      const scale = session.age <= FADE_START ? 1 : 1 - (session.age - FADE_START) / (LIFETIME - FADE_START);
+      const scale = session.age <= session.fadeStart ? 1 : 1 - (session.age - session.fadeStart) / (session.lifetime - session.fadeStart);
       // Shrinking as well as fading stops a settled pile of armour obscuring
       // movement while its last shadows leave the ground.
       for (const fragment of session.fragments) {
         const { mesh, velocity, spin, extent } = fragment;
         if (!fragment.rest) {
           velocity.y -= 10.8 * step;
+          if (fragment.shatter) { velocity.x *= Math.exp(-1.3 * step); velocity.z *= Math.exp(-1.3 * step); }
           mesh.position.addScaledVector(velocity, step);
           mesh.rotateX(spin.x * step);
           mesh.rotateY(spin.y * step);
@@ -489,9 +660,9 @@ export function createEnemyFinishers(scene, { maxSessions = 12, maxFragments = 3
           const floor = .018 + support * scale;
           if (mesh.position.y <= floor && velocity.y < 0) {
             mesh.position.y = floor;
-            velocity.x *= .61; velocity.z *= .61;
-            velocity.y *= -.22;
-            spin.multiplyScalar(.42);
+            velocity.x *= fragment.shatter ? .48 : .61; velocity.z *= fragment.shatter ? .48 : .61;
+            velocity.y *= fragment.shatter ? -.17 : -.22;
+            spin.multiplyScalar(fragment.shatter ? .3 : .42);
             fragment.bounces++;
             if (fragment.bounces >= 2 || velocity.y < .32) { fragment.rest = true; velocity.set(0, 0, 0); }
           }
@@ -511,7 +682,7 @@ export function createEnemyFinishers(scene, { maxSessions = 12, maxFragments = 3
           particle.rotation += step * 1.8;
           session.dustMesh.setMatrixAt(j, dustMatrix(particle, dustScale));
         });
-        session.dustMesh.material.opacity = .32 * (1 - session.age / .65);
+        session.dustMesh.material.opacity = session.dustOpacity * (1 - session.age / .65);
         session.dustMesh.instanceMatrix.needsUpdate = true;
       } else session.dustMesh.count = 0;
     }
@@ -528,6 +699,7 @@ export function createEnemyFinishers(scene, { maxSessions = 12, maxFragments = 3
       activeFragments: sessions.reduce((count, session) => count + session.fragments.length, 0),
       activeDustParticles: sessions.reduce((count, session) => count + session.dustMesh.count, 0),
       pooledSessions: sessionPool.length, pooledFragmentMeshes: meshPool.length,
+      pooledShatterGeometries: shatterGeometryPool.length,
       ownedGeometries: ownedGeometries.size, ownedMaterials: ownedMaterials.size,
       activeFragmentDrawCalls: sessions.reduce((count, session) => count + session.fragments.length, 0),
       maxSessions, maxFragments, totalCreated, totalReleased,
@@ -540,6 +712,8 @@ export function createEnemyFinishers(scene, { maxSessions = 12, maxFragments = 3
     if (destroyed) return;
     clear();
     for (const session of sessionPool) { session.dustMesh.dispose(); session.dustMesh.material.dispose(); }
+    for (const geometry of shatterGeometryPool) geometry.dispose();
+    shatterGeometryPool.length = 0;
     sessionPool.length = 0; meshPool.length = 0;
     emptyGeometry.dispose(); poolMaterial.dispose(); dustGeometry.dispose();
     destroyed = true;

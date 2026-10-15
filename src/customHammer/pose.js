@@ -1,37 +1,46 @@
 import * as THREE from 'three';
 import {HAMMER_ID,HAMMER_SHAFT,HAMMER_MOVES,getHammerAttackProfile,hammerIndex} from './definition.js';
+import {sampleSourceLocomotion} from '../sourceMotion/clock.js';
+import {sampleReferenceCurveBlend,createReferenceCurveBlendWorkspace} from '../sourceMotion/sampler.js';
 
 const clamp=THREE.MathUtils.clamp;
 const smooth=t=>{t=clamp(t,0,1);return t*t*(3-2*t);};
 const v=(x=0,y=0,z=0)=>new THREE.Vector3(x,y,z);
 const sole=.124;
-// Grip, yaw/elevation/head roll, pelvis height/yaw/pitch, chest yaw/pitch.
-// Carries are shared at the attack/recovery boundary, including both feet.
-const guard=[.03,1.07,.39, .62,.72,0, .88,.02,.025, -.02,.015];
-const leftCarry=[-.10,1.01,.44, -1.10,-.18,-.05, .84,-.34,.045, .17,.025];
-const highCarry=[.03,1.17,.40, .62,1.06,-.72, .90,.18,.015, .12,-.035];
+const turn=Math.PI*2;
+const yAxis=v(0,1,0);
+// New choreography in the chest's moving space: grip XYZ, shaft yaw / pitch /
+// roll, pelvis height / yaw / pitch, chest yaw / pitch, pelvis / chest bank,
+// and pelvis XZ. Body rotation carries the entire skeleton through the strike.
+// The attack boundaries share complete carries, so a held combo never resets.
+const guard=[.14,.23,.46, .62,.58,0, .89,0,.025, 0,-.02, 0,0,0,0];
+const leftCarry=[.11,.20,.46, -.66,.13,-.24, .84,-2.60,.10, -.15,.035,-.10,-.055,-.035,.015];
+const highCarry=[.11,.40,.43, .55,1.08,.78, .92,2.68,-.04, .20,-.13,.09,.055,.035,0];
+const guardEnd=guard.map((value,i)=>i===7?turn:value);
 const tracks=[
-  [[0,guard],[.22,[.08,1.09,.38,.95,.35,.02,.85,.20,.035,.08,.01]],
-   [.48,[.15,1.12,.41,1.24,.14,.06,.81,.34,.045,.08,.025]],
-   [.56,[.14,1.11,.46,1.08,.13,.045,.82,.20,.06,.18,.035]],
-   [.67,[.08,1.08,.55,.08,.045,0,.86,-.12,.07,.16,.05]],
-   [.83,[-.12,1.00,.48,-1.08,-.16,-.05,.83,-.36,.055,.16,.035]],
+  [[0,guard],
+   [.18,[.15,.26,.45,.76,.48,.12,.86,.72,-.035,.24,-.035,.06,.04,.04,-.035]],
+   [.34,[.16,.29,.46,.82,.32,.20,.83,1.20,-.055,.32,-.025,.10,.05,.05,-.04]],
+   [.46,[.16,.29,.48,.70,.22,.13,.85,.91,.01,.20,.035,.05,.025,.03,0]],
+   [.61,[.16,.27,.51,.23,-.025,.01,.87,-.18,.095,-.08,.075,-.045,-.035,-.015,.045]],
+   [.76,[.12,.22,.49,-.42,-.10,-.16,.82,-1.54,.14,-.27,.09,-.115,-.07,-.045,.04]],
    [1,leftCarry]],
-  [[0,leftCarry],[.28,[-.08,.97,.40,-1.22,-.34,-.04,.80,-.35,.035,.16,.01]],
-   [.46,[-.05,.99,.44,-1.08,-.28,-.04,.81,-.16,.04,-.03,.015]],
-   [.60,[0,1.10,.53,-.38,.035,-.12,.85,.07,.025,.045,-.025]],
-   [.68,[.06,1.12,.54,.10,.30,-.26,.90,.28,.01,.10,-.045]],
-   [.85,[.04,1.17,.41,.62,.99,-.66,.91,.26,.015,.12,-.04]],
+  [[0,leftCarry],
+   [.18,[.10,.18,.45,-.76,-.16,-.30,.79,-2.96,.12,-.24,.055,-.11,-.055,-.05,.015]],
+   [.34,[.12,.21,.46,-.68,-.20,-.22,.80,-2.43,.10,-.23,.025,-.06,-.02,-.03,.02]],
+   [.49,[.16,.26,.50,-.34,-.14,-.03,.86,-1.13,.045,-.17,-.02,.035,.035,.015,.04]],
+   [.60,[.17,.32,.51,.18,.15,.18,.92,-.30,-.03,.12,-.08,.08,.06,.045,.055]],
+   [.76,[.15,.40,.46,.48,.78,.58,1.00,1.12,-.10,.30,-.15,.13,.075,.065,.015]],
    [1,highCarry]],
-  [[0,highCarry],[.20,[.02,1.30,.39,.40,1.25,-1.05,.84,.12,-.015,.07,-.06]],
-   [.40,[.01,1.40,.36,.20,1.42,-1.50,.84,.08,-.025,.015,-.075]],
-   [.52,[0,1.36,.42,.04,1.23,-1.52,.86,.025,.08,0,.10]],
-   [.62,[0,1.24,.55,0,.50,-1.53,.85,-.015,.14,0,.17]],
-   [.72,[0,1.03,.59,0,-.45,-1.54,.78,-.025,.18,0,.20]],
-   [.77,[0,.98,.55,0,-.79,-1.54,.75,-.025,.20,0,.20]],
-   [.84,[.02,1.00,.50,.08,-.42,-1.40,.80,-.01,.10,.01,.12]],
-   [.92,[.03,1.05,.40,.36,.40,-.58,.86,.01,.04,-.01,.03]],
-   [1,guard]],
+  [[0,highCarry],
+   [.17,[.12,.42,.42,.58,1.18,1.02,.86,3.19,-.075,.22,-.13,.11,.07,.035,-.025]],
+   [.34,[.10,.43,.40,.45,1.39,1.40,1.19,4.20,-.095,.27,-.11,.14,.05,.035,-.015]],
+   [.48,[.08,.43,.44,.27,1.28,1.54,1.28,5.12,-.03,.18,-.04,.09,.015,.015,.015]],
+   [.61,[.09,.41,.55,.10,.55,1.56,1.10,5.98,.12,.07,.11,.015,-.025,0,.045]],
+   [.725,[.12,.32,.59,-.10,-.51,1.57,.74,turn,.23,0,.13,-.025,-.015,-.02,.055]],
+   [.80,[.13,.30,.58,-.08,-.60,1.53,.72,turn+.10,.25,.035,.14,-.04,-.015,-.025,.045]],
+   [.88,[.13,.25,.51,.12,-.13,1.18,.80,turn+.06,.13,.02,.055,-.02,0,-.01,.025]],
+   [1,guardEnd]],
 ];
 
 // Monotone Hermite slopes preserve the authored extrema, but keep nonzero
@@ -58,46 +67,58 @@ function orientation(yaw,elevation,roll) {
   const y=axis.clone().negate(),z=v().crossVectors(x,y).normalize();
   return {axis,quaternion:new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x,y,z))};
 }
+function resolveFrame(sample) {
+  const bodyQ=sample.bodyQuaternion??new THREE.Quaternion().setFromEuler(new THREE.Euler(sample.pelvisPitch,sample.pelvisYaw,sample.pelvisRoll??0,'XYZ'));
+  const chestQ=bodyQ.clone().multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(sample.chestPitch,sample.chestYaw,sample.chestRoll??0,'XYZ')));
+  sample.grip=sample.gripLocal.clone().applyQuaternion(chestQ).add(sample.bodyPosition??v(sample.bodyX??0,sample.height,sample.bodyZ??0));
+  const shaft=orientation(sample.shaftYaw,sample.shaftElevation,sample.shaftRoll);
+  sample.quaternion=chestQ.multiply(shaft.quaternion);
+  sample.axis=v(0,-1,0).applyQuaternion(sample.quaternion);
+  return sample;
+}
 export function sampleHammerMotion(combo=0,phase=0) {
   const index=hammerIndex(combo), move=HAMMER_MOVES[index], p=clamp(phase,0,1);
   const t=clamp(p/move.recoverAt,0,1);
   let values=guard.map((_,i)=>component(tracks[index],i,t));
   if(p>move.recoverAt) {
     const amount=smooth((p-move.recoverAt)/(1-move.recoverAt));
-    values=values.map((value,i)=>THREE.MathUtils.lerp(value,guard[i],amount));
-  }
-  return {index,phase:p,attackPhase:t,values,grip:v(...values.slice(0,3)),
-    ...orientation(...values.slice(3,6)),height:values[6],pelvisYaw:values[7],pelvisPitch:values[8],
-    chestYaw:values[9],chestPitch:values[10]};
-}
-function baseFeet() {return [v(-.205,sole,.11),v(.205,sole,-.10)];}
-function attackFeet(rig,sample,step) {
-  const feet=baseFeet(),t=sample.attackPhase,lead=sample.index===1?1:0;
-  if(step?.feet) {
-    const forward=v(Math.sin(step.angle),0,Math.cos(step.angle));
-    const travel=HAMMER_MOVES[sample.index].lunge;
-    return step.feet.map((anchor,i)=>{
-      const target=anchor.clone();
-      if(i===lead) {
-        const progress=smooth((t-.08)/.45);
-        target.addScaledVector(forward,travel*1.18*progress);
-        target.y+=Math.sin(Math.PI*clamp((t-.08)/.45,0,1))*.13;
-      } else {
-        const follow=clamp((t-.78)/.22,0,1);
-        target.addScaledVector(forward,travel*.82*smooth(follow));
-        target.y+=Math.sin(Math.PI*follow)*.08;
-      }
-      return rig.group.worldToLocal(target);
+    values=values.map((value,i)=>{
+      const home=i===7?guard[i]+Math.round((value-guard[i])/turn)*turn:guard[i];
+      return THREE.MathUtils.lerp(value,home,amount);
     });
   }
-  const stepAmount=sample.index===2?.16:.13;
-  const settle=clamp((t-.80)/.20,0,1);
-  feet[lead].z+=stepAmount*smooth((t-.08)/.45)*(1-smooth(settle));
-  feet[lead].y+=Math.sin(Math.PI*clamp((t-.08)/.45,0,1))*(sample.index===2?.15:.11);
-  feet[lead].y+=Math.sin(Math.PI*settle)*.07;
-  if(sample.phase>HAMMER_MOVES[sample.index].recoverAt) {
-    const mix=smooth((sample.phase-HAMMER_MOVES[sample.index].recoverAt)/(1-HAMMER_MOVES[sample.index].recoverAt));
-    const home=baseFeet();feet.forEach((foot,i)=>foot.lerp(home[i],mix));
+  return resolveFrame({index,phase:p,attackPhase:t,values,gripLocal:v(...values.slice(0,3)),
+    shaftYaw:values[3],shaftElevation:values[4],shaftRoll:values[5],height:values[6],pelvisYaw:values[7],pelvisPitch:values[8],
+    chestYaw:values[9],chestPitch:values[10],pelvisRoll:values[11],chestRoll:values[12],bodyX:values[13],bodyZ:values[14]});
+}
+// Root travel is applied by gameplay in the attack's initial heading. Never
+// retract the completed step when the attack moves into its recovery segment.
+export function sampleHammerTravel(combo=0,phase=0) {
+  const index=hammerIndex(combo),t=clamp(phase/HAMMER_MOVES[index].recoverAt,0,1);
+  const forward=HAMMER_MOVES[index].lunge*smooth((t-.08)/.66);
+  const lateral=[.22,-.28,.12][index]*smooth((t-.08)/.52);
+  return {forward,lateral};
+}
+function baseFeet() {return [v(-.205,sole,.11),v(.205,sole,-.10)];}
+function attackFeet(rig,sample) {
+  const feet=baseFeet(),t=sample.attackPhase,index=sample.index;
+  const yaw=(sample.pelvisYaw-.12*Math.sin(sample.pelvisYaw)),lead=index===1?1:0;
+  const first=clamp((t-.06)/.41,0,1),second=clamp((t-.47)/.43,0,1);
+  for(let i=0;i<2;i++) {
+    const swing=i===lead?first:second;
+    feet[i].z+=(i===lead?.18:-.12)*Math.sin(Math.PI*swing);
+    feet[i].x+=(i===lead?-.065:.065)*Math.sin(Math.PI*swing);
+    feet[i].y+=Math.sin(Math.PI*swing)*(index===1?.25:.22);
+    feet[i].applyAxisAngle(yAxis,yaw);
+  }
+  if(index===2) {
+    // A true airborne turn: both shoes rise and tuck during the overhand load.
+    const airborne=Math.sin(Math.PI*clamp((t-.17)/.49,0,1));
+    feet.forEach((foot,i)=>{foot.y+=airborne*.42;foot.z+=(i===0?.11:-.16)*airborne;});
+  }
+  if(sample.phase>HAMMER_MOVES[index].recoverAt) {
+    const blend=smooth((sample.phase-HAMMER_MOVES[index].recoverAt)/(1-HAMMER_MOVES[index].recoverAt));
+    const home=baseFeet();feet.forEach((foot,i)=>foot.lerp(home[i],blend));
   }
   return feet;
 }
@@ -123,138 +144,234 @@ function solveLimb(rig,root,mid,end,target,pole,endQuaternion) {
   end.quaternion.copy(lowerQ.invert()).multiply(endQuaternion);
   rig.group.updateMatrixWorld(true);
 }
-function softPositive(x,e=.018) {return x<=-e?0:x>=e?x:(x+e)*(x+e)/(4*e);}
 function constrainGrip(rig,grip,axis,q) {
   const primary=grip.clone(),right=rig.arms[1],left=rig.arms[0];
   const shoulders=[localPosition(rig,right.shoulder),localPosition(rig,left.shoulder).addScaledVector(axis,HAMMER_SHAFT.support)];
-  const lengths=[right.elbow.position.length()+right.wrist.position.length()-.018,left.elbow.position.length()+left.wrist.position.length()-.018];
-  const chestQ=localQuaternion(rig,rig.chest),chestInverse=chestQ.clone().invert(),chestPosition=localPosition(rig,rig.chest);
-  const forward=v(0,0,1).applyQuaternion(chestQ);
-  const headQ=localQuaternion(rig,rig.head),headInverse=headQ.clone().invert(),headPosition=localPosition(rig,rig.head);
-  const headForward=v(0,0,1).applyQuaternion(headQ);
+  const lengths=[right.elbow.position.length()+right.wrist.position.length()-.012,left.elbow.position.length()+left.wrist.position.length()-.012];
+  const chestQ=localQuaternion(rig,rig.chest),headQ=localQuaternion(rig,rig.head);
+  const chestPosition=localPosition(rig,rig.chest),headPosition=localPosition(rig,rig.head);
+  const shapes=[
+    {q:chestQ,origin:chestPosition,center:v(0,.015,0),radius:v(.34,.255,.275)},
+    {q:chestQ,origin:chestPosition,center:v(0,.35,.015),radius:v(.405,.39,.335)},
+    {q:headQ,origin:headPosition,center:v(0,.11,.025),radius:v(.30,.325,.30)},
+  ].map(shape=>({...shape,inverse:shape.q.clone().invert()}));
   const yExtent=HAMMER_SHAFT.halfExtents.reduce((sum,half,i)=>sum+half*Math.abs(v(i===0?1:0,i===1?1:0,i===2?1:0).applyQuaternion(q).y),0);
   const minimumGripY=HAMMER_SHAFT.floor+yExtent-axis.y*HAMMER_SHAFT.length;
-  for(let iteration=0;iteration<16;iteration++) {
+  // Geometric capsules permit side/back carries and full turns. The earlier
+  // universal front-plane clamp flattened every swing into a tiny frontal arc.
+  for(let iteration=0;iteration<24;iteration++) {
+    for(let hand=0;hand<2;hand++) {
+      const reach=primary.clone().sub(shoulders[hand]),distance=reach.length();
+      if(distance>lengths[hand])primary.copy(shoulders[hand]).addScaledVector(reach,lengths[hand]/distance);
+    }
+    for(const shape of shapes) {
+      for(let along=-HAMMER_SHAFT.tail;along<.57;along+=.075) {
+        const point=primary.clone().addScaledVector(axis,along).sub(shape.origin).applyQuaternion(shape.inverse).sub(shape.center);
+        const normalized=point.clone().divide(shape.radius),distance=normalized.length();
+        if(distance>=1)continue;
+        if(distance<1e-6)normalized.set(0,0,1);else normalized.multiplyScalar(1/distance);
+        const surface=normalized.multiply(shape.radius),push=surface.sub(point).applyQuaternion(shape.q);
+        primary.add(push.multiplyScalar(.85));
+      }
+    }
+    primary.y=Math.max(primary.y,minimumGripY);
+  }
+  // Finish inside the intersection of both reach spheres and the head-floor
+  // half-space. Collision relaxation can leave millimetres of overshoot when
+  // the overhead tail passes the head; neither wrist is allowed to detach.
+  for(let iteration=0;iteration<36;iteration++) {
     for(let hand=0;hand<2;hand++) {
       const reach=primary.clone().sub(shoulders[hand]),distance=reach.length();
       if(distance>lengths[hand])primary.copy(shoulders[hand]).addScaledVector(reach,lengths[hand]/distance);
     }
     primary.y=Math.max(primary.y,minimumGripY);
-    let clearance=0;
-    for(const offset of [0,HAMMER_SHAFT.support,HAMMER_SHAFT.tail]) {
-      const point=primary.clone().addScaledVector(axis,-offset).sub(chestPosition).applyQuaternion(chestInverse);
-      if(point.y>-.12&&point.y<.58&&Math.abs(point.x)<.37)
-        clearance=Math.max(clearance,.29-point.z);
-    }
-    if(clearance>0)primary.addScaledVector(forward,clearance);
-    let faceClearance=0;
-    for(const offset of [0,.12,HAMMER_SHAFT.support,HAMMER_SHAFT.tail]) {
-      const point=primary.clone().addScaledVector(axis,-offset).sub(headPosition).applyQuaternion(headInverse);
-      if(Math.abs(point.x)<.22&&point.y>-.13&&point.y<.38)
-        faceClearance=Math.max(faceClearance,.27-point.z);
-    }
-    if(faceClearance>0)primary.addScaledVector(headForward,faceClearance);
   }
-  primary.y+=softPositive(minimumGripY-primary.y);
   return primary;
 }
-function applyBody(rig,sample,feet,state,time,phase) {
-  rig.body.position.y=sample.height;
-  rig.body.rotation.set(sample.pelvisPitch,sample.pelvisYaw,state==='roll'?Math.sin(Math.PI*phase)*-.34:0);
-  rig.chest.rotation.set(sample.chestPitch,sample.chestYaw,0);
-  rig.chest.position.z+=state==='attack'?.018:.005;
-  // Girdle protraction keeps the grip ahead of armour without extending arms.
-  for(const arm of rig.arms)arm.shoulder.position.z+=.065;
-  rig.head.rotation.set(-sample.chestPitch*.45,-(sample.pelvisYaw+sample.chestYaw)*.68,0);
+function applyBody(rig,sample,feet,state,time,phase,lowerFrame) {
+  rig.body.position.copy(sample.bodyPosition??v(sample.bodyX??0,sample.height,sample.bodyZ??0));
+  if(sample.bodyQuaternion)rig.body.quaternion.copy(sample.bodyQuaternion);
+  else rig.body.rotation.set(sample.pelvisPitch,sample.pelvisYaw,sample.pelvisRoll??0);
+  rig.chest.rotation.set(sample.chestPitch,sample.chestYaw,sample.chestRoll??0);
+  // Small clavicle travel follows the authored body, rather than making an
+  // invisible long arm. Both hands are still solved against actual bone lengths.
+  for(const arm of rig.arms)arm.shoulder.position.z+=.035;
+  const torsoYaw=sample.pelvisYaw+sample.chestYaw;
+  // Continuous anticipation through a complete turn, with anatomical neck
+  // limits and no discontinuity when an unwrapped pelvis crosses +/- PI.
+  const ahead=-Math.sin(torsoYaw)*.82;
+  rig.head.rotation.set(-sample.chestPitch*.42,ahead,-(sample.chestRoll??0)*.4);
   rig.group.updateMatrixWorld(true);
-  for(let i=0;i<2;i++)solveLimb(rig,rig.legs[i].hip,rig.legs[i].knee,rig.legs[i].foot,
-    feet[i],v(rig.legs[i].side*.15,-.08,1),new THREE.Quaternion());
-  rig.pony.rotation.x=-.10-Math.sin(time*5)*.025;
-  rig.pony.rotation.z=-sample.chestYaw*.16;
+  if(lowerFrame) {
+    for(let i=0;i<2;i++) {
+      const leg=rig.legs[i],bone=9+i*3;
+      leg.hip.position.fromArray(lowerFrame,76+i*3).multiplyScalar(.9);
+      const bodyQ=new THREE.Quaternion().fromArray(lowerFrame,3);
+      const hipQ=new THREE.Quaternion().fromArray(lowerFrame,3+bone*4);
+      const kneeQ=new THREE.Quaternion().fromArray(lowerFrame,3+(bone+1)*4);
+      const footQ=new THREE.Quaternion().fromArray(lowerFrame,3+(bone+2)*4);
+      leg.hip.quaternion.copy(bodyQ.invert()).multiply(hipQ);
+      leg.knee.quaternion.copy(hipQ.clone().invert()).multiply(kneeQ);
+      leg.foot.quaternion.copy(kneeQ.invert()).multiply(footQ);
+    }
+  } else {
+    const footYaw=(sample.pelvisYaw-.12*Math.sin(sample.pelvisYaw));
+    const pole=v(0,-.06,1).applyAxisAngle(yAxis,sample.pelvisYaw);
+    for(let i=0;i<2;i++) {
+      const footQ=sample.footQuaternions?.[i]??new THREE.Quaternion().setFromAxisAngle(yAxis,footYaw);
+      solveLimb(rig,rig.legs[i].hip,rig.legs[i].knee,rig.legs[i].foot,feet[i],pole,footQ);
+    }
+  }
+  // Blend every lower-body joint through recovery, rather than switching
+  // from IK to a source FK frame once a timer crosses a threshold.
+  if(sample.recoveryLower) {
+    const {frame,blend}=sample.recoveryLower;
+    const bodyQ=new THREE.Quaternion().fromArray(frame,3);
+    for(let i=0;i<2;i++) {
+      const leg=rig.legs[i],bone=9+i*3;
+      const hipQ=new THREE.Quaternion().fromArray(frame,3+bone*4);
+      const kneeQ=new THREE.Quaternion().fromArray(frame,3+(bone+1)*4);
+      const footQ=new THREE.Quaternion().fromArray(frame,3+(bone+2)*4);
+      leg.hip.position.lerp(v().fromArray(frame,76+i*3).multiplyScalar(.9),blend);
+      leg.hip.quaternion.slerp(bodyQ.clone().invert().multiply(hipQ),blend);
+      leg.knee.quaternion.slerp(hipQ.clone().invert().multiply(kneeQ),blend);
+      leg.foot.quaternion.slerp(kneeQ.clone().invert().multiply(footQ),blend);
+    }
+  }
+  rig.pony.rotation.x=-.14-Math.sin(time*7)*.045-(sample.pelvisPitch??0)*.3;
+  rig.pony.rotation.z=clamp(-sample.chestYaw*.23,-.25,.25);
   for(let i=0;i<rig.cloths.length;i++) {
-    rig.cloths[i].rotation.x+=Math.sin(time*5+i)*.04-sample.pelvisPitch*.3;
-    rig.cloths[i].rotation.z-=sample.chestYaw*.12;
+    rig.cloths[i].rotation.x+=Math.sin(time*7+i)*.065-sample.pelvisPitch*.42;
+    rig.cloths[i].rotation.z-=sample.chestYaw*.20+(sample.pelvisRoll??0)*.4;
   }
 }
-
+function sourceLowerBody(rig,runtime,pose,state,dt) {
+  const action=['idle','walk','run'].includes(pose.sourceLocomotion)?pose.sourceLocomotion
+    :['idle','walk','run'].includes(state)?state:runtime.lastLocomotion??'idle';
+  runtime.lastLocomotion=action;
+  const samples=sampleSourceLocomotion(rig,{weaponId:'tang-dao',state:action,dt,
+    speedFactor:pose.speedFactor,hold:pose.dt===0&&!pose.immediate});
+  const sampled=sampleReferenceCurveBlend(samples,runtime.sourceBlend);
+  return {samples,frame:sampled?.frame};
+}
+function floorMinimum(rig) {
+  rig.group.updateMatrixWorld(true);
+  return Math.min(...rig.legs.map(leg=>new THREE.Box3().setFromObject(leg.foot,true).min.y-rig.group.position.y));
+}
 export function resetCustomHammerPose(rig) {rig.customHammerState=undefined;rig.customHammerDebug=undefined;}
 export function applyCustomHammerPose(rig,pose={}) {
   if(rig.type!=='hero'||rig.weaponId!==HAMMER_ID)return false;
   const state=pose.state??'idle',phase=clamp(pose.sourceAttack?.phase??pose.phase??0,0,1);
   let runtime=rig.customHammerState;
-  if(!runtime)runtime=rig.customHammerState={weaponId:HAMMER_ID,key:null,time:0,blendAge:0,last:null,from:null};
+  if(!runtime)runtime=rig.customHammerState={weaponId:HAMMER_ID,key:null,time:0,blendAge:0,last:null,from:null,
+    sourceBlend:createReferenceCurveBlendWorkspace(),lastLocomotion:'idle'};
   if(pose.dt===0&&!pose.immediate&&runtime.last)return true;
   const dt=Number.isFinite(pose.dt)?Math.max(0,pose.dt):1/60;
   runtime.time+=dt;
   const time=Number.isFinite(pose.time)?pose.time:runtime.time;
   let sample=state==='attack'?sampleHammerMotion(pose.combo,phase):sampleHammerMotion(0,0);
-  let feet=state==='attack'?attackFeet(rig,sample,pose.attackStep):baseFeet();
-  if(state==='attack'&&pose.attackStep&&phase>HAMMER_MOVES[sample.index].recoverAt&&(pose.speed??0)>.025) {
+  let feet=state==='attack'?attackFeet(rig,sample):baseFeet();
+  const lower=sourceLowerBody(rig,runtime,pose,state,dt);
+  let lowerFrame=['idle','walk','run'].includes(state)?lower.frame:null;
+  if(lowerFrame) {
+    // Original source pelvis/leg curves retain their nimble knee lift, stride,
+    // leaning and layer-0 run/walk clock. Only the hammer carry is authored here.
+    sample.bodyPosition=v().fromArray(lowerFrame,0).multiplyScalar(.9);
+    sample.bodyQuaternion=new THREE.Quaternion().fromArray(lowerFrame,3).normalize();
+    sample.height=sample.bodyPosition.y;
+    const bodyEuler=new THREE.Euler().setFromQuaternion(sample.bodyQuaternion,'YXZ');
+    sample.pelvisYaw=bodyEuler.y;sample.pelvisPitch=bodyEuler.x;sample.pelvisRoll=bodyEuler.z;
+    const movement=state==='run'?1:state==='walk'?.5:0;
+    sample.chestYaw=-bodyEuler.y*.30;sample.chestPitch=-.045+movement*.03;
+    sample.gripLocal.y+=Math.sin(time*11.3)*.018*movement;
+    sample.shaftElevation+=movement*.16;sample.shaftYaw-=movement*.11;
+  } else if(state==='attack'&&phase>HAMMER_MOVES[sample.index].recoverAt&&(pose.speed??0)>.025&&lower.frame) {
     const recoveryTime=(phase-HAMMER_MOVES[sample.index].recoverAt)*HAMMER_MOVES[sample.index].duration;
-    const blend=smooth(recoveryTime/.075),gait=pose.gaitPhase??0,movement=clamp(pose.speed,0,1);
-    const walking=baseFeet();
-    walking.forEach((foot,i)=>{const angle=gait+i*Math.PI;foot.z+=Math.cos(angle)*.25*movement;foot.y+=Math.max(0,Math.sin(angle))*.16*movement;});
-    feet.forEach((foot,i)=>foot.lerp(walking[i],blend));
-    sample.height=THREE.MathUtils.lerp(sample.height,.87+Math.cos(gait*2)*.021*movement,blend);
-    sample.pelvisPitch=THREE.MathUtils.lerp(sample.pelvisPitch,.075*movement,blend);
-  }
-  if(state!=='attack') {
-    const movement=state==='run'?1:state==='walk'?.48:0;
-    const gait=pose.gaitPhase??runtime.time*(state==='run'?8:4.5);
-    if(movement) {
-      feet.forEach((foot,i)=>{const angle=gait+i*Math.PI;foot.z+=Math.cos(angle)*.25*movement;foot.y+=Math.max(0,Math.sin(angle))*.16*movement;});
-      sample.height=.87+Math.cos(gait*2)*.021*movement;
-      sample.pelvisYaw=Math.sin(gait)*.075*movement;sample.chestYaw=-sample.pelvisYaw*.7;
-      sample.pelvisPitch=.075*movement;
-      sample.grip.y+=Math.cos(gait*2)*.023*movement;sample.grip.z+=.025*movement;
-      sample.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(v(0,0,1),Math.sin(gait)*.035*movement));
-      sample.axis.copy(v(0,-1,0).applyQuaternion(sample.quaternion));
-    } else {
-      const breathe=Math.sin(time*2.3)*.008;sample.height+=breathe;sample.grip.y+=breathe;
-      sample.chestYaw+=Math.sin(time*1.7)*.012;
+    // Use the whole recovery for the turn back into locomotion. A short
+    // fixed blend forced a complete body turn into only a few render frames.
+    const blend=smooth(recoveryTime/HAMMER_MOVES[sample.index].recoverySeconds),frame=lower.frame;
+    const fromBody=new THREE.Quaternion().setFromEuler(new THREE.Euler(sample.pelvisPitch,sample.pelvisYaw,sample.pelvisRoll));
+    const sourceBody=new THREE.Quaternion().fromArray(frame,3).normalize();
+    sample.bodyQuaternion=fromBody.slerp(sourceBody,blend);
+    sample.bodyPosition=v(sample.bodyX,sample.height,sample.bodyZ).lerp(v().fromArray(frame,0).multiplyScalar(.9),blend);
+    sample.height=sample.bodyPosition.y;
+    const sourceYaw=new THREE.Euler().setFromQuaternion(sourceBody,'YXZ').y;
+    sample.pelvisYaw+=Math.atan2(Math.sin(sourceYaw-sample.pelvisYaw),Math.cos(sourceYaw-sample.pelvisYaw))*blend;
+    sample.footQuaternions=[];
+    for(let i=0;i<2;i++) {
+      const bone=9+i*3,hipQ=new THREE.Quaternion().fromArray(frame,3+bone*4),kneeQ=new THREE.Quaternion().fromArray(frame,3+(bone+1)*4);
+      const target=v().fromArray(frame,76+i*3).multiplyScalar(.9).applyQuaternion(sourceBody).add(v().fromArray(frame,0).multiplyScalar(.9));
+      target.add(v(0,-.46*.9,0).applyQuaternion(hipQ)).add(v(0,-.43*.9,0).applyQuaternion(kneeQ));
+      feet[i].lerp(target,blend);
+      sample.footQuaternions[i]=new THREE.Quaternion().setFromAxisAngle(yAxis,(sample.pelvisYaw-.12*Math.sin(sample.pelvisYaw)))
+        .slerp(new THREE.Quaternion().fromArray(frame,3+(bone+2)*4),blend);
     }
+    sample.recoveryLower={frame,blend};
+  } else if(state!=='attack') {
+    const breathe=Math.sin(time*2.3)*.008;sample.height+=breathe;sample.gripLocal.y+=breathe;
     if(state==='hurt') {
-      const stress=Math.sin(Math.PI*phase);sample.height-=.075*stress;
-      sample.pelvisPitch=-.14*stress;sample.chestPitch=-.10*stress;sample.grip.z+=.065*stress;
+      const stress=Math.sin(Math.PI*phase);sample.height-=.08*stress;
+      sample.pelvisPitch=-.23*stress;sample.chestPitch=-.15*stress;sample.gripLocal.z+=.045*stress;
     } else if(state==='roll') {
-      const tuck=Math.sin(Math.PI*phase);sample.height-=.23*tuck;
-      sample.pelvisPitch=.35*tuck;sample.chestPitch=.18*tuck;sample.grip.y-=.17*tuck;
-      sample.grip.z+=.06*tuck;feet.forEach((foot,i)=>{foot.y+=.10*tuck;foot.z+=(i===0?.18:-.17)*tuck;});
+      // A low, side-leading spring step keeps both hands on the hammer and
+      // responds immediately to the locomotion controller's evasive travel.
+      const tuck=Math.sin(Math.PI*phase);sample.height-=.29*tuck;
+      sample.pelvisYaw=-.75*tuck;sample.pelvisPitch=.48*tuck;sample.pelvisRoll=-.48*tuck;
+      sample.chestPitch=.22*tuck;sample.gripLocal.y-=.07*tuck;sample.gripLocal.z+=.03*tuck;
+      sample.shaftYaw+=.55*tuck;sample.shaftElevation+=.20*tuck;
+      feet.forEach((foot,i)=>{foot.y+=(i===0?.28:.13)*tuck;foot.z+=(i===0?.27:-.28)*tuck;});
+    } else if(state==='guard') {
+      sample.height-=.06;sample.pelvisYaw=-.28;sample.chestYaw=.15;sample.gripLocal.y+=.14;
+      sample.shaftYaw=-.48;sample.shaftElevation=.32;feet[0].z+=.13;feet[1].z-=.10;
     } else if(state==='dead') {
-      const collapse=smooth(phase);sample.height-=.24*collapse;sample.pelvisPitch=.48*collapse;
-      sample.chestPitch=.43*collapse;sample.grip.y-=.16*collapse;sample.grip.z+=.14*collapse;
+      const collapse=smooth(phase);sample.height-=.26*collapse;sample.pelvisPitch=.52*collapse;
+      sample.chestPitch=.46*collapse;sample.gripLocal.y-=.10*collapse;sample.gripLocal.z+=.12*collapse;
     }
   }
   const key=state==='attack'?`attack:${sample.index}`:state;
-  if(runtime.key!==key) {
-    runtime.from=runtime.last;runtime.blendAge=0;runtime.key=key;
-  }
+  if(runtime.key!==key){runtime.from=runtime.last;runtime.blendAge=0;runtime.key=key;}
   runtime.blendAge+=dt;
-  if(runtime.from&&!pose.immediate&&runtime.blendAge<.09) {
-    const a=smooth(runtime.blendAge/.09),from=runtime.from;
-    sample.grip.lerp(from.grip,1-a);sample.quaternion.slerp(from.quaternion,1-a);
+  resolveFrame(sample);
+  // Short source-like crossfade on a true state change. Consecutive authored
+  // carries already meet exactly and are displayed without a heavy wind-up.
+  if(runtime.from&&!pose.immediate&&runtime.blendAge<.055) {
+    const amount=smooth(runtime.blendAge/.055),from=runtime.from;
+    sample.grip.lerp(from.grip,1-amount);sample.quaternion.slerp(from.quaternion,1-amount);
     sample.axis.copy(v(0,-1,0).applyQuaternion(sample.quaternion));
-    for(const name of ['height','pelvisYaw','pelvisPitch','chestYaw','chestPitch'])sample[name]=THREE.MathUtils.lerp(from[name],sample[name],a);
-    feet.forEach((foot,i)=>foot.lerp(from.feet[i],1-a));
+    for(const name of ['height','pelvisPitch','chestYaw','chestPitch','pelvisRoll','chestRoll','bodyX','bodyZ'])
+      sample[name]=THREE.MathUtils.lerp(from[name]??0,sample[name]??0,amount);
+    const delta=Math.atan2(Math.sin(sample.pelvisYaw-from.pelvisYaw),Math.cos(sample.pelvisYaw-from.pelvisYaw));
+    sample.pelvisYaw=from.pelvisYaw+delta*amount;
+    if(!lowerFrame)feet.forEach((foot,i)=>foot.lerp(from.feet[i],1-amount));
   }
   for(const {node,p,r,s} of rig.bind){node.position.copy(p);node.rotation.copy(r);node.scale.copy(s);}
   rig.arms[1].weapon.position.set(0,0,0);rig.arms[1].weapon.quaternion.identity();
-  applyBody(rig,sample,feet,state,time,phase);
+  applyBody(rig,sample,feet,state,time,phase,lowerFrame);
+  // Preserve authored airborne moments; only actual shoe penetration lifts the
+  // rig. The two arms are solved after that correction from the same rigid shaft.
+  let minimum=floorMinimum(rig);
+  if(minimum<.055) {
+    const correction=.055-minimum;rig.body.position.y+=correction;sample.grip.y+=correction;
+    rig.group.updateMatrixWorld(true);minimum=floorMinimum(rig);
+  }
   const grip=constrainGrip(rig,sample.grip,sample.axis,sample.quaternion);
   const support=grip.clone().addScaledVector(sample.axis,-HAMMER_SHAFT.support);
-  solveLimb(rig,rig.arms[1].shoulder,rig.arms[1].elbow,rig.arms[1].wrist,grip,v(.8,-.12,.65),sample.quaternion);
-  solveLimb(rig,rig.arms[0].shoulder,rig.arms[0].elbow,rig.arms[0].wrist,support,v(-.8,-.12,.65),sample.quaternion);
+  const chestQ=localQuaternion(rig,rig.chest);
+  solveLimb(rig,rig.arms[1].shoulder,rig.arms[1].elbow,rig.arms[1].wrist,grip,v(.85,-.15,.55).applyQuaternion(chestQ),sample.quaternion);
+  solveLimb(rig,rig.arms[0].shoulder,rig.arms[0].elbow,rig.arms[0].wrist,support,v(-.85,-.15,.55).applyQuaternion(chestQ),sample.quaternion);
   rig.group.updateMatrixWorld(true);
-  const footMinY=Math.min(...rig.legs.map(leg=>{const box=new THREE.Box3().setFromObject(leg.foot,true);return box.min.y-rig.group.position.y;}));
+  const footMinY=floorMinimum(rig);
   const gap=rig.offhandGrip.getWorldPosition(v()).distanceTo(rig.arms[0].wrist.getWorldPosition(v()));
-  runtime.last={...sample,grip:sample.grip.clone(),quaternion:sample.quaternion.clone(),feet:feet.map(foot=>foot.clone())};
+  runtime.last={...sample,grip:grip.clone(),quaternion:sample.quaternion.clone(),feet:feet.map(foot=>foot.clone())};
   const profile=getHammerAttackProfile(pose.combo);
   rig.sourcePose={active:true,state,profile,phase,segment:pose.sourceAttack?.segment??'custom',footMinY,offhandGap:gap,scale:.9};
   rig.sourceMotionDebug={active:true,state,family:'custom-hammer',clip:state==='attack'?profile.name:`custom_hammer_${state}`,
-    phase,authored:true,rawTime:pose.sourceAttack?.rawTime??0,locomotion:[],offhandGap:gap,footMinY};
+    phase,authored:true,rawTime:pose.sourceAttack?.rawTime??0,
+    locomotion:lower.samples.map(({state,phase,rawTime,weight})=>({state,phase,rawTime,weight})),offhandGap:gap,footMinY};
   rig.customHammerDebug={state,combo:sample.index,phase,attackPhase:sample.attackPhase,offhandGap:gap,footMinY,
     grip:grip.toArray(),axis:sample.axis.toArray(),headMinY:rig.weaponBlades()[0].headMinY,
-    authoring:'New three-hit Hermite paths; original source rhythm only'};
-  rig.reviewedAttackSample=null;rig.attackFootTargets=feet;
+    pelvisYaw:sample.pelvisYaw,chestYaw:sample.chestYaw,airborne:footMinY>.16,
+    authoring:'Original-scale body turns and source locomotion; independently authored three-hit shaft paths'};
+  rig.reviewedAttackSample=null;rig.attackFootTargets=lowerFrame?null:feet;
   return true;
 }

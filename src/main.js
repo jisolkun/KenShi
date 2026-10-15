@@ -19,6 +19,8 @@ import { createEnemyFinishers } from "./enemyFinishers.js";
 import {HAMMER_ID} from './customHammer/definition.js';
 import {clipHammerSweep,hammerSweepContact,hammerGroundContact} from './customHammer/combat.js';
 import {createHammerFeedback} from './customHammer/feedback.js';
+import {sampleHammerTravel} from './customHammer/pose.js';
+import {resolveHammerStep} from './customHammer/movement.js';
 import { isCombatTarget, referenceAttackSensorTargets,
   sourceAttackDirectionAllowed,
   projectWalkablePoint } from "./heroAI.js";
@@ -332,7 +334,8 @@ function locomotion(dt, maxSpeed) {
     // Sweep the body displacement so source-style movement cannot jump across
     // props or living bodies during a slow frame. The reference injects its
     // character controller into ordinary movement, including attack recovery.
-    const resolved = resolveGreatDaoStep(hero.pos, {
+    const resolveStep=currentWeapon.customMotion?resolveHammerStep:resolveGreatDaoStep;
+    const resolved = resolveStep(hero.pos, {
       x: hero.moveVelocity.x * dt, z: hero.moveVelocity.z * dt,
     }, { obstacles: world.obstacles, bounds: world.bounds,
       targets: enemies.filter(enemy => isCombatTarget(enemy, enemies)).map(enemy => ({
@@ -907,7 +910,7 @@ function beginAttack(enemy) {
   hero.attackStep = null;
   hero.sourceClock = beginSourceStroke(hero.combo);
   if(currentWeapon.customMotion) {
-    hero.attackStep={angle:hero.angle,progress:0,
+    hero.attackStep={angle:hero.angle,progress:0,previousTravel:{forward:0,lateral:0},resolvedLocal:{forward:0,lateral:0},
       feet:rig.legs.map(leg=>leg.foot.getWorldPosition(new THREE.Vector3()))};
   }
   hero.attackStepPhase = 0;
@@ -954,13 +957,18 @@ function advanceSourceForces(dt,preview=false) {
 function advanceHammerRoot(dt) {
   const step=hero.attackStep;
   if(!currentWeapon.customMotion||hero.state!=='attack'||!step||!(dt>0))return;
-  const move=currentWeapon.moves[hero.combo];
-  const phase=hero.sourceClock.phase/Math.max(.001,move.recoverAt);
-  const u=THREE.MathUtils.clamp((phase-.08)/.45,0,1),progress=u*u*(3-2*u);
-  const travel=move.lunge*Math.max(0,progress-step.progress);step.progress=progress;
-  const displacement={x:Math.sin(step.angle)*travel,z:Math.cos(step.angle)*travel};
-  const resolved=resolveGreatDaoStep(hero.pos,displacement,{obstacles:world.obstacles,bounds:world.bounds,
+  const travel=sampleHammerTravel(hero.combo,hero.sourceClock.phase);
+  const previous=step.previousTravel??{forward:0,lateral:0};
+  const forward=travel.forward-previous.forward,lateral=travel.lateral-previous.lateral;
+  step.previousTravel=travel;
+  const sine=Math.sin(step.angle),cosine=Math.cos(step.angle);
+  const displacement={x:sine*forward+cosine*lateral,z:cosine*forward-sine*lateral};
+  const resolved=resolveHammerStep(hero.pos,displacement,{obstacles:world.obstacles,bounds:world.bounds,
     targets:enemies.filter(e=>isCombatTarget(e,enemies)).map(e=>({x:e.pos.x,z:e.pos.z,radius:e.radius}))});
+  const dx=resolved.x-hero.pos.x,dz=resolved.z-hero.pos.z;
+  step.resolvedLocal.forward+=dx*sine+dz*cosine;
+  step.resolvedLocal.lateral+=dx*cosine-dz*sine;
+  hero.moveVelocity.x+=dx/dt;hero.moveVelocity.z+=dz/dt;
   hero.pos.set(resolved.x,0,resolved.z);
 }
 function heroAttackCandidate() {
@@ -1008,7 +1016,7 @@ function hurtEnemy(e,damage,from,force=1,critical=false,playerContact=false,cutD
   e.hurtStrength=critical?1.15:.8;
   e.localHitStop=sourceContact?0:Math.max(e.localHitStop||0,.027);
   e.velocity.addScaledVector(knockback,force*(e.type==='boss'?.4:1));
-  if(sourceContact?.rising&&e.type!=='boss') e.sourceAirTime=0;
+  if(sourceContact?.rising&&sourceContact.weaponId!==HAMMER_ID&&e.type!=='boss') e.sourceAirTime=0;
   showDamage(e,damage,critical?'critical':'normal');
   if(sourceContact) {
     sourceImpact.hit(contactPoint??e.pos.clone().add(new THREE.Vector3(0,.9,0)),direction,
@@ -1023,8 +1031,9 @@ function hurtEnemy(e,damage,from,force=1,critical=false,playerContact=false,cutD
   if(e.hp<=0) {
     e.state='dead'; e.elapsed=0; e.duration=1.5; e.bar.visible=false;
     kills++; dropLoot(e.pos); e.deathDirection=direction; e.deathImpactDone=false; safeAudio('kill');
-    if(sourceContact&&sourceContact.weaponId!==HAMMER_ID) {
+    if(sourceContact) {
       e.rig.setFlash?.(0);
+      if(sourceContact.weaponId===HAMMER_ID){e.velocity.set(0,0,0);e.sourceAirTime=undefined;}
       e.finisher=enemyFinishers.breakEnemy(e.rig,{weaponId:sourceContact.weaponId,combo:sourceContact.combo,
         direction,contactPoint,cutNormal:sourceContact.cutNormal,critical});
       e.deathImpactDone=!!e.finisher;
@@ -1055,8 +1064,8 @@ function playSourceFootsteps() {
 function playSourceLanding() {
   const minimum=rig.sourcePose?.footMinY;
   if(!Number.isFinite(minimum)){hero.sourceAirborne=false;return;}
-  if(minimum>.09)hero.sourceAirborne=true;
-  else if(hero.sourceAirborne&&minimum<.035) {
+  if(minimum>(currentWeapon.customMotion ? .18 : .09))hero.sourceAirborne=true;
+  else if(hero.sourceAirborne&&minimum<(currentWeapon.customMotion ? .078 : .035)) {
     hero.sourceAirborne=false;
     safeAudio('landing',1);
   }
@@ -1107,12 +1116,13 @@ function updateHammerCombat(stroke,dt) {
   const frame=rig.weaponBlades()[0],phase=stroke.clock.phase;
   if(!frame?.headCenter){stroke.finished=true;return;}
   const sweep=clipHammerSweep(frame,stroke.previous,phase,stroke.previousPhase,stroke.move.active);
+  hammerFeedback.trace({frame,previous:stroke.previous,dt,
+    active:phase>=.12&&phase<=stroke.move.recoverAt*.98,
+    combo:stroke.combo,strikeId:stroke.id});
   if(!stroke.released&&phase>=stroke.move.active[0]) {
     stroke.released=true;safeAudio('weaponSlash',stroke.weaponId,stroke.combo);
   }
   if(sweep) {
-    hammerFeedback.trace({frame:sweep.current,previous:sweep.previous,dt,active:true,
-      combo:stroke.combo,strikeId:stroke.id});
     if(stroke.combo===2&&!stroke.ground) {
       const point=hammerGroundContact(sweep.current,sweep.previous);
       if(point) {
@@ -1248,7 +1258,7 @@ function updateHero(frameDt) {
   hero.velocity.multiplyScalar(Math.exp(-dt * 10));
   hero.pos.addScaledVector(hero.velocity, dt);
   if (hero.attackTarget && !isCombatTarget(hero.attackTarget, enemies)) hero.attackTarget = null;
-  const maxSpeed = 5.8 * (0.88 + currentWeapon.stats.speed * 0.024);
+  const maxSpeed = currentWeapon.customMotion ? 6.25 : 5.8 * (0.88 + currentWeapon.stats.speed * 0.024);
   function navigate() {
     locomotion(dt, maxSpeed);
     locomotionState();
@@ -1360,6 +1370,8 @@ function updateHero(frameDt) {
     hurtStrength: hero.hurtStrength || 0,
   });
   hero.rig.group.updateMatrixWorld(true);
+  if(currentWeapon.customMotion)hammerFeedback.movement?.({position:hero.pos,direction:hero.moveVelocity,
+    speed:hero.actualSpeed,dt,grounded:(rig.sourcePose?.footMinY??0)<.10});
   playSourceFootsteps();
   updateSourceCombat(dt);
 
@@ -1845,7 +1857,7 @@ function updateCamera(dt) {
   desired.y = preview ? 1.05 : 0.15;
   camera.zoom = THREE.MathUtils.lerp(camera.zoom, preview ? 2.4 : 1, 1 - Math.exp(-dt * 8));
   camera.updateProjectionMatrix();
-  const followRate = !preview && isHeavyWeapon(currentWeapon.id) && hero.state === 'attack' ? 3.8 : 7;
+  const followRate = currentWeapon.customMotion ? 8 : !preview && isHeavyWeapon(currentWeapon.id) && hero.state === 'attack' ? 3.8 : 7;
   cameraFocus.lerp(desired, 1 - Math.exp(-dt * followRate));
   shakeAge += dt;
   const amplitude = shake * Math.exp(-shakeAge * 19) * Math.sin(shakeAge * 58);

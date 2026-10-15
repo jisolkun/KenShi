@@ -334,7 +334,8 @@ function sample(p, keys) {
 export function poseCharacter(rig, {state='idle',time=0,phase=0,combo=0,speed=1,skill=0,dt,
   gaitPhase,moveBlend,turnLean=0,attackCarry=0,attackStep=null,hurtDirection=1,hurtStrength=1,hurtVertical=0,transition=true,immediate=false,
   alertness=.35,idleAge,lookYaw,sourceAttack,sourceLocomotion,speedFactor} = {}) {
-  if(applyCustomHammerPose(rig,{state,time,phase,combo,speed,dt,gaitPhase,moveBlend,attackStep,immediate,sourceAttack,hurtDirection,hurtStrength}))return;
+  if(applyCustomHammerPose(rig,{state,time,phase,combo,speed,dt,gaitPhase,moveBlend,turnLean,attackStep,immediate,sourceAttack,
+    sourceLocomotion,speedFactor,hurtDirection,hurtStrength,alertness,idleAge,lookYaw}))return;
   if(applySourceHeroPose(rig,{state,time,phase,combo,dt,immediate,sourceAttack,sourceLocomotion,speedFactor}))return;
   const returningFromSource=Boolean(rig.sourceMotionState?.active);
   if(returningFromSource){

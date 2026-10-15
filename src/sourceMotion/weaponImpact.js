@@ -6,7 +6,7 @@ export const WEAPON_IMPACT_PROFILES = Object.freeze({
   'dual-dao': Object.freeze({ family: 'paired-cut', styleId: 'dual-cross-flick', duration: .14, chips: 6 }),
   'tang-dao': Object.freeze({ family: 'incision', styleId: 'tang-directional-incision', duration: .17, chips: 4 }),
   'great-dao': Object.freeze({ family: 'heavy-cleave', styleId: 'great-cleave-slivers', duration: .23, chips: 7 }),
-  'great-hammer': Object.freeze({ family: 'solid-pressure', styleId: 'hammer-compression-core', duration: .24, chips: 9 }),
+  'great-hammer': Object.freeze({ family: 'solid-pressure', styleId: 'hammer-pressure-flare', duration: .29, chips: 14 }),
 });
 export const WEAPON_IMPACT_POOL_SIZE = 12;
 
@@ -76,6 +76,7 @@ export function createWeaponImpact(scene) {
   const pools = new Map(), ownedGeometry = new Set(), ownedMaterial = new Set(), ownedInstances = new Set();
   let serial = 0, destroyed = false;
   const point = new THREE.Vector3(), rotation = new THREE.Quaternion(), scale = new THREE.Vector3(), matrix = new THREE.Matrix4();
+  const pressureDirection = new THREE.Vector3();
   const euler = new THREE.Euler();
   const ownGeometry = value => { ownedGeometry.add(value); return value; };
   const ownMaterial = value => { ownedMaterial.add(value); return value; };
@@ -89,14 +90,16 @@ export function createWeaponImpact(scene) {
     const chipGeometry = ownGeometry(geometryWithTag(hammer ? new THREE.BoxGeometry(1, .4, .75) : id === 'great-dao'
       ? new THREE.OctahedronGeometry(1, 0) : id === 'dual-dao' ? new THREE.TetrahedronGeometry(1, 0) : new THREE.BoxGeometry(1, .35, .8), 'armor-chips', profile.family));
     const sliverGeometry = id === 'great-dao' ? ownGeometry(geometryWithTag(new THREE.TetrahedronGeometry(1, 0), 'stylized-dark-red-slivers', profile.family)) : null;
+    const pressureRingGeometry = hammer ? ownGeometry(geometryWithTag(new THREE.RingGeometry(.84, 1, 40), 'expanding-pressure-halo', profile.family)) : null;
+    const pressureRayGeometry = hammer ? ownGeometry(geometryWithTag(new THREE.OctahedronGeometry(1, 0), 'radial-pressure-streaks', profile.family)) : null;
     const pool = { next: 0, slots: [] };
     for (let i = 0; i < WEAPON_IMPACT_POOL_SIZE; i++) {
       const group = new THREE.Group();
       group.name = `${profile.styleId}: slot ${i}`;
       group.visible = false;
       group.userData = { effectType: 'weapon-impact', weaponId: id, effectFamily: profile.family, styleId: profile.styleId, poolSlot: i, phase: 'inactive' };
-      const glint = new THREE.Mesh(glintGeometry, ownMaterial(transparentMaterial(hammer ? 0xf1ddaa : id === 'great-dao' ? 0xe3c4a9 : id === 'tang-dao' ? 0xebdac4 : 0xd4e3df, { additive: !hammer })));
-      glint.name = hammer ? 'Compact solid contact pressure' : 'Directional cutting contact';
+      const glint = new THREE.Mesh(glintGeometry, ownMaterial(transparentMaterial(hammer ? 0xe4f5ff : id === 'great-dao' ? 0xe3c4a9 : id === 'tang-dao' ? 0xebdac4 : 0xd4e3df, { additive: true })));
+      glint.name = hammer ? 'Bright compression contact core' : 'Directional cutting contact';
       group.add(glint);
       const chips = new THREE.InstancedMesh(chipGeometry, ownMaterial(transparentMaterial(0x59625a, { lit: true })), profile.chips);
       chips.frustumCulled = false;
@@ -106,11 +109,15 @@ export function createWeaponImpact(scene) {
       group.add(chips);
       const slivers = sliverGeometry ? new THREE.InstancedMesh(sliverGeometry, ownMaterial(transparentMaterial(0x65171b)), 5) : null;
       if (slivers) { slivers.name = 'Dark red stylized cutting slivers'; slivers.frustumCulled = false; ownedInstances.add(slivers); group.add(slivers); }
+      const pressureRing = hammer ? new THREE.Mesh(pressureRingGeometry, ownMaterial(transparentMaterial(0x9bd7ff, { additive: true }))) : null;
+      const pressureRays = hammer ? new THREE.InstancedMesh(pressureRayGeometry, ownMaterial(transparentMaterial(0xe9f6ff, { additive: true })), 16) : null;
+      if (pressureRing) { pressureRing.name = 'Expanding contact pressure halo'; group.add(pressureRing); }
+      if (pressureRays) { pressureRays.name = 'Contact radial pressure rays'; pressureRays.frustumCulled = false; pressureRays.instanceMatrix.setUsage(THREE.DynamicDrawUsage); ownedInstances.add(pressureRays); group.add(pressureRays); }
       holder.add(group);
-      const slot = { id, index: i, group, glint, chips, slivers, age: 0, life: profile.duration,
+      const slot = { id, index: i, group, glint, chips, slivers, pressureRing, pressureRays, age: 0, life: profile.duration,
         active: false, serial: 0, seed: i, gain: 1, awaitingPresentation: false, unseenAge: 0,
         gravity: new THREE.Vector3(), direction: FORWARD.clone() };
-      if (hammer) for (const mesh of [glint, chips]) mesh.onAfterRender = () => {
+      if (hammer) for (const mesh of [glint, chips, pressureRing, pressureRays]) mesh.onAfterRender = () => {
         if (slot.active && slot.awaitingPresentation) { slot.awaitingPresentation = false; slot.age = 0; }
       };
       group.userData.snapshot = () => slotSnapshot(slot);
@@ -127,12 +134,12 @@ export function createWeaponImpact(scene) {
       const seed = slot.seed * 17 + i * 3.7 + (kind === 'sliver' ? 200 : 0);
       const angle = noise(seed) * Math.PI * 2, radial = .8 + noise(seed + 1) * 1.45;
       const forward = (slot.id === 'great-hammer' ? 1.7 : 1.1) + noise(seed + 2) * 1.7;
-      const spread = slot.id === 'great-hammer' ? .62 : .5;
+      const spread = slot.id === 'great-hammer' ? 1.05 : .5;
       point.set(Math.cos(angle) * radial * t * spread, Math.sin(angle) * radial * t * spread, forward * t);
       point.addScaledVector(slot.gravity, .5 * t * t);
       euler.set(noise(seed + 3) * 6 + t * 11, noise(seed + 4) * 6 - t * 8, angle + t * 9);
       rotation.setFromEuler(euler);
-      const size = (.018 + noise(seed + 5) * .028) * (1 - progress * .6);
+      const size = (.018 + noise(seed + 5) * .028) * (slot.id === 'great-hammer' ? 1.65 : 1) * (1 - progress * .6);
       if (kind === 'sliver') scale.set(size * .4, size * .65, size * 2.5);
       else scale.set(size, size * (slot.id === 'great-hammer' ? .45 : .8), size);
       matrix.compose(point, rotation, scale);
@@ -152,9 +159,29 @@ export function createWeaponImpact(scene) {
     slot.glint.visible = flash > 0;
     slot.glint.material.opacity = flash * (slot.id === 'great-hammer' ? .80 : .68);
     if (slot.id === 'great-hammer') {
-      const pressure = 1 + Math.min(1, slot.age / .030) * .35;
-      slot.glint.scale.set(.082 * pressure * (1 - p * .55), .070 * pressure, .115 * pressure);
-      slot.glint.material.color.setHex(slot.age < .025 ? 0xfff1cd : 0xd7b877);
+      const pressure = 1 + Math.min(1, slot.age / .035) * .48;
+      slot.glint.scale.set(.19 * pressure * (1 - p * .55), .16 * pressure, .25 * pressure);
+      slot.glint.material.color.setHex(slot.age < .025 ? 0xfff9e2 : slot.combo === 2 ? 0xffc96b : slot.combo === 1 ? 0x9beef2 : 0xb9ddff);
+      slot.glint.material.opacity = flash * .90;
+      const pulse = Math.max(0, 1 - slot.age / .19), radius = .15 + .64 * (1 - (1 - Math.min(1, slot.age / .19)) ** 2);
+      slot.pressureRing.visible = pulse > 0; slot.pressureRing.scale.setScalar(radius);
+      slot.pressureRing.material.color.setHex(slot.combo === 2 ? 0xffd17f : slot.combo === 1 ? 0x9ceee8 : 0x9bd7ff);
+      slot.pressureRing.material.opacity = pulse * .64;
+      slot.pressureRays.visible = p < .80;
+      const rayProgress = Math.min(1, p / .8);
+      for (let i = 0; i < slot.pressureRays.count; i++) {
+        const seed = slot.seed * 29 + i * 3.7, angle = i / slot.pressureRays.count * Math.PI * 2 + noise(seed) * .12;
+        const vertical = slot.combo === 1 ? 1.35 : 1, horizontal = slot.combo === 0 ? 1.3 : 1;
+        const ray = pressureDirection.set(Math.cos(angle) * horizontal, Math.sin(angle) * vertical, .20 + noise(seed + 3) * .45).normalize();
+        const travel = (.06 + rayProgress * (.47 + noise(seed + 1) * .45)) * (slot.combo === 2 ? 1.18 : 1);
+        point.copy(ray).multiplyScalar(travel); rotation.setFromUnitVectors(FORWARD, ray);
+        const length = (.13 + noise(seed + 2) * .22) * (1 - rayProgress * .65);
+        scale.set(.014 * (1 - rayProgress * .6), .014 * (1 - rayProgress * .6), length);
+        matrix.compose(point, rotation, scale); slot.pressureRays.setMatrixAt(i, matrix);
+      }
+      slot.pressureRays.instanceMatrix.needsUpdate = true;
+      slot.pressureRays.material.opacity = .90 * (1 - rayProgress) ** 1.4;
+      slot.pressureRays.material.color.setHex(slot.combo === 2 ? 0xffe1a0 : slot.combo === 1 ? 0xcdfff3 : 0xe0f4ff);
     } else slot.glint.scale.set(1 - p * .55, 1, .85 + p * .65);
     particles(slot, slot.chips, 'chip');
     particles(slot, slot.slivers, 'sliver');

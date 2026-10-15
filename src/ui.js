@@ -63,7 +63,7 @@ export function createUI(callbacks = {}, initialSelectedWeaponId = DEFAULT_WEAPO
     <div class="modal-layer is-hidden"><section class="game-modal" role="dialog" aria-modal="true" aria-label="战场菜单"></section></div>
     <div class="notification" role="status"><span></span></div>
     <div class="damage-layer" aria-hidden="true"></div>
-    <span class="game-version" aria-label="游戏版本">v0.16.0 · 大锤三连击</span>
+    <span class="game-version" aria-label="游戏版本">v0.17.0 · 旋锤破阵</span>
     <div class="orientation-notice" role="status"><div class="orientation-icon" aria-hidden="true">↻</div><b>请横屏游玩</b><span>将手机旋转至横向后继续</span><button class="orientation-retry" data-action="mobile-view-retry">重新尝试全屏与横屏</button></div>
   `;
   document.body.append(root);
@@ -226,7 +226,7 @@ export function createUI(callbacks = {}, initialSelectedWeaponId = DEFAULT_WEAPO
     setText($('.preview-caption>span'), `点选类型 · 演示${moveCountName(weapon)}普攻`);
     $('.weapon-grid').innerHTML = WEAPONS.filter(item => isWeaponUnlocked(item.id)).map(item => {
       const selected = item.id === selectedWeaponId;
-      return `<button class="weapon-card ${selected ? 'selected' : ''}" data-weapon="${item.id}" aria-pressed="${selected}">${weaponSilhouette(item)}<b>${typeName(item)}</b><small>${item.id === 'great-hammer' ? '蓄势抡击 · 三连破阵' : item.id === 'dual-dao' ? '双刃交替' : item.id==='great-dao'?'重刃横扫 · 腾身断阵':'转身挥砍'}</small><span class="weapon-selected">${selected ? '已选' : '选择'}</span></button>`;
+      return `<button class="weapon-card ${selected ? 'selected' : ''}" data-weapon="${item.id}" aria-pressed="${selected}">${weaponSilhouette(item)}<b>${typeName(item)}</b><small>${item.id === 'great-hammer' ? '旋身腾跃 · 三连破阵' : item.id === 'dual-dao' ? '双刃交替' : item.id==='great-dao'?'重刃横扫 · 腾身断阵':'转身挥砍'}</small><span class="weapon-selected">${selected ? '已选' : '选择'}</span></button>`;
     }).join('');
     $('.weapon-detail').innerHTML = `<div class="weapon-detail-heading"><span>所选类型</span>${weaponSilhouette(weapon)}<h3>${typeName(weapon)}</h3><b>${moveCountName(weapon)}普攻 · 前方接敌施展</b></div><p class="weapon-description">${weapon.id === 'dual-dao' ? `左右双刃交替挥斩，接续${moveCountName(weapon)}普攻。` : ['great-dao','great-hammer'].includes(weapon.id)?weapon.description:`持刀踏步转身，衔接${moveCountName(weapon)}普攻。`}<br>点按地面或敌人定向，按住持续调整方向，松手后减速。</p><div class="weapon-moves"><span>普攻动作</span><ol>${weapon.moves.map(move => `<li>${typeof move === 'string' ? move : move.name}</li>`).join('')}</ol></div><button class="primary-button" data-action="armory-confirm"><span>以${typeName(weapon)}入阵</span><i>→</i></button><small class="weapon-preview-note">左侧选类型 · 中央观看普攻</small>`;
   }

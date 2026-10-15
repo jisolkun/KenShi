@@ -4,9 +4,9 @@ export const HAMMER_ID = 'great-hammer';
 export const HAMMER_SHAFT = Object.freeze({ length: 1.02, support: .24, tail: .36,
   halfExtents: Object.freeze([.26, .18, .17]), floor: .055 });
 const rows = [
-  ['磐山横破', .90, .64, .43, [.35, .51], 42, 1.85, .26, .70, 'arc'],
-  ['回峰挑击', .94, .68, .45, [.36, .54], 48, 1.90, .20, .82, 'arc'],
-  ['落岳震阵', 1.20, 1.00, .73, [.60, .80], 76, 1.80, .32, 1.35, 'crush'],
+  ['旋身横破', .78, .56, .35, [.25, .43], 42, 2.05, 1.05, .70, 'arc'],
+  ['回风挑岳', .82, .59, .35, [.24, .45], 48, 2.10, .90, .82, 'arc'],
+  ['腾岳震阵', 1.02, .80, .58, [.47, .68], 76, 2.00, 1.20, 1.35, 'crush'],
 ];
 export const HAMMER_MOVES = Object.freeze(rows.map(([name,duration,attackSeconds,contact,active,damage,reach,lunge,knockback,shape],combo) => Object.freeze({
   name, duration, attackSeconds, recoverySeconds: duration-attackSeconds,
@@ -34,8 +34,8 @@ export function getHammerAttackTiming(combo=0) {
 }
 export const HAMMER_WEAPON = {
   id: HAMMER_ID, name: '大锤', category: '重兵', grip: 'twohand', customMotion: true,
-  tagline: '横破、提挑、落岳，三击破阵',
-  description: '沉肩转腰斜横破阵，反向提挑借势抬锤，再踏步过顶重砸。双手合握一柄，三击从蓄力、爆发到回收连续承接。',
+  tagline: '旋身、回风、腾岳，三击破阵',
+  description: '交叉旋步横扫开阵，反身回风挑起锤势，再纵身腾跃过顶震地。腰胯领锤、双手合握，奔走与三连击连贯衔接。',
   effectColor: 0xd2b37c, effectAccent: 0xf1dfb5,
-  stats: {speed:3,power:5,reach:4}, moves: HAMMER_MOVES,
+  stats: {speed:4,power:5,reach:4}, moves: HAMMER_MOVES,
 };
