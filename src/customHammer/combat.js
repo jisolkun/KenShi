@@ -68,6 +68,11 @@ export function hammerSweepContact(current,previous,target) {
     ||(target.radius??.4)<0||(target.maxY??1.8)<(target.minY??.12)
     ||[current.headHalfExtents.x,current.headHalfExtents.y,current.headHalfExtents.z].some(n=>n<0)
     ||![current.headQuaternion?.x,current.headQuaternion?.y,current.headQuaternion?.z,current.headQuaternion?.w].every(Number.isFinite))return null;
+  const from=previous?.headCenter??current.headCenter;
+  const dx=current.headCenter.x-from.x,dz=current.headCenter.z-from.z,square=dx*dx+dz*dz;
+  const along=square?Math.max(0,Math.min(1,((target.x-from.x)*dx+(target.z-from.z)*dz)/square)):0;
+  const envelope=Math.max(current.headHalfExtents.length(),previous?.headHalfExtents?.length()??0)+(target.radius??.4);
+  if(Math.hypot(target.x-from.x-dx*along,target.z-from.z-dz*along)>envelope)return null;
   if(!previous?.headCenter)return frameContact(current,target);
   const distance=previous.headCenter.distanceTo(current.headCenter);
   const turn=previous.headQuaternion.angleTo(current.headQuaternion);
@@ -79,6 +84,21 @@ export function hammerSweepContact(current,previous,target) {
   return null;
 }
 export function hammerSweepContains(current,previous,target) {return !!hammerSweepContact(current,previous,target);}
+// The visible pressure rim extends the solid head's strike. Sample the same
+// rotating box path, with a bounded envelope rather than a radial body sensor.
+export function hammerPressureContact(current,previous,target,padding=0) {
+  const solid=hammerSweepContact(current,previous,target);
+  if(solid)return {...solid,pressure:false};
+  if(!Number.isFinite(padding)||padding<=0||!current?.headHalfExtents)return null;
+  const expand=frame=>frame&&({...frame,headHalfExtents:frame.headHalfExtents.clone().addScalar(padding)});
+  const contact=hammerSweepContact(expand(current),expand(previous),target);
+  return contact?{...contact,pressure:true}:null;
+}
+export function hammerShockContains(point,target,radius) {
+  if(!validVector(point)||!target||![target.x,target.z,target.minY??.12,target.radius??.4,radius].every(Number.isFinite)
+    ||radius<=0||(target.radius??.4)<0||(target.minY??.12)>point.y+.48)return false;
+  return Math.hypot(target.x-point.x,target.z-point.z)<=radius+(target.radius??.4);
+}
 export function hammerGroundContact(current,previous,floor=.049) {
   if(!current?.headCorners)return null;
   let contact=null;

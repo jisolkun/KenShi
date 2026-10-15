@@ -14,6 +14,11 @@ const finiteQuaternion = value => finiteVector(value) && Number.isFinite(value.w
 const vector = (out, value) => Array.isArray(value) ? out.fromArray(value) : out.copy(value);
 const rotation = (out, value) => Array.isArray(value) ? out.fromArray(value).normalize() : out.copy(value).normalize();
 const MAX_SWEEP_POINTS = 64;
+// The pressure envelope accompanies the enlarged physical sweep. The solid
+// head ghosts retain their measured size, while the air displaced around them
+// opens into a broad, translucent wake.
+const PRESSURE_WIDTH_GAIN = 1.28;
+const GROUND_SHOCK_RADIUS = 2.45;
 const FORWARD = new THREE.Vector3(0, 0, 1);
 const SWEEP_PALETTES = [
   { wake: new THREE.Color(0x68a9ff), rim: new THREE.Color(0xe4f4ff), spark: new THREE.Color(0xa6dbff) },
@@ -213,13 +218,13 @@ export function createHammerFeedback(scene) {
     if (!record.mesh.visible) return;
     const geometry = record.mesh.geometry, positions = geometry.attributes.position, colors = geometry.attributes.color;
     const palette = SWEEP_PALETTES[record.combo], samples = record.samples, fade = (1 - clamp(record.age / record.life, 0, 1)) ** 1.25;
-    const widths = [-.17, -.075, .47, .70, -.105, -.055], alphas = [0, .30, .17, 0, .91, .72];
+    const widths = [-.17, -.075, .47, .70, -.105, -.055], alphas = [0, .29, .16, 0, .87, .72];
     for (let i = 0; i < samples.length; i++) {
       const sample = samples[i], tail = Math.min(1, (i + .3) / 3), tip = Math.min(1, (samples.length - i) / 2);
       axis.set(0, 1, 0).applyQuaternion(sample.quaternion);
       for (let row = 0; row < 6; row++) {
         const index = i * 6 + row;
-        p.copy(sample.position).addScaledVector(axis, widths[row] * sample.width);
+        p.copy(sample.position).addScaledVector(axis, widths[row] * sample.width * PRESSURE_WIDTH_GAIN);
         positions.setXYZ(index, p.x, p.y, p.z);
         const color = row < 4 ? palette.wake : palette.rim;
         colors.setXYZW(index, color.r, color.g, color.b, alphas[row] * fade * tail * tip * sample.alpha);
@@ -234,11 +239,11 @@ export function createHammerFeedback(scene) {
       for (const part of [record.mesh, record.echo, record.cracks]) part.visible = record.active;
       if (!record.active) continue;
       const u = clamp(record.age / record.life, 0, 1), expand = 1 - (1 - u) ** 3;
-      record.mesh.scale.setScalar((.28 + 1.64 * expand) * record.gain);
-      record.echo.scale.setScalar((.19 + 2.15 * (1 - (1 - u) ** 2)) * record.gain);
-      record.cracks.scale.setScalar((1.18 + .42 * Math.min(1, u * 5)) * record.gain);
-      record.mesh.material.opacity = .72 * (1 - u) ** 2;
-      record.echo.material.opacity = .50 * (1 - u) ** 2.8;
+      record.mesh.scale.setScalar((.34 + (GROUND_SHOCK_RADIUS - .34) * expand) * record.gain);
+      record.echo.scale.setScalar((.24 + 2.44 * (1 - (1 - u) ** 2)) * record.gain);
+      record.cracks.scale.setScalar((1.48 + .57 * Math.min(1, u * 5)) * record.gain);
+      record.mesh.material.opacity = .68 * (1 - u) ** 2;
+      record.echo.material.opacity = .46 * (1 - u) ** 2.8;
       record.cracks.material.opacity = .64 * (1 - u) ** .8;
     }
     group.visible = [heads, dust, chips, sparks, contacts, sweeps].some(collection => collection.some(record => record.active));
@@ -254,7 +259,7 @@ export function createHammerFeedback(scene) {
     let record = sweeps.find(item => item.active && item.strikeId === strikeId && item.combo === index);
     if (!record) {
       record = sweeps[sweepCursor]; sweepCursor = (sweepCursor + 1) % sweeps.length;
-      begin(record); record.samples.length = 0; record.combo = index; record.strikeId = strikeId; record.life = index === 2 ? .21 : .17;
+      begin(record); record.samples.length = 0; record.combo = index; record.strikeId = strikeId; record.life = index === 2 ? .235 : .195;
     }
     record.age = 0;
     // World-space samples never rotate with the hero after they are emitted.
@@ -288,9 +293,9 @@ export function createHammerFeedback(scene) {
     }
     if (lastSpeed > 3.6) {
       const seed = sampledHeads * 3;
-      p.copy(current); axis.set(0, 1, 0).applyQuaternion(currentQ); p.addScaledVector(axis, .12 + hash(seed) * .28);
-      heading.copy(current).sub(prior).multiplyScalar(.15 / dt); heading.y += .45;
-      spawnSpark(p, heading, SWEEP_PALETTES[index].spark, .16 + Math.min(.20, lastSpeed * .012), .16 + hash(seed + 1) * .07, seed);
+      p.copy(current); axis.set(0, 1, 0).applyQuaternion(currentQ); p.addScaledVector(axis, .12 + hash(seed) * .40);
+      heading.copy(current).sub(prior).multiplyScalar(.18 / dt); heading.y += .45;
+      spawnSpark(p, heading, SWEEP_PALETTES[index].spark, .20 + Math.min(.25, lastSpeed * .015), .17 + hash(seed + 1) * .07, seed);
     }
     distanceSinceSample = 0; timeSinceSample = 0; attach(); sync(); return true;
   }
@@ -304,7 +309,7 @@ export function createHammerFeedback(scene) {
     if (!finiteVector(heading) || heading.lengthSq() < 1e-8) heading.set(0, 0, 1); heading.normalize();
     const groundDirection = heading.clone(), index = ((Math.trunc(combo) % 3) + 3) % 3, gain = index === 2 ? 1 : .75;
     const record = contacts[contactCursor]; contactCursor = (contactCursor + 1) % contacts.length;
-    begin(record); record.gain = gain; record.life = .60;
+    begin(record); record.gain = gain; record.life = .64;
     for (const [part, height] of [[record.mesh, .008], [record.echo, .012], [record.cracks, .004]]) { part.position.copy(contact); part.position.y += height; }
     record.cracks.rotation.y = hash(floorContacts + 3) * Math.PI;
     const seed = ++floorContacts * 37;
@@ -315,19 +320,19 @@ export function createHammerFeedback(scene) {
         if (kind === 'dust') dustCursor = (dustCursor + 1) % dust.length; else chipCursor = (chipCursor + 1) % chips.length;
         begin(particle); particle.origin.copy(contact); particle.origin.y += kind === 'dust' ? .032 : .023;
         particle.origin.x += radialX * .045; particle.origin.z += radialZ * .045;
-        const speed = (1.4 + hash(seed + i * 3 + (kind === 'chip' ? 11 : 0)) * (kind === 'chip' ? 2.8 : 2.1)) * gain;
-        particle.velocity.set(radialX * speed + groundDirection.x * .40 * gain,
-          (kind === 'chip' ? 1.1 + hash(seed + i + 9) * 1.9 : .75 + hash(seed + i + 2) * .9) * gain,
-          radialZ * speed + groundDirection.z * .40 * gain);
-        particle.size = kind === 'dust' ? .13 + hash(seed + i + 4) * .12 : .036 + hash(seed + i + 5) * .050;
-        particle.life = kind === 'dust' ? .35 + hash(seed + i + 6) * .20 : .36 + hash(seed + i + 7) * .22;
-        particle.alpha = kind === 'dust' ? .82 : .98; particle.spin = kind === 'chip' ? (hash(seed + i + 12) - .5) * 22 : .5;
+        const speed = (1.8 + hash(seed + i * 3 + (kind === 'chip' ? 11 : 0)) * (kind === 'chip' ? 3.5 : 2.6)) * gain;
+        particle.velocity.set(radialX * speed + groundDirection.x * .50 * gain,
+          (kind === 'chip' ? 1.25 + hash(seed + i + 9) * 2.0 : .85 + hash(seed + i + 2) * .95) * gain,
+          radialZ * speed + groundDirection.z * .50 * gain);
+        particle.size = kind === 'dust' ? .16 + hash(seed + i + 4) * .145 : .044 + hash(seed + i + 5) * .060;
+        particle.life = kind === 'dust' ? .37 + hash(seed + i + 6) * .20 : .38 + hash(seed + i + 7) * .22;
+        particle.alpha = kind === 'dust' ? .76 : .98; particle.spin = kind === 'chip' ? (hash(seed + i + 12) - .5) * 22 : .5;
         euler.set(hash(seed + i + 13) * 6, hash(seed + i + 14) * 6, angle); particle.quaternion.setFromEuler(euler);
       }
       if (i < 18) {
         p.copy(contact); p.y += .045;
-        axis.set(radialX * (2.7 + hash(seed + i) * 2), .4 + hash(seed + i + 22) * 1.4, radialZ * (2.7 + hash(seed + i) * 2));
-        spawnSpark(p, axis, i % 3 === 0 ? SWEEP_PALETTES[0].spark : SWEEP_PALETTES[2].spark, .28 + hash(seed + i + 4) * .24, .21 + hash(seed + i + 3) * .10, seed + i);
+        axis.set(radialX * (3.4 + hash(seed + i) * 2.5), .5 + hash(seed + i + 22) * 1.5, radialZ * (3.4 + hash(seed + i) * 2.5));
+        spawnSpark(p, axis, i % 3 === 0 ? SWEEP_PALETTES[0].spark : SWEEP_PALETTES[2].spark, .35 + hash(seed + i + 4) * .30, .23 + hash(seed + i + 3) * .10, seed + i);
       }
     }
     attach(); sync(); return true;
@@ -374,6 +379,7 @@ export function createHammerFeedback(scene) {
   function diagnostics() {
     return {
       destroyed, budget: HAMMER_FEEDBACK_BUDGET, lastSpeed, sampledHeads, floorContacts, movementBursts,
+      pressureWidthGain: PRESSURE_WIDTH_GAIN, groundShockRadius: GROUND_SHOCK_RADIUS,
       activeHeads: headMesh.count, activeDust: dustMesh.count, activeChips: chipMesh.count, activeSparks: sparkMesh.count,
       activeContacts: contacts.filter(record => record.active).length, activeSweeps: sweeps.filter(record => record.active).length,
       geometryCount: geometries.size, materialCount: materials.size,

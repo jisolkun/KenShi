@@ -17,13 +17,13 @@ import { getSourceCameraImpulse, lerpSourceCameraOffset } from "./sourceMotion/i
 import { sampleWeaponContact } from "./sourceMotion/contact.js";
 import { createEnemyFinishers } from "./enemyFinishers.js";
 import {HAMMER_ID} from './customHammer/definition.js';
-import {clipHammerSweep,hammerSweepContact,hammerGroundContact} from './customHammer/combat.js';
+import {clipHammerSweep,hammerPressureContact,hammerGroundContact,hammerShockContains} from './customHammer/combat.js';
 import {createHammerFeedback} from './customHammer/feedback.js';
 import {sampleHammerTravel} from './customHammer/pose.js';
 import {resolveHammerStep} from './customHammer/movement.js';
 import { isCombatTarget, referenceAttackSensorTargets,
   sourceAttackDirectionAllowed,
-  projectWalkablePoint } from "./heroAI.js";
+  projectWalkablePoint,segmentClear } from "./heroAI.js";
 import { createHeroControl, resetHeroControl, resetHeroAttackFamily,
   sampleHeroMovement, stepHeroMovement, selectHeroAttack, startHeroAttack, stepHeroCombo,
   clearHeroCombo, disableHeroSensor } from "./referenceHeroControl.js";
@@ -1123,33 +1123,53 @@ function updateHammerCombat(stroke,dt) {
     stroke.released=true;safeAudio('weaponSlash',stroke.weaponId,stroke.combo);
   }
   if(sweep) {
+    let landing=null;
     if(stroke.combo===2&&!stroke.ground) {
       const point=hammerGroundContact(sweep.current,sweep.previous);
       if(point) {
         stroke.ground=true;
+        landing=point;
         const direction=frame.headCenter.clone().sub(stroke.previous?.headCenter??frame.headCenter);
         hammerFeedback.ground({point,direction,combo:stroke.combo,strikeId:stroke.id});
         safeAudio('weaponGround',stroke.weaponId,stroke.combo);
-        if(!stroke.preview)kickCamera(new THREE.Vector3(Math.sin(hero.angle),0,Math.cos(hero.angle)),.08);
+        if(!stroke.preview)kickCamera(new THREE.Vector3(Math.sin(hero.angle),0,Math.cos(hero.angle)),.11);
       }
     }
     if(!stroke.preview&&mode==='playing')for(const enemy of enemies) {
       if(!isCombatTarget(enemy,enemies)||stroke.hitTargets.has(enemy.id))continue;
       const lift=Number.isFinite(enemy.sourceAirTime)?Math.sin(Math.PI*Math.min(1,enemy.sourceAirTime/.55))*.65:0;
-      const physical=hammerSweepContact(sweep.current,sweep.previous,{x:enemy.pos.x,z:enemy.pos.z,
-        radius:enemy.radius,minY:enemy.pos.y+.12+lift,maxY:enemy.pos.y+1.78*enemy.rig.group.scale.y+lift});
+      const physical=hammerPressureContact(sweep.current,sweep.previous,{x:enemy.pos.x,z:enemy.pos.z,
+        radius:enemy.radius,minY:enemy.pos.y+.12+lift,maxY:enemy.pos.y+1.78*enemy.rig.group.scale.y+lift},stroke.move.pressurePadding);
       if(!physical)continue;
-      stroke.hitTargets.add(enemy.id);
-      const contact=sampleWeaponContact({frame:sweep.current,previous:sweep.previous,targetRig:enemy.rig,
-        targetPosition:enemy.pos,attackerPosition:hero.pos,angle:hero.angle});
-      contact.point=physical.point;
-      const critical=stroke.combo===2||Math.random()<.08;
-      hurtEnemy(enemy,Math.round(stroke.move.damage*(critical?1.18:1)),hero.pos,
-        stroke.move.knockback*2.25,critical,true,null,contact.point,
-        {...contact,weaponId:HAMMER_ID,combo:stroke.combo,layer:21,rising:stroke.combo===1});
+      hitHammerEnemy(stroke,enemy,sweep,physical.point,{pressure:physical.pressure});
+    }
+    if(landing&&!stroke.preview&&mode==='playing')for(const enemy of enemies) {
+      if(!isCombatTarget(enemy,enemies)||stroke.hitTargets.has(enemy.id))continue;
+      if(enemy.pos.distanceTo(hero.pos)-enemy.radius>stroke.move.reach)continue;
+      const lift=Number.isFinite(enemy.sourceAirTime)?Math.sin(Math.PI*Math.min(1,enemy.sourceAirTime/.55))*.65:0;
+      if(!hammerShockContains(landing,{x:enemy.pos.x,z:enemy.pos.z,radius:enemy.radius,minY:enemy.pos.y+.12+lift},stroke.move.groundRadius))continue;
+      if(!segmentClear(landing,enemy.pos,world.obstacles,.03))continue;
+      hitHammerEnemy(stroke,enemy,sweep,enemy.pos.clone().add(new THREE.Vector3(0,.35,0)),{groundShock:true,origin:landing});
     }
   }
   stroke.previous=frame;stroke.previousPhase=phase;stroke.finished=stroke.clock.done;
+}
+function hitHammerEnemy(stroke,enemy,sweep,point,{pressure=false,groundShock=false,origin=null}={}) {
+  if(stroke.hitTargets.has(enemy.id))return;
+  stroke.hitTargets.add(enemy.id);
+  const contact=sampleWeaponContact({frame:sweep.current,previous:sweep.previous,targetRig:enemy.rig,
+    targetPosition:enemy.pos,attackerPosition:hero.pos,angle:hero.angle});
+  contact.point=point;
+  if(groundShock) {
+    contact.knockback.copy(enemy.pos).sub(origin);contact.knockback.y=0;
+    if(contact.knockback.lengthSq()<1e-6)contact.knockback.set(Math.sin(hero.angle),0,Math.cos(hero.angle));
+    contact.knockback.normalize();contact.direction.copy(contact.knockback);
+  }
+  const critical=stroke.combo===2||Math.random()<.08;
+  hurtEnemy(enemy,Math.round(stroke.move.damage*(critical?1.18:1)*(groundShock?stroke.move.groundDamageScale:1)),hero.pos,
+    stroke.move.knockback*(groundShock?1.45:2.25),critical,true,null,contact.point,
+    {...contact,weaponId:HAMMER_ID,combo:stroke.combo,layer:21,rising:stroke.combo===1,pressure,groundShock});
+  if(!stroke.impactReacted) {stroke.impactReacted=true;kickCamera(contact.knockback,stroke.combo===2?.055:.04);}
 }
 function damageHero(amount, from) {
   if (

@@ -6,7 +6,7 @@ export const WEAPON_IMPACT_PROFILES = Object.freeze({
   'dual-dao': Object.freeze({ family: 'paired-cut', styleId: 'dual-cross-flick', duration: .14, chips: 6 }),
   'tang-dao': Object.freeze({ family: 'incision', styleId: 'tang-directional-incision', duration: .17, chips: 4 }),
   'great-dao': Object.freeze({ family: 'heavy-cleave', styleId: 'great-cleave-slivers', duration: .23, chips: 7 }),
-  'great-hammer': Object.freeze({ family: 'solid-pressure', styleId: 'hammer-pressure-flare', duration: .29, chips: 14 }),
+  'great-hammer': Object.freeze({ family: 'solid-pressure', styleId: 'hammer-pressure-flare', duration: .32, chips: 14 }),
 });
 export const WEAPON_IMPACT_POOL_SIZE = 12;
 
@@ -133,13 +133,13 @@ export function createWeaponImpact(scene) {
     for (let i = 0; i < mesh.count; i++) {
       const seed = slot.seed * 17 + i * 3.7 + (kind === 'sliver' ? 200 : 0);
       const angle = noise(seed) * Math.PI * 2, radial = .8 + noise(seed + 1) * 1.45;
-      const forward = (slot.id === 'great-hammer' ? 1.7 : 1.1) + noise(seed + 2) * 1.7;
-      const spread = slot.id === 'great-hammer' ? 1.05 : .5;
+      const forward = (slot.id === 'great-hammer' ? 2.1 : 1.1) + noise(seed + 2) * 1.7;
+      const spread = slot.id === 'great-hammer' ? 1.32 : .5;
       point.set(Math.cos(angle) * radial * t * spread, Math.sin(angle) * radial * t * spread, forward * t);
       point.addScaledVector(slot.gravity, .5 * t * t);
       euler.set(noise(seed + 3) * 6 + t * 11, noise(seed + 4) * 6 - t * 8, angle + t * 9);
       rotation.setFromEuler(euler);
-      const size = (.018 + noise(seed + 5) * .028) * (slot.id === 'great-hammer' ? 1.65 : 1) * (1 - progress * .6);
+      const size = (.018 + noise(seed + 5) * .028) * (slot.id === 'great-hammer' ? 2.0 : 1) * (1 - progress * .6);
       if (kind === 'sliver') scale.set(size * .4, size * .65, size * 2.5);
       else scale.set(size, size * (slot.id === 'great-hammer' ? .45 : .8), size);
       matrix.compose(point, rotation, scale);
@@ -155,28 +155,28 @@ export function createWeaponImpact(scene) {
     const phase = !slot.active ? 'inactive' : slot.age < .028 ? 'contact' : p < .52 ? 'burst' : 'fade';
     Object.assign(slot.group.userData, { active: slot.active, phase, age: slot.age, duration: slot.life, serial: slot.serial });
     if (!slot.active) return;
-    const flash = Math.max(0, 1 - slot.age / .105);
+    const flash = Math.max(0, 1 - slot.age / (slot.id === 'great-hammer' ? .115 : .105));
     slot.glint.visible = flash > 0;
     slot.glint.material.opacity = flash * (slot.id === 'great-hammer' ? .80 : .68);
     if (slot.id === 'great-hammer') {
       const pressure = 1 + Math.min(1, slot.age / .035) * .48;
-      slot.glint.scale.set(.19 * pressure * (1 - p * .55), .16 * pressure, .25 * pressure);
+      slot.glint.scale.set(.235 * pressure * (1 - p * .55), .20 * pressure, .31 * pressure);
       slot.glint.material.color.setHex(slot.age < .025 ? 0xfff9e2 : slot.combo === 2 ? 0xffc96b : slot.combo === 1 ? 0x9beef2 : 0xb9ddff);
-      slot.glint.material.opacity = flash * .90;
-      const pulse = Math.max(0, 1 - slot.age / .19), radius = .15 + .64 * (1 - (1 - Math.min(1, slot.age / .19)) ** 2);
+      slot.glint.material.opacity = flash * .86;
+      const pulse = Math.max(0, 1 - slot.age / .215), radius = .19 + .85 * (1 - (1 - Math.min(1, slot.age / .215)) ** 2);
       slot.pressureRing.visible = pulse > 0; slot.pressureRing.scale.setScalar(radius);
       slot.pressureRing.material.color.setHex(slot.combo === 2 ? 0xffd17f : slot.combo === 1 ? 0x9ceee8 : 0x9bd7ff);
-      slot.pressureRing.material.opacity = pulse * .64;
+      slot.pressureRing.material.opacity = pulse * .62;
       slot.pressureRays.visible = p < .80;
       const rayProgress = Math.min(1, p / .8);
       for (let i = 0; i < slot.pressureRays.count; i++) {
         const seed = slot.seed * 29 + i * 3.7, angle = i / slot.pressureRays.count * Math.PI * 2 + noise(seed) * .12;
         const vertical = slot.combo === 1 ? 1.35 : 1, horizontal = slot.combo === 0 ? 1.3 : 1;
         const ray = pressureDirection.set(Math.cos(angle) * horizontal, Math.sin(angle) * vertical, .20 + noise(seed + 3) * .45).normalize();
-        const travel = (.06 + rayProgress * (.47 + noise(seed + 1) * .45)) * (slot.combo === 2 ? 1.18 : 1);
+        const travel = (.08 + rayProgress * (.61 + noise(seed + 1) * .58)) * (slot.combo === 2 ? 1.18 : 1);
         point.copy(ray).multiplyScalar(travel); rotation.setFromUnitVectors(FORWARD, ray);
-        const length = (.13 + noise(seed + 2) * .22) * (1 - rayProgress * .65);
-        scale.set(.014 * (1 - rayProgress * .6), .014 * (1 - rayProgress * .6), length);
+        const length = (.17 + noise(seed + 2) * .28) * (1 - rayProgress * .65);
+        scale.set(.018 * (1 - rayProgress * .6), .018 * (1 - rayProgress * .6), length);
         matrix.compose(point, rotation, scale); slot.pressureRays.setMatrixAt(i, matrix);
       }
       slot.pressureRays.instanceMatrix.needsUpdate = true;

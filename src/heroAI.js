@@ -25,12 +25,14 @@ export const REFERENCE_ATTACK_SENSOR_RULES = Object.freeze({
   dual: { radius: .13 * 12.5 * REFERENCE_SCENE_SCALE, forward: .16 * 12.5 * REFERENCE_SCENE_SCALE },
   spear: { radius: .15 * 12.5 * REFERENCE_SCENE_SCALE, forward: .20 * 12.5 * REFERENCE_SCENE_SCALE },
   staff: { radius: .15 * 12.5 * REFERENCE_SCENE_SCALE, forward: .20 * 12.5 * REFERENCE_SCENE_SCALE },
+  hammer: { radius: 1.02, forward: 1.30 },
   ranged: { radius: .15 * 12.5 * REFERENCE_SCENE_SCALE, forward: .25 * 12.5 * REFERENCE_SCENE_SCALE },
   runReady: { radius: .20 * 12.5 * REFERENCE_SCENE_SCALE, forward: .22 * 12.5 * REFERENCE_SCENE_SCALE },
 });
 
 function referenceWeaponFamily(weaponId = '') {
   if (weaponId === 'dual-dao' || weaponId === 'dual') return 'dual';
+  if (weaponId === 'great-hammer') return 'hammer';
   if (['spear', 'halberd', 'staff'].includes(weaponId)) return weaponId;
   if (['bow', 'crossbow', 'orb', 'magic'].includes(weaponId)) return 'ranged';
   return 'default';

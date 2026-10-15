@@ -13,13 +13,16 @@ const yAxis=v(0,1,0);
 // roll, pelvis height / yaw / pitch, chest yaw / pitch, pelvis / chest bank,
 // and pelvis XZ. Body rotation carries the entire skeleton through the strike.
 // The attack boundaries share complete carries, so a held combo never resets.
-const guard=[.14,.23,.46, .62,.58,0, .89,0,.025, 0,-.02, 0,0,0,0];
+// The resting shaft falls past the right hip toward the rear. Both palms
+// stay on the same haft: the left hand leads across the waist, while the
+// right hand supports the weight below it. The head has a clear floor gap.
+const guard=[.26,.21,.15, 2.50,-.73,-.08, .91,0,.065, -.06,.065, 0,-.025,0,0];
 const leftCarry=[.11,.20,.46, -.66,.13,-.24, .84,-2.60,.10, -.15,.035,-.10,-.055,-.035,.015];
 const highCarry=[.11,.40,.43, .55,1.08,.78, .92,2.68,-.04, .20,-.13,.09,.055,.035,0];
-const guardEnd=guard.map((value,i)=>i===7?turn:value);
+const rightCarry=[.23,.24,.36,1.40,-.26,.80,.83,turn+.04,.13,-.015,.06,-.02,-.015,-.01,.02];
 const tracks=[
   [[0,guard],
-   [.18,[.15,.26,.45,.76,.48,.12,.86,.72,-.035,.24,-.035,.06,.04,.04,-.035]],
+   [.18,[.23,.28,.33,1.72,-.18,-.025,.86,.58,-.035,.21,-.035,.06,.04,.04,-.035]],
    [.34,[.16,.29,.46,.82,.32,.20,.83,1.20,-.055,.32,-.025,.10,.05,.05,-.04]],
    [.46,[.16,.29,.48,.70,.22,.13,.85,.91,.01,.20,.035,.05,.025,.03,0]],
    [.61,[.16,.27,.51,.23,-.025,.01,.87,-.18,.095,-.08,.075,-.045,-.035,-.015,.045]],
@@ -39,8 +42,8 @@ const tracks=[
    [.61,[.09,.41,.55,.10,.55,1.56,1.10,5.98,.12,.07,.11,.015,-.025,0,.045]],
    [.725,[.12,.32,.59,-.10,-.51,1.57,.74,turn,.23,0,.13,-.025,-.015,-.02,.055]],
    [.80,[.13,.30,.58,-.08,-.60,1.53,.72,turn+.10,.25,.035,.14,-.04,-.015,-.025,.045]],
-   [.88,[.13,.25,.51,.12,-.13,1.18,.80,turn+.06,.13,.02,.055,-.02,0,-.01,.025]],
-   [1,guardEnd]],
+   [.88,[.17,.27,.47,.48,-.39,1.18,.80,turn+.08,.13,-.015,.06,-.02,-.015,-.01,.025]],
+   [1,rightCarry]],
 ];
 
 // Monotone Hermite slopes preserve the authored extrema, but keep nonzero
@@ -72,7 +75,7 @@ function resolveFrame(sample) {
   const chestQ=bodyQ.clone().multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(sample.chestPitch,sample.chestYaw,sample.chestRoll??0,'XYZ')));
   sample.grip=sample.gripLocal.clone().applyQuaternion(chestQ).add(sample.bodyPosition??v(sample.bodyX??0,sample.height,sample.bodyZ??0));
   const shaft=orientation(sample.shaftYaw,sample.shaftElevation,sample.shaftRoll);
-  sample.quaternion=chestQ.multiply(shaft.quaternion);
+  sample.quaternion=sample.shaftWorldQuaternion?.clone()??chestQ.multiply(shaft.quaternion);
   sample.axis=v(0,-1,0).applyQuaternion(sample.quaternion);
   return sample;
 }
@@ -86,6 +89,11 @@ export function sampleHammerMotion(combo=0,phase=0) {
       const home=i===7?guard[i]+Math.round((value-guard[i])/turn)*turn:guard[i];
       return THREE.MathUtils.lerp(value,home,amount);
     });
+    // An interrupted chain first clears the chest with a lifted, forward
+    // haft, then lets the head settle to the right. A straight lerp from a
+    // reverse carry to the low trailing carry would cut through the ribs.
+    const lift=Math.sin(Math.PI*amount)*(index===2?0:1);
+    values[1]+=lift*.20;values[2]+=lift*.16;values[4]+=lift*1.05;
   }
   return resolveFrame({index,phase:p,attackPhase:t,values,gripLocal:v(...values.slice(0,3)),
     shaftYaw:values[3],shaftElevation:values[4],shaftRoll:values[5],height:values[6],pelvisYaw:values[7],pelvisPitch:values[8],
@@ -144,7 +152,7 @@ function solveLimb(rig,root,mid,end,target,pole,endQuaternion) {
   end.quaternion.copy(lowerQ.invert()).multiply(endQuaternion);
   rig.group.updateMatrixWorld(true);
 }
-function constrainGrip(rig,grip,axis,q) {
+function constrainGrip(rig,grip,axis,q,clearLegs=false) {
   const primary=grip.clone(),right=rig.arms[1],left=rig.arms[0];
   const shoulders=[localPosition(rig,right.shoulder),localPosition(rig,left.shoulder).addScaledVector(axis,HAMMER_SHAFT.support)];
   const lengths=[right.elbow.position.length()+right.wrist.position.length()-.012,left.elbow.position.length()+left.wrist.position.length()-.012];
@@ -154,6 +162,8 @@ function constrainGrip(rig,grip,axis,q) {
     {q:chestQ,origin:chestPosition,center:v(0,.015,0),radius:v(.34,.255,.275)},
     {q:chestQ,origin:chestPosition,center:v(0,.35,.015),radius:v(.405,.39,.335)},
     {q:headQ,origin:headPosition,center:v(0,.11,.025),radius:v(.30,.325,.30)},
+    ...(clearLegs?rig.legs.map(leg=>({q:localQuaternion(rig,leg.hip),origin:localPosition(rig,leg.hip),
+      center:v(0,-.205,.035),radius:v(.18,.30,.215)})):[]),
   ].map(shape=>({...shape,inverse:shape.q.clone().invert()}));
   const yExtent=HAMMER_SHAFT.halfExtents.reduce((sum,half,i)=>sum+half*Math.abs(v(i===0?1:0,i===1?1:0,i===2?1:0).applyQuaternion(q).y),0);
   const minimumGripY=HAMMER_SHAFT.floor+yExtent-axis.y*HAMMER_SHAFT.length;
@@ -282,9 +292,27 @@ export function applyCustomHammerPose(rig,pose={}) {
     const bodyEuler=new THREE.Euler().setFromQuaternion(sample.bodyQuaternion,'YXZ');
     sample.pelvisYaw=bodyEuler.y;sample.pelvisPitch=bodyEuler.x;sample.pelvisRoll=bodyEuler.z;
     const movement=state==='run'?1:state==='walk'?.5:0;
-    sample.chestYaw=-bodyEuler.y*.30;sample.chestPitch=-.045+movement*.03;
-    sample.gripLocal.y+=Math.sin(time*11.3)*.018*movement;
-    sample.shaftElevation+=movement*.16;sample.shaftYaw-=movement*.11;
+    // Keep the source pelvis and every leg joint intact. The loaded shoulder
+    // counters its twist, so the head trails on the right instead of swinging
+    // across the knees. Small heave and delayed shaft sway share the actual
+    // source stride clock rather than an unrelated wall-time oscillation.
+    let stride=0,heave=0;
+    for(const source of lower.samples) {
+      if(source.state==='idle')continue;
+      const cycle=source.phase*turn;
+      stride+=Math.sin(cycle-.42)*source.weight;
+      heave+=Math.sin(cycle*2-.65)*source.weight;
+    }
+    sample.chestYaw=-.06-bodyEuler.y*.72;sample.chestPitch=.045+movement*.075;
+    sample.chestRoll=-.025-bodyEuler.z*.30-movement*.014;
+    sample.gripLocal.x+=movement*.035+stride*.008*movement;
+    sample.gripLocal.y+=movement*.040+heave*.010*movement;
+    sample.gripLocal.z-=movement*.025;
+    // The heavy head resists the source runner's lively pelvis twist. Keep
+    // its main line in character space and let the shoulders move around it;
+    // only a small stride-delayed pendulum reaches the shaft itself.
+    sample.shaftWorldQuaternion=orientation(2.50+stride*.032*movement,
+      -.83-heave*.018*movement,-.08+stride*.024*movement).quaternion;
   } else if(state==='attack'&&phase>HAMMER_MOVES[sample.index].recoverAt&&(pose.speed??0)>.025&&lower.frame) {
     const recoveryTime=(phase-HAMMER_MOVES[sample.index].recoverAt)*HAMMER_MOVES[sample.index].duration;
     // Use the whole recovery for the turn back into locomotion. A short
@@ -334,8 +362,10 @@ export function applyCustomHammerPose(rig,pose={}) {
   resolveFrame(sample);
   // Short source-like crossfade on a true state change. Consecutive authored
   // carries already meet exactly and are displayed without a heavy wind-up.
-  if(runtime.from&&!pose.immediate&&runtime.blendAge<.055) {
-    const amount=smooth(runtime.blendAge/.055),from=runtime.from;
+  const transitionSeconds=state==='attack'&&runtime.from?.state!=='attack'?.075
+    :lowerFrame&&runtime.from?.state==='attack'?.095:.055;
+  if(runtime.from&&!pose.immediate&&runtime.blendAge<transitionSeconds) {
+    const amount=smooth(runtime.blendAge/transitionSeconds),from=runtime.from;
     sample.grip.lerp(from.grip,1-amount);sample.quaternion.slerp(from.quaternion,1-amount);
     sample.axis.copy(v(0,-1,0).applyQuaternion(sample.quaternion));
     for(const name of ['height','pelvisPitch','chestYaw','chestPitch','pelvisRoll','chestRoll','bodyX','bodyZ'])
@@ -354,15 +384,15 @@ export function applyCustomHammerPose(rig,pose={}) {
     const correction=.055-minimum;rig.body.position.y+=correction;sample.grip.y+=correction;
     rig.group.updateMatrixWorld(true);minimum=floorMinimum(rig);
   }
-  const grip=constrainGrip(rig,sample.grip,sample.axis,sample.quaternion);
+  const grip=constrainGrip(rig,sample.grip,sample.axis,sample.quaternion,!!lowerFrame);
   const support=grip.clone().addScaledVector(sample.axis,-HAMMER_SHAFT.support);
   const chestQ=localQuaternion(rig,rig.chest);
-  solveLimb(rig,rig.arms[1].shoulder,rig.arms[1].elbow,rig.arms[1].wrist,grip,v(.85,-.15,.55).applyQuaternion(chestQ),sample.quaternion);
-  solveLimb(rig,rig.arms[0].shoulder,rig.arms[0].elbow,rig.arms[0].wrist,support,v(-.85,-.15,.55).applyQuaternion(chestQ),sample.quaternion);
+  solveLimb(rig,rig.arms[1].shoulder,rig.arms[1].elbow,rig.arms[1].wrist,grip,v(.85,-.15,-.25).applyQuaternion(chestQ),sample.quaternion);
+  solveLimb(rig,rig.arms[0].shoulder,rig.arms[0].elbow,rig.arms[0].wrist,support,v(-.85,-.15,-.25).applyQuaternion(chestQ),sample.quaternion);
   rig.group.updateMatrixWorld(true);
   const footMinY=floorMinimum(rig);
   const gap=rig.offhandGrip.getWorldPosition(v()).distanceTo(rig.arms[0].wrist.getWorldPosition(v()));
-  runtime.last={...sample,grip:grip.clone(),quaternion:sample.quaternion.clone(),feet:feet.map(foot=>foot.clone())};
+  runtime.last={...sample,state,grip:grip.clone(),quaternion:sample.quaternion.clone(),feet:feet.map(foot=>foot.clone())};
   const profile=getHammerAttackProfile(pose.combo);
   rig.sourcePose={active:true,state,profile,phase,segment:pose.sourceAttack?.segment??'custom',footMinY,offhandGap:gap,scale:.9};
   rig.sourceMotionDebug={active:true,state,family:'custom-hammer',clip:state==='attack'?profile.name:`custom_hammer_${state}`,
